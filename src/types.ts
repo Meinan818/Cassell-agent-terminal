@@ -52,6 +52,15 @@ export interface Settings {
 
 export type MsgKind = "text" | "tool" | "error" | "eva" | "perm" | "ask" | "think";
 
+/** Inspector（S6）：按需出现的右侧工作视图，一次只看一个。 */
+export type InspectorView =
+  | "review"
+  | "terminal"
+  | "files"
+  | "browser"
+  | "plugins"
+  | "workflow";
+
 export interface ChatMsg {
   id: string;
   role: "user" | "assistant";

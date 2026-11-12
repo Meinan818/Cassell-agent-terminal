@@ -4,10 +4,12 @@ import type {
   Approval,
   Effort,
   FileEntry,
+  Mode,
   Sandbox,
   Settings,
 } from "../types";
 import { EFFORTS, EFFORT_LABELS, SANDBOX_LABELS } from "../types";
+import Mark from "./Mark";
 
 interface ComposerProps {
   settings: Settings;
@@ -16,9 +18,18 @@ interface ComposerProps {
   onSend: (text: string, attachments: string[]) => boolean;
   running: boolean;
   onCancel: () => void;
+  /** 模式切换走 App 的统一入口（带 1200ms 仪式，与侧栏名册同步）。 */
+  onModeChange: (mode: Mode) => void;
 }
 
-type Popover = "model" | "perm" | "attach" | null;
+type Popover = "model" | "perm" | "attach" | "mode" | null;
+
+/** 固定契约：球那位工人按这个 cue 接打字状态（节流约 2s 一次）。 */
+function dispatchBallCue(cue: string) {
+  window.dispatchEvent(
+    new CustomEvent("cassell:ball-cue", { detail: { cue } }),
+  );
+}
 
 export default function Composer({
   settings,
@@ -26,6 +37,7 @@ export default function Composer({
   onSend,
   running,
   onCancel,
+  onModeChange,
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [popover, setPopover] = useState<Popover>(null);
@@ -34,7 +46,10 @@ export default function Composer({
   const [attachDir, setAttachDir] = useState(settings.workdir);
   const [attachFiles, setAttachFiles] = useState<FileEntry[]>([]);
   const [customModel, setCustomModel] = useState("");
+  /** 模型菜单分层：null = 服务商列表；某服务商 id = 该服务商的模型列表。 */
+  const [modelLevel, setModelLevel] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const lastTypingCueRef = useRef(0);
 
   const provider =
     settings.providers.find((p) => p.id === settings.provider_id) ??
@@ -53,7 +68,10 @@ export default function Composer({
   useEffect(() => {
     if (!popover) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPopover(null);
+      if (e.key === "Escape") {
+        setPopover(null);
+        setModelLevel(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -75,6 +93,16 @@ export default function Composer({
     };
   }, [popover, attachDir]);
 
+  const handleTextChange = (value: string) => {
+    setText(value);
+    // 打字 cue：节流约 2s 一次，球据此进 listening。
+    const now = Date.now();
+    if (value.trim() && now - lastTypingCueRef.current > 2000) {
+      lastTypingCueRef.current = now;
+      dispatchBallCue("typing-start");
+    }
+  };
+
   const send = () => {
     const body = text.trim();
     if (!body || running) return;
@@ -85,29 +113,55 @@ export default function Composer({
     }
   };
 
-  const togglePopover = (which: Popover) =>
-    setPopover((cur) => (cur === which ? null : which));
+  const togglePopover = (which: Popover) => {
+    setPopover((cur) => {
+      const next = cur === which ? null : which;
+      if (next !== "model") setModelLevel(null);
+      return next;
+    });
+  };
+  const closePopover = () => {
+    setPopover(null);
+    setModelLevel(null);
+  };
 
   const pickProvider = (id: string) => {
     const p = settings.providers.find((x) => x.id === id);
     if (!p) return;
+    // 换服务商是中间层：不关闭，同一菜单内滑进该服务商的模型列表。
     onPatch({ provider_id: id, model: p.default_model });
+    setModelLevel(id);
   };
 
-  const pickModel = (m: string) => onPatch({ model: m });
-  const pickEffort = (e: Effort) => onPatch({ effort: e });
-  const pickApproval = (a: Approval) => onPatch({ approval: a });
-  const pickSandbox = (s: Sandbox) => onPatch({ sandbox: s });
+  const pickModel = (m: string) => {
+    onPatch({ model: m });
+    closePopover(); // 选到最终项才关闭。
+  };
+  const pickEffort = (e: Effort) => {
+    onPatch({ effort: e });
+    closePopover(); // 思考强度是最终项，选完关闭。
+  };
+  const pickApproval = (a: Approval) => {
+    onPatch({ approval: a });
+    closePopover();
+  };
+  const pickSandbox = (s: Sandbox) => {
+    onPatch({ sandbox: s });
+    closePopover();
+  };
 
   const submitCustomModel = () => {
     const m = customModel.trim();
     if (!m) return;
     onPatch({ model: m });
     setCustomModel("");
+    closePopover();
   };
 
-  const modelLabel = `${provider?.id ?? ""}:${settings.model} ${EFFORT_LABELS[settings.effort]}`;
   const canSend = text.trim().length > 0 && !running;
+  const levelProvider = modelLevel
+    ? (settings.providers.find((p) => p.id === modelLevel) ?? provider)
+    : null;
 
   return (
     <div className={`composer-wrap ${focused ? "focused" : ""}`}>
@@ -133,11 +187,11 @@ export default function Composer({
         className="composer-input"
         value={text}
         rows={1}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => handleTextChange(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             send();
           }
@@ -164,40 +218,58 @@ export default function Composer({
         </button>
         <button
           type="button"
-          className="composer-btn perm-btn"
+          className="composer-btn w2-shield"
           aria-label="权限与沙箱"
           aria-expanded={popover === "perm"}
           onClick={() => togglePopover("perm")}
         >
-          <span className={`status-dot ${settings.approval === "auto" ? "on" : "warn"}`} />
-          🛡 {settings.approval === "auto" ? "全自动" : "只读确认"}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
+          </svg>
+          <span
+            className={`w2-dot ${settings.approval === "auto" ? "ok" : "warn"}`}
+            title={settings.approval === "auto" ? "全自动" : "只读确认"}
+          />
         </button>
         <button
           type="button"
-          className="composer-eva"
-          aria-pressed={settings.mode === "eva"}
-          onClick={() =>
-            onPatch({ mode: settings.mode === "eva" ? "norma" : "eva" })
-          }
-          title="切换模式：诺玛（通用工作）/ EVA（工程开发）。只换模式，不改思考强度与 Ultracode。"
+          className="w2-mode-chip"
+          aria-label="切换模式"
+          aria-expanded={popover === "mode"}
+          onClick={() => togglePopover("mode")}
+          title="切换模式：诺玛（通用工作）/ EVA（工程开发）"
         >
+          <Mark
+            size={28}
+            eva={settings.mode === "eva"}
+            state="idle"
+            fast={settings.mode === "eva"}
+          />
           {settings.mode === "eva" ? "EVA" : "诺玛"}
-          <span
-            className={`switch ${settings.mode === "eva" ? "on" : ""}`}
-            aria-hidden="true"
-          >
-            <span className="knob" />
-          </span>
+          <span aria-hidden="true">▾</span>
         </button>
         <span className="composer-spacer" />
         <button
           type="button"
-          className="composer-btn model-btn"
+          className="composer-btn w2-model-chip"
           aria-label="选择模型与思考强度"
           aria-expanded={popover === "model"}
           onClick={() => togglePopover("model")}
         >
-          {modelLabel} ▾
+          <span className="w2-m1">{settings.model}</span>
+          <span className="w2-m2">
+            {provider?.name ?? ""} · {EFFORT_LABELS[settings.effort]}
+          </span>
         </button>
         {running ? (
           <button
@@ -221,83 +293,129 @@ export default function Composer({
         )}
       </div>
 
-      <div className="composer-status">
-        审批 {settings.approval === "auto" ? "Auto" : "只读"} · 沙箱{" "}
-        {SANDBOX_LABELS[settings.sandbox]} · {provider?.name ?? ""} ·{" "}
-        {settings.mode === "eva" ? "EVA 模式" : "诺玛"}
-      </div>
-
       {popover && (
         <>
           <div
             className="popover-backdrop"
-            onClick={() => setPopover(null)}
+            onClick={closePopover}
             aria-hidden="true"
           />
           <div className="popover" role="dialog">
             {popover === "model" && (
               <>
-                <div className="popover-title">模型与思考强度</div>
-                <div className="popover-section">服务商（BYOK）</div>
-                <div className="option-list">
-                  {settings.providers.map((p) => (
+                {levelProvider ? (
+                  <>
                     <button
-                      key={p.id}
                       type="button"
-                      className={`option ${p.id === settings.provider_id ? "selected" : ""}`}
-                      onClick={() => pickProvider(p.id)}
+                      className="w2-pop-back"
+                      onClick={() => setModelLevel(null)}
                     >
-                      <span>{p.name}</span>
-                      <span className="option-note">
-                        {settings.api_keys[p.id]?.trim() ? "已配置 Key" : "未配置 Key"}
-                      </span>
-                      {p.id === settings.provider_id && <span className="check">✓</span>}
+                      ‹ 服务商
                     </button>
-                  ))}
-                </div>
-                <div className="popover-section">模型</div>
+                    <div className="popover-title">{levelProvider.name} 的模型</div>
+                    <div className="option-list">
+                      {(levelProvider.models ?? []).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={`option ${m === settings.model && levelProvider.id === settings.provider_id ? "selected" : ""}`}
+                          onClick={() => pickModel(m)}
+                        >
+                          <span>{m}</span>
+                          {m === settings.model &&
+                            levelProvider.id === settings.provider_id && (
+                              <span className="check">✓</span>
+                            )}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="custom-model">
+                      <input
+                        value={customModel}
+                        onChange={(e) => setCustomModel(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") submitCustomModel();
+                        }}
+                        placeholder="自定义模型名，回车确认"
+                        aria-label="自定义模型名"
+                      />
+                      <button type="button" onClick={submitCustomModel}>
+                        确定
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="popover-title">模型与思考强度</div>
+                    <div className="popover-section">服务商（BYOK）</div>
+                    <div className="option-list">
+                      {settings.providers.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`option ${p.id === settings.provider_id ? "selected" : ""}`}
+                          onClick={() => pickProvider(p.id)}
+                        >
+                          <span>{p.name}</span>
+                          <span className="option-note">
+                            {settings.api_keys[p.id]?.trim() ? "已配置 Key" : "未配置 Key"}
+                          </span>
+                          {p.id === settings.provider_id && <span className="check">✓</span>}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="popover-section">思考强度</div>
+                    <div className="effort-row">
+                      {EFFORTS.map((e) => (
+                        <button
+                          key={e}
+                          type="button"
+                          className={`effort ${settings.effort === e ? "selected" : ""}`}
+                          onClick={() => pickEffort(e)}
+                        >
+                          {EFFORT_LABELS[e]}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="popover-hint">
+                      点服务商进第二层选模型；选到最终项菜单才收起。
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {popover === "mode" && (
+              <>
+                <div className="popover-title">切换模式</div>
                 <div className="option-list">
-                  {(provider?.models ?? []).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={`option ${m === settings.model ? "selected" : ""}`}
-                      onClick={() => pickModel(m)}
-                    >
-                      <span>{m}</span>
-                      {m === settings.model && <span className="check">✓</span>}
-                    </button>
-                  ))}
-                </div>
-                <div className="custom-model">
-                  <input
-                    value={customModel}
-                    onChange={(e) => setCustomModel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") submitCustomModel();
+                  <button
+                    type="button"
+                    className={`option ${settings.mode === "norma" ? "selected" : ""}`}
+                    onClick={() => {
+                      onModeChange("norma");
+                      closePopover();
                     }}
-                    placeholder="自定义模型名，回车确认"
-                    aria-label="自定义模型名"
-                  />
-                  <button type="button" onClick={submitCustomModel}>
-                    确定
+                  >
+                    <span>诺玛</span>
+                    <span className="option-note">通用工作</span>
+                    {settings.mode === "norma" && <span className="check">✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className={`option ${settings.mode === "eva" ? "selected" : ""}`}
+                    onClick={() => {
+                      onModeChange("eva");
+                      closePopover();
+                    }}
+                  >
+                    <span>EVA</span>
+                    <span className="option-note">工程开发</span>
+                    {settings.mode === "eva" && <span className="check">✓</span>}
                   </button>
                 </div>
-                <div className="popover-section">思考强度</div>
-                <div className="effort-row">
-                  {EFFORTS.map((e) => (
-                    <button
-                      key={e}
-                      type="button"
-                      className={`effort ${settings.effort === e ? "selected" : ""}`}
-                      onClick={() => pickEffort(e)}
-                    >
-                      {EFFORT_LABELS[e]}
-                    </button>
-                  ))}
-                </div>
                 <div className="popover-hint">
-                  面板不会在点选后消失，点外面、按 Esc 或点“完成”才收起。
+                  只换模式，不改思考强度与 Ultracode。
                 </div>
               </>
             )}
@@ -388,14 +506,6 @@ export default function Composer({
                 </div>
               </>
             )}
-
-            <button
-              type="button"
-              className="popover-done"
-              onClick={() => setPopover(null)}
-            >
-              完成
-            </button>
           </div>
         </>
       )}
