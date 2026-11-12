@@ -217,7 +217,6 @@ select {
   align-items: center;
   gap: 12px;
   padding: 12px 24px;
-  border-bottom: 1px solid var(--border);
 }
 
 .main-head-title {
@@ -255,12 +254,11 @@ select {
 }
 
 .btn-ghost {
-  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 13px;
   color: var(--text-2);
-  background: var(--bg-panel);
+  background: var(--bg-soft);
 }
 
 .btn-ghost:hover {
@@ -293,7 +291,6 @@ select {
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
-  border-right: 1px solid var(--border);
   padding: 16px 12px;
   gap: 16px;
   overflow: hidden;
@@ -311,17 +308,15 @@ select {
 }
 
 .side-search {
-  border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--bg-soft);
   color: var(--text);
   padding: 8px 12px;
   outline: none;
-  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+  transition: box-shadow 150ms var(--ease);
 }
 
 .side-search:focus {
-  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -415,50 +410,10 @@ select {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  padding-top: 4px;
 }
 
-.identity-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 12px;
-}
-
-.identity-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.identity-name {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.identity-id {
-  font-size: 11px;
-  color: var(--text-3);
-  font-family: var(--mono);
-}
-
-.identity-badge {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--seal-fg);
-  background: var(--seal-bg);
-  border: 1.5px solid var(--border-strong);
-}
+/* 旧身份卡已无人引用（Sidebar 现用 w2-rank 体系），删除，避免两套并存。 */
 
 .side-nav {
   display: flex;
@@ -490,7 +445,7 @@ select {
   padding: 24px 24px 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
   max-width: 760px;
   width: 100%;
   margin: 0 auto;
@@ -501,17 +456,19 @@ select {
   gap: 12px;
 }
 
+/* 用户气泡：无气泡（Claude / Gemini 式）——右对齐纯文字，无底色、无边框、无圆角；
+ * 回合分隔靠对齐（用户右 / 助手左 + 球头像）+ 24px turn 间距 + 用户字 15px。 */
 .msg.user {
   justify-content: flex-end;
 }
 
 .msg.user .msg-body {
-  background: var(--user-bubble);
-  border-radius: 16px 16px 4px 16px;
-  padding: 12px 16px;
+  background: none;
+  border-radius: 0;
+  padding: 2px 0;
   max-width: 78%;
   line-height: 1.65;
-  font-size: 14px;
+  font-size: 15px;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -519,7 +476,7 @@ select {
 
 .msg.assistant .msg-body {
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -532,7 +489,6 @@ select {
   font-size: 13px;
   color: var(--text-2);
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 8px 12px;
   white-space: pre-wrap;
@@ -540,13 +496,13 @@ select {
   overflow-wrap: anywhere;
 }
 
+/* 错误卡：克制、清晰、有质感——无框、无红底、无 pill；红色只用在标题行。 */
 .msg.error .msg-body {
   font-size: 14px;
-  color: var(--danger);
-  background: var(--danger-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 12px 16px;
+  color: var(--text-2);
+  background: none;
+  border-radius: 0;
+  padding: 4px 0;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -606,7 +562,6 @@ select {
   font-size: 13px;
   color: var(--text-2);
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 8px 12px;
   white-space: pre-wrap;
@@ -624,7 +579,6 @@ select {
 .setup-cta {
   margin-top: 8px;
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-lg);
   padding: 24px;
   display: flex;
@@ -652,7 +606,6 @@ select {
   justify-content: space-between;
   gap: 12px;
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 12px 16px;
   margin-bottom: 12px;
@@ -683,23 +636,20 @@ select {
   margin: 0 auto;
 }
 
+/* 输入框：无框，L1 panel 底 + 柔和阴影常驻；聚焦改光环 + 阴影加深（浮起），不改边框色。 */
 .composer-wrap {
   position: relative;
   background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-input);
   padding: 12px 16px 8px;
   box-shadow: var(--shadow-sm);
-  transition:
-    border-color 200ms var(--ease),
-    box-shadow 200ms var(--ease);
+  transition: box-shadow 200ms var(--ease);
 }
 
 .composer-wrap.focused {
-  border-color: var(--accent);
   box-shadow:
     0 0 0 3px var(--accent-soft),
-    var(--shadow-sm);
+    var(--shadow);
 }
 
 .composer-input {
@@ -750,12 +700,11 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 13px;
   color: var(--text-2);
-  background: var(--bg-panel);
+  background: transparent;
 }
 
 .composer-btn:hover {
@@ -927,7 +876,6 @@ select {
   max-height: 420px;
   overflow-y: auto;
   background: var(--bg-panel);
-  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow);
   padding: 16px;
@@ -1006,7 +954,6 @@ select {
 
 .custom-model input {
   flex: 1;
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-soft);
   color: var(--text);
@@ -1016,7 +963,6 @@ select {
 }
 
 .custom-model button {
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   padding: 8px 12px;
   font-size: 13px;
@@ -1029,17 +975,16 @@ select {
 }
 
 .effort {
-  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 13px;
   color: var(--text-2);
+  background: var(--bg-soft);
 }
 
 .effort.selected {
   background: var(--accent);
   color: var(--on-accent);
-  border-color: var(--accent);
   font-weight: 600;
 }
 
@@ -1083,7 +1028,6 @@ select {
   align-items: center;
   gap: 8px;
   background: var(--accent-soft);
-  border: 1px solid var(--accent);
   border-radius: 999px;
   padding: 8px 16px 8px 12px;
   box-shadow: var(--shadow);
@@ -1167,7 +1111,6 @@ select {
   font-size: 12px;
   color: var(--text-2);
   background: var(--bg-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 8px 12px;
   line-height: 1.7;
@@ -1435,7 +1378,6 @@ select {
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
-  border-left: 1px solid var(--border);
   min-height: 0;
 }
 
@@ -1443,7 +1385,6 @@ select {
   display: flex;
   gap: 4px;
   padding: 12px 12px 0;
-  border-bottom: 1px solid var(--border);
 }
 
 .rp-tab {
@@ -1451,7 +1392,6 @@ select {
   padding: 8px 4px;
   font-size: 13px;
   color: var(--text-2);
-  border-bottom: 2px solid transparent;
   border-radius: var(--r-sm);
   position: relative;
 }
@@ -1464,7 +1404,7 @@ select {
 .rp-tab.active {
   color: var(--text);
   font-weight: 700;
-  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .rp-badge {
@@ -1551,7 +1491,6 @@ select {
 
 .merge-card {
   background: var(--ok-soft);
-  border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 12px;
   animation: pop-in 200ms var(--ease-exp);
@@ -1582,7 +1521,7 @@ select {
 }
 
 .review-file {
-  border: 1px solid var(--border);
+  background: var(--bg-soft);
   border-radius: var(--r-md);
   padding: 12px;
   display: flex;
@@ -1591,7 +1530,6 @@ select {
 }
 
 .review-file.state-approved {
-  border-color: var(--ok);
   background: var(--ok-soft);
 }
 
@@ -1683,7 +1621,6 @@ select {
 }
 
 .term-quick button {
-  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 12px;
   font-size: 12px;
@@ -1697,7 +1634,6 @@ select {
 }
 
 .term-input {
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-soft);
   color: var(--text);
@@ -1708,7 +1644,6 @@ select {
 }
 
 .term-input:focus {
-  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -1740,7 +1675,7 @@ select {
 }
 
 .file-preview {
-  border: 1px solid var(--border);
+  background: var(--bg-soft);
   border-radius: var(--r-md);
   overflow: hidden;
 }
@@ -1751,7 +1686,6 @@ select {
   color: var(--text-2);
   background: var(--bg-soft);
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1772,7 +1706,7 @@ select {
 }
 
 .browser-card {
-  border: 1px solid var(--border);
+  background: var(--bg-soft);
   border-radius: var(--r-md);
   padding: 12px;
   display: flex;
@@ -1804,7 +1738,6 @@ select {
 .browser-open-row input {
   flex: 1;
   min-width: 0;
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-soft);
   color: var(--text);
@@ -1823,7 +1756,6 @@ select {
   align-items: center;
   gap: 12px;
   padding: 8px;
-  border-bottom: 1px solid var(--border);
 }
 
 .ext-info {
@@ -1889,7 +1821,6 @@ select {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid var(--border);
   font-size: 16px;
   font-weight: 700;
 }
@@ -1934,7 +1865,6 @@ select {
 
 .field-input {
   width: 100%;
-  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--bg-soft);
   color: var(--text);
@@ -1943,7 +1873,6 @@ select {
 }
 
 .field-input:focus {
-  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
@@ -1964,7 +1893,7 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--border);
+  background: var(--bg-soft);
   border-radius: var(--r-md);
   padding: 12px;
 }
