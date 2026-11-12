@@ -87,17 +87,20 @@ const WAVE2_CSS = `
 .w2-search-input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .w2-task-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 /* ---- 段位牌 ---- */
-/* ---- 段位牌 · 卡塞尔学院专员证件（去线条重做）----
- * 一张证件，不是一个设置盒子：无框，L1 panel 底 + 柔和阴影浮在 rail 侧栏上；
- * 第一行发证方（校徽真照片 24px 无环 + 卡塞尔学院 + S 印章），第二行名字 17px/700，
- * 第三行等宽编号 + 在线，第四行三个纯图标按钮。EVA 态改 accent-soft 洗色 + 柔光晕，不画蓝环。 */
-.w2-rank { background: var(--bg-panel); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow-sm); }
+/* ---- 段位牌 · 卡塞尔学院专员证件（Deline 6 根本重做）----
+ * 横向名片比例（约 208×122，1.7:1），三行：发证行（线条校徽 22px + 卡塞尔学院 +
+ * S 印章）/ 身份行（名字 + 编号 + 在线并在一行）/ 图标行。S 印章回归定版：
+ * 大号优雅衬线 S（Georgia 500）+ 1px 浅色发丝圆环，无实心圆底、无“血统评级”文字；
+ * EVA 态 S 与环同步变 accent 色。 */
+.w2-rank { background: var(--bg-panel); border-radius: 16px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-sm); }
 .w2-rank-top { display: flex; align-items: center; gap: 8px; }
 .w2-rank-school { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--text-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.w2-crest { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 10px; font-weight: 700; flex-shrink: 0; overflow: hidden; }
-.w2-rank-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
-.w2-seal { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--seal-fg); background: var(--seal-bg); border: 1px solid var(--border-strong); margin-left: auto; flex-shrink: 0; }
-.w2-rank-id { font-family: var(--mono); font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
+.w2-crest { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--text); flex-shrink: 0; }
+.w2-crest svg { width: 100%; height: 100%; display: block; }
+.w2-rank-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.w2-rank-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; white-space: nowrap; }
+.w2-seal { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 17px; font-weight: 500; color: var(--text); background: none; border: 1px solid var(--border-strong); margin-left: auto; flex-shrink: 0; }
+.w2-rank-id { font-family: var(--mono); font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .w2-icon-nav { display: flex; gap: 4px; }
 .w2-icon-btn { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
 .w2-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
@@ -285,9 +288,7 @@ const S7_CSS = `
 const AUDIT_CSS = `
 /* ---- P2-18：全站 :focus-visible 焦点环（鼠标点击不显示，键盘导航必须显示） ---- */
 .app :focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-/* ---- P2-8：校徽圆印用真校徽图片（侧栏段位牌 + 设置身份区共用 .w2-crest） ---- */
-.app .w2-crest { overflow: hidden; }
-.app .w2-crest img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+/* ---- P2-8（Deline 6）：校徽改线条版（CrestLine），.w2-crest 里不再放 img ---- */
 /* ---- 设置 modal 审计小件 ---- */
 .app .s7-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 12px; color: var(--text-2); background: var(--bg-soft); }
 .app .s7-summary-warn { background: var(--accent-soft); }

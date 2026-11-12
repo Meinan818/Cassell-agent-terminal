@@ -18,6 +18,7 @@ import {
 } from "../types";
 import { APP_VERSION } from "../version";
 import type { CommandItem, SettingsNav } from "./commands";
+import CrestLine from "./CrestLine";
 import { humanizeTestError } from "./ConnectWizard";
 
 /* ------------------------------------------------------------------ */
@@ -293,18 +294,18 @@ export function SettingsModal({
                 <div className="s7-group">
                   <div className="s7-identity">
                     <span className="w2-crest" title="卡塞尔学院">
-                      <img src="/cassell-seal.jpg" alt="卡塞尔学院校徽" />
+                      <CrestLine size={22} />
                     </span>
                     <span className="s7-identity-name">
                       {settings.display_name?.trim() || "路明非"}
                     </span>
-                    <span className="w2-seal" title="血统评级 S">
+                    <span className="w2-seal" title="S">
                       S
                     </span>
                   </div>
-                  <div className="s7-identity-id">S2017-0117 · 血统评级 S</div>
+                  <div className="s7-identity-id">S2017-0117</div>
                   <p className="drawer-note">
-                    编号与血统评级是学院档案，只读，不可改。
+                    编号是学院档案，只读，不可改。
                   </p>
                 </div>
                 {/* P0-1：这一行不再是全局唯一设置——它是“当前项目的目录”。

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Mode, Project, Task } from "../types";
 import Mark, { type MarkState } from "./Mark";
+import CrestLine from "./CrestLine";
 
 interface SidebarProps {
   tasks: Task[];
@@ -418,23 +419,27 @@ export default function Sidebar({
           }`}
         >
           <div className="w2-rank-top">
-            {/* P2-8：校徽圆印用真校徽图片，不再写“卡”字。 */}
+            {/* Deline 6：校徽改白色线条版（CrestLine 矢量线稿），不用照片。 */}
             <span className="w2-crest" title="卡塞尔学院">
-              <img src="/cassell-seal.jpg" alt="卡塞尔学院校徽" />
+              <CrestLine size={22} />
             </span>
             <span className="w2-rank-school">卡塞尔学院</span>
-            <span className="w2-seal" title="血统评级 S">
+            {/* Deline 6：S 印章回归定版——大号优雅衬线 S + 1px 发丝圆环，无实心圆底、无“血统评级”文字。 */}
+            <span className="w2-seal" title="S">
               S
             </span>
           </div>
-          <div className="w2-rank-name">{displayName}</div>
-          <div className="w2-rank-id">
-            S2017-0117
-            <span
-              className={`w2-dot ${running ? "busy" : "ok"}`}
-              style={{ marginLeft: 0 }}
-            />
-            {running ? "工作中" : "在线"}
+          {/* Deline 6：横向名片比例——名字 + 编号 + 状态并在一行，卡片不再是矮胖正方形。 */}
+          <div className="w2-rank-line">
+            <span className="w2-rank-name">{displayName}</span>
+            <span className="w2-rank-id">
+              S2017-0117
+              <span
+                className={`w2-dot ${running ? "busy" : "ok"}`}
+                style={{ marginLeft: 0 }}
+              />
+              {running ? "工作中" : "在线"}
+            </span>
           </div>
           <div className="w2-icon-nav">
             <button
