@@ -8,7 +8,7 @@ interface SidebarProps {
   activeTaskId: string | null;
   onSelectTask: (id: string) => void;
   onNewTask: () => void;
-  /** P0-1：真项目列表——点即切换；名字 + 路径 + 任务数一行。 */
+  /** P0-1：真项目列表——点即切换；每行只显示项目名。 */
   projects: Project[];
   activeProjectId: string | null;
   onSelectProject: (id: string) => void;
@@ -34,19 +34,6 @@ interface SidebarProps {
    * 名册行与段位牌在仪式里点亮/褪去，球与顶栏共用同一份仪式。
    */
   ritual?: { dir: Mode; startedAt: number } | null;
-}
-
-/** P2-2：任务行相对时间（“2 小时前”）。 */
-function relTime(ts: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (s < 60) return "刚刚";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟前`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
-  return new Date(ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
 /** 1.5px 描边线条图标（与全站同一套；禁用 emoji ⚙/▤/?）。 */
@@ -122,11 +109,6 @@ export default function Sidebar({
   const visible = tasks.filter(
     (t) => !t.archived && (activeProjectId === null || t.project === activeProjectId),
   );
-
-  /** 任务的 project 字段是项目 id，显示时解析成名字；旧数据里的
-   * “默认项目”这类名字在迁移前原样显示。 */
-  const projectNameOf = (projectId: string) =>
-    projects.find((p) => p.id === projectId)?.name ?? projectId;
 
   const saveRename = (t: Task) => {
     if (editingId !== t.id) return;
@@ -240,9 +222,6 @@ export default function Sidebar({
           <span className="w2-kbd">选文件夹</span>
         </button>
         {projects.map((p) => {
-          const count = tasks.filter(
-            (t) => !t.archived && t.project === p.id,
-          ).length;
           const isActive = p.id === activeProjectId;
           return editingProjectId === p.id ? (
             <input
@@ -263,7 +242,7 @@ export default function Sidebar({
             <button
               key={p.id}
               type="button"
-              className={`side-project side-project-col ${isActive ? "active" : ""}`}
+              className={`side-project ${isActive ? "active" : ""}`}
               onClick={() => onSelectProject(p.id)}
               onDoubleClick={() => {
                 setEditingProjectId(p.id);
@@ -272,13 +251,7 @@ export default function Sidebar({
               aria-pressed={isActive}
               title={p.path ? `${p.name}\n${p.path}\n双击重命名` : `${p.name}\n双击重命名`}
             >
-              <span className="side-project-top">
-                <span className="side-project-name">{p.name}</span>
-                <span className="side-project-count">{count}</span>
-              </span>
-              <span className="side-project-path">
-                {p.path || "还没有选择文件夹"}
-              </span>
+              <span className="side-project-name">{p.name}</span>
             </button>
           );
         })}
@@ -302,8 +275,6 @@ export default function Sidebar({
       <div className="side-section side-tasks">
         <div className="side-section-title">最近</div>
         {visible.map((t) => {
-          const isRunning = running && t.id === activeTaskId;
-          const done = t.messages.length > 0;
           return (
             <div
               key={t.id}
@@ -334,17 +305,7 @@ export default function Sidebar({
                   }}
                   title="双击重命名"
                 >
-                  <span className="w2-task-top">
-                    <span className="side-task-title">{t.title}</span>
-                    {isRunning ? (
-                      <span className="w2-pill run">运行中</span>
-                    ) : done ? (
-                      <span className="w2-pill done">已完成</span>
-                    ) : null}
-                  </span>
-                  <span className="side-task-meta">
-                    {projectNameOf(t.project)} · {relTime(t.createdAt)}
-                  </span>
+                  <span className="side-task-title">{t.title}</span>
                 </button>
               )}
               {/* P2-1：悬停出现重命名与删除（删除两步确认）。 */}

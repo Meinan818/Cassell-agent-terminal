@@ -85,7 +85,6 @@ const WAVE2_CSS = `
 .w2-kbd { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); }
 .w2-search-input { width: 100%; border-radius: 8px; background: var(--bg-panel); color: var(--text); padding: 8px 12px; outline: none; font-size: 13px; animation: w2-fade 150ms var(--ease) both; }
 .w2-search-input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
-.w2-task-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 /* ---- 段位牌 ---- */
 /* ---- 段位牌 · 卡塞尔学院专员证件（Deline 6 根本重做）----
  * 横向名片比例（约 208×122，1.7:1），三行：发证行（线条校徽 22px + 卡塞尔学院 +
@@ -348,13 +347,7 @@ const AUDIT_CSS = `
 .app .w2-task-actions button.danger:hover { color: #dc2626; }
 .app .w2-task-rename { width: 100%; font-size: 13px; padding: 6px 10px; }
 @media (prefers-reduced-motion: reduce) { .app .s7-slash, .app .w2-jump, .app .w2-msg-actions { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
-/* ---- P0-1：真项目——侧栏项目行两行式（名字 + 任务数 / 路径） ---- */
-.app .side-project-col { flex-direction: column; align-items: stretch; gap: 2px; }
-.app .side-project-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-.app .side-project-top .side-project-name { min-width: 0; flex: 1; }
-.app .side-project-top .side-project-count { flex-shrink: 0; }
-.app .side-project-path { display: block; font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app .side-project.active .side-project-path { color: var(--text-2); }
+/* ---- P0-1：真项目——侧栏项目行单行只显示名字（路径副标题与任务数徽章已删） ---- */
 `;
 
 function loadTasks(): Task[] {
