@@ -1,22 +1,40 @@
 import { useMemo, useState } from "react";
 import type { Mode, Task } from "../types";
-import Mark from "./Mark";
+import Mark, { type MarkState } from "./Mark";
 
 interface SidebarProps {
   tasks: Task[];
   activeTaskId: string | null;
   onSelectTask: (id: string) => void;
   onNewTask: () => void;
+  /** P2-1：任务行悬停重命名（双击标题也可）与删除（两步确认）。 */
+  onRenameTask: (id: string, title: string) => void;
+  onDeleteTask: (id: string) => void;
   onOpenDrawer: (which: "settings" | "archive" | "help") => void;
+  /** 搜索入口：点开即 Cmd-K 命令面板（S7），不再是行内过滤框。 */
+  onOpenPalette: () => void;
   /** 身份卡显示名（空 = 默认“路明非”，由调用方处理回退）。 */
   displayName: string;
   mode: Mode;
   onModeChange: (mode: Mode) => void;
   running: boolean;
+  /** P2-6：名册与输入框芯片的球接同一份 markState，不要永远 idle。 */
+  markState: MarkState;
   drawer: "settings" | "archive" | "help" | null;
 }
 
-const INVITE_CODE = "CASSELL-S2017-0117";
+/** P2-2：任务行相对时间（“2 小时前”）。 */
+function relTime(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return "刚刚";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} 分钟前`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} 小时前`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d} 天前`;
+  return new Date(ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
 
 /** 1.5px 描边线条图标（与全站同一套；禁用 emoji ⚙/▤/?）。 */
 function LineIcon({ kind }: { kind: "gear" | "archive" | "help" }) {
@@ -62,18 +80,22 @@ export default function Sidebar({
   activeTaskId,
   onSelectTask,
   onNewTask,
+  onRenameTask,
+  onDeleteTask,
   onOpenDrawer,
+  onOpenPalette,
   displayName,
   mode,
   onModeChange,
   running,
+  markState,
   drawer,
 }: SidebarProps) {
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const projects = useMemo(() => {
     const map = new Map<string, number>();
@@ -87,18 +109,13 @@ export default function Sidebar({
   const visible = tasks.filter((t) => {
     if (t.archived) return false;
     if (projectFilter && t.project !== projectFilter) return false;
-    if (query && !t.title.includes(query)) return false;
     return true;
   });
 
-  const copyInvite = async () => {
-    try {
-      await navigator.clipboard.writeText(INVITE_CODE);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      setCopied(false);
-    }
+  const saveRename = (t: Task) => {
+    if (editingId !== t.id) return;
+    if (editTitle.trim()) onRenameTask(t.id, editTitle);
+    setEditingId(null);
   };
 
   const roster: {
@@ -122,7 +139,8 @@ export default function Sidebar({
       name: "EVA",
       sub: "工程开发",
       eva: true,
-      status: mode === "eva" && running ? "并行中" : "待命",
+      // 诚实文案：当前引擎是单智能体循环，EVA 运行时也只说“工作中”，不说“并行中”。
+      status: mode === "eva" && running ? "工作中" : "待命",
       dot: mode === "eva" && running ? "busy" : "idle",
     },
   ];
@@ -142,7 +160,8 @@ export default function Sidebar({
               aria-pressed={mode === r.id}
               title={`切换到${r.name}（${r.sub}）`}
             >
-              <Mark size={28} eva={r.eva} state="idle" />
+              {/* P2-6：当前模式那行的球接 App 的 markState；另一行永远 idle。 */}
+              <Mark size={28} eva={r.eva} state={mode === r.id ? markState : "idle"} />
               <span style={{ minWidth: 0 }}>
                 <span className="w2-roster-name">{r.name}</span>
                 <span
@@ -158,38 +177,22 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* ② 新建任务（行内轻量按钮）+ 搜索入口（点开即 Cmd-K；面板是 S7 的活，
-          本波先留入口，点开是行内过滤输入框——真实可用，不是假按钮） */}
+      {/* ② 新建任务（行内轻量按钮）+ 搜索入口（点开即 Cmd-K 命令面板，S7） */}
       <div className="side-section">
         <button className="w2-side-action" onClick={onNewTask} type="button">
           ＋ 新任务
           <span className="w2-kbd">⌘N</span>
         </button>
-        {searchOpen ? (
-          <input
-            className="w2-search-input"
-            value={query}
-            autoFocus
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setQuery("");
-                setSearchOpen(false);
-              }
-            }}
-            placeholder="搜索任务…（Esc 收起）"
-            aria-label="搜索任务"
-          />
-        ) : (
-          <button
-            className="w2-side-action"
-            onClick={() => setSearchOpen(true)}
-            type="button"
-          >
-            搜索任务…
-            <span className="w2-kbd">⌘K</span>
-          </button>
-        )}
+        <button
+          className="w2-side-action"
+          onClick={onOpenPalette}
+          type="button"
+          aria-label="打开命令面板"
+          title="命令面板：搜命令、搜任务（⌘K）"
+        >
+          搜索任务…
+          <span className="w2-kbd">⌘K</span>
+        </button>
       </div>
 
       {/* ③ 最近：带状态标签；项目分组收进下方可折叠的一组 */}
@@ -199,22 +202,91 @@ export default function Sidebar({
           const isRunning = running && t.id === activeTaskId;
           const done = t.messages.length > 0;
           return (
-            <button
+            <div
               key={t.id}
-              type="button"
-              className={`side-task ${t.id === activeTaskId ? "active" : ""}`}
-              onClick={() => onSelectTask(t.id)}
+              className={`side-task-wrap ${t.id === activeTaskId ? "active" : ""}`}
             >
-              <span className="w2-task-top">
-                <span className="side-task-title">{t.title}</span>
-                {isRunning ? (
-                  <span className="w2-pill run">运行中</span>
-                ) : done ? (
-                  <span className="w2-pill done">已完成</span>
-                ) : null}
+              {editingId === t.id ? (
+                <input
+                  className="field-input w2-task-rename"
+                  value={editTitle}
+                  autoFocus
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveRename(t);
+                    else if (e.key === "Escape") setEditingId(null);
+                  }}
+                  onBlur={() => saveRename(t)}
+                  aria-label="重命名任务"
+                  autoComplete="off"
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={`side-task ${t.id === activeTaskId ? "active" : ""}`}
+                  onClick={() => onSelectTask(t.id)}
+                  onDoubleClick={() => {
+                    setEditingId(t.id);
+                    setEditTitle(t.title);
+                  }}
+                  title="双击重命名"
+                >
+                  <span className="w2-task-top">
+                    <span className="side-task-title">{t.title}</span>
+                    {isRunning ? (
+                      <span className="w2-pill run">运行中</span>
+                    ) : done ? (
+                      <span className="w2-pill done">已完成</span>
+                    ) : null}
+                  </span>
+                  <span className="side-task-meta">
+                    {t.project} · {relTime(t.createdAt)}
+                  </span>
+                </button>
+              )}
+              {/* P2-1：悬停出现重命名与删除（删除两步确认）。 */}
+              <span className="w2-task-actions">
+                {confirmDeleteId === t.id ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onDeleteTask(t.id);
+                        setConfirmDeleteId(null);
+                      }}
+                    >
+                      确认删除
+                    </button>
+                    <button type="button" onClick={() => setConfirmDeleteId(null)}>
+                      取消
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      aria-label={`重命名 ${t.title}`}
+                      title="重命名"
+                      onClick={() => {
+                        setEditingId(t.id);
+                        setEditTitle(t.title);
+                      }}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      aria-label={`删除 ${t.title}`}
+                      title="删除"
+                      onClick={() => setConfirmDeleteId(t.id)}
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
               </span>
-              <span className="side-task-meta">{t.project}</span>
-            </button>
+            </div>
           );
         })}
         {visible.length === 0 && (
@@ -261,8 +333,9 @@ export default function Sidebar({
       <div className="side-bottom">
         <div className="w2-rank">
           <div className="w2-rank-top">
+            {/* P2-8：校徽圆印用真校徽图片，不再写“卡”字。 */}
             <span className="w2-crest" title="卡塞尔学院">
-              卡
+              <img src="/cassell-seal.jpg" alt="卡塞尔学院校徽" />
             </span>
             <span className="w2-rank-name">{displayName}</span>
             <span className="w2-seal" title="血统评级 S">
@@ -306,12 +379,7 @@ export default function Sidebar({
               <LineIcon kind="help" />
             </button>
           </div>
-          <div className="w2-invite">
-            邀请码 {INVITE_CODE}
-            <button type="button" onClick={copyInvite}>
-              {copied ? "✓ 已复制" : "复制"}
-            </button>
-          </div>
+          {/* P2-7：邀请码行已拿掉——装饰码没有用途，复制它也加不进任何组织。 */}
         </div>
       </div>
     </aside>

@@ -9,7 +9,9 @@ import type {
   Settings,
 } from "../types";
 import { EFFORTS, EFFORT_LABELS, SANDBOX_LABELS } from "../types";
-import Mark from "./Mark";
+import Mark, { type MarkState } from "./Mark";
+import { EFFORT_DESCS, SANDBOX_DESCS } from "./Drawers";
+import type { CommandItem } from "./commands";
 
 interface ComposerProps {
   settings: Settings;
@@ -20,6 +22,10 @@ interface ComposerProps {
   onCancel: () => void;
   /** 模式切换走 App 的统一入口（带 1200ms 仪式，与侧栏名册同步）。 */
   onModeChange: (mode: Mode) => void;
+  /** P2-6：名册与 Composer chip 的球接同一份 markState，不要永远 idle。 */
+  markState: MarkState;
+  /** P1-6：斜杠命令用同一套命令注册表（行首打 / 时弹迷你面板）。 */
+  getSlashCommands: (query: string) => CommandItem[];
 }
 
 type Popover = "model" | "perm" | "attach" | "mode" | null;
@@ -38,6 +44,8 @@ export default function Composer({
   running,
   onCancel,
   onModeChange,
+  markState,
+  getSlashCommands,
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [popover, setPopover] = useState<Popover>(null);
@@ -45,9 +53,14 @@ export default function Composer({
   const [attachments, setAttachments] = useState<string[]>([]);
   const [attachDir, setAttachDir] = useState(settings.workdir);
   const [attachFiles, setAttachFiles] = useState<FileEntry[]>([]);
+  /** P2-10：附件菜单里的文件名过滤框。 */
+  const [attachFilter, setAttachFilter] = useState("");
   const [customModel, setCustomModel] = useState("");
   /** 模型菜单分层：null = 服务商列表；某服务商 id = 该服务商的模型列表。 */
   const [modelLevel, setModelLevel] = useState<string | null>(null);
+  /** P1-6：斜杠命令迷你面板的选中行；Esc 隐藏后，下一次打字再出现。 */
+  const [slashIdx, setSlashIdx] = useState(0);
+  const slashSuppressedRef = useRef(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const lastTypingCueRef = useRef(0);
 
@@ -95,6 +108,9 @@ export default function Composer({
 
   const handleTextChange = (value: string) => {
     setText(value);
+    setSlashIdx(0);
+    // Esc 藏起来的斜杠面板，下一次打字再出现。
+    if (value.startsWith("/")) slashSuppressedRef.current = false;
     // 打字 cue：节流约 2s 一次，球据此进 listening。
     const now = Date.now();
     if (value.trim() && now - lastTypingCueRef.current > 2000) {
@@ -114,6 +130,11 @@ export default function Composer({
   };
 
   const togglePopover = (which: Popover) => {
+    // P2-10：附件菜单每次打开都回到工作区根目录 + 清空过滤。
+    if (which === "attach" && popover !== "attach") {
+      setAttachDir(settings.workdir);
+      setAttachFilter("");
+    }
     setPopover((cur) => {
       const next = cur === which ? null : which;
       if (next !== "model") setModelLevel(null);
@@ -139,7 +160,8 @@ export default function Composer({
   };
   const pickEffort = (e: Effort) => {
     onPatch({ effort: e });
-    closePopover(); // 思考强度是最终项，选完关闭。
+    // P1-1（用户 07:19 已投诉过一次）：思考强度点选只打勾、不关闭菜单；
+    // 只有选到最终项（模型）或点菜单外 / Esc 才关闭。
   };
   const pickApproval = (a: Approval) => {
     onPatch({ approval: a });
@@ -163,13 +185,42 @@ export default function Composer({
     ? (settings.providers.find((p) => p.id === modelLevel) ?? provider)
     : null;
 
+  // P1-6：行首打 / 弹出同一套命令注册表的迷你面板（上下键选、回车执行、Esc 关闭）。
+  // 有其他菜单开着时不弹；Esc 只是藏起来，下一次打字再出现。
+  const slashActive =
+    text.startsWith("/") && popover === null && !slashSuppressedRef.current;
+  const slashItems = slashActive ? getSlashCommands(text.slice(1)).slice(0, 8) : [];
+  const slashSel = Math.min(slashIdx, Math.max(0, slashItems.length - 1));
+  const runSlash = (item: CommandItem) => {
+    setText("");
+    setSlashIdx(0);
+    item.run();
+  };
+
+  // P2-22：附件 chip 显示相对路径（相对工作区），不是只显示文件名；
+  // 悬停 title 仍是完整路径。
+  const relPath = (a: string) => {
+    const wd = settings.workdir;
+    if (wd && a.startsWith(wd)) {
+      const r = a.slice(wd.length).replace(/^[/\\]/, "");
+      if (r) return r;
+    }
+    return a.split(/[\\/]/).pop() ?? a;
+  };
+  // P2-10：附件列表按文件名过滤。
+  const attachShown = attachFilter.trim()
+    ? attachFiles.filter((f) =>
+        f.name.toLowerCase().includes(attachFilter.trim().toLowerCase()),
+      )
+    : attachFiles;
+
   return (
     <div className={`composer-wrap ${focused ? "focused" : ""}`}>
       {attachments.length > 0 && (
         <div className="attach-chips">
           {attachments.map((a) => (
             <span key={a} className="attach-chip" title={a}>
-              {a.split(/[\\/]/).pop()}
+              {relPath(a)}
               <button
                 type="button"
                 aria-label={`移除附件 ${a}`}
@@ -182,6 +233,49 @@ export default function Composer({
         </div>
       )}
 
+      {/* P1-6：斜杠命令迷你面板。 */}
+      {slashActive && (
+        <div className="s7-slash" role="listbox" aria-label="斜杠命令">
+          <div className="s7-slash-list">
+            {slashItems.length === 0 && (
+              <div className="s7-empty">
+                没有匹配「{text.slice(1)}」的命令
+                <span>换个词试试，或按 Esc 关掉。</span>
+              </div>
+            )}
+            {(() => {
+              let lastGroup = "";
+              return slashItems.map((item, idx) => {
+                const head =
+                  item.group !== lastGroup ? (
+                    <div className="s7-palette-group" key={`g-${item.group}-${idx}`}>
+                      {item.group}
+                    </div>
+                  ) : null;
+                lastGroup = item.group;
+                return (
+                  <div key={item.id}>
+                    {head}
+                    <button
+                      type="button"
+                      className={`s7-palette-item ${idx === slashSel ? "sel" : ""}`}
+                      onMouseEnter={() => setSlashIdx(idx)}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        runSlash(item);
+                      }}
+                    >
+                      <span>{item.title}</span>
+                      {item.hint && <span className="s7-palette-hint">{item.hint}</span>}
+                    </button>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      )}
+
       <textarea
         ref={taRef}
         className="composer-input"
@@ -191,6 +285,29 @@ export default function Composer({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onKeyDown={(e) => {
+          if (slashActive) {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setSlashIdx((i) => Math.min(i + 1, slashItems.length - 1));
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setSlashIdx((i) => Math.max(i - 1, 0));
+              return;
+            }
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              const item = slashItems[slashSel];
+              if (item) runSlash(item);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              slashSuppressedRef.current = true;
+              return;
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             send();
@@ -252,7 +369,7 @@ export default function Composer({
           <Mark
             size={28}
             eva={settings.mode === "eva"}
-            state="idle"
+            state={markState}
             fast={settings.mode === "eva"}
           />
           {settings.mode === "eva" ? "EVA" : "诺玛"}
@@ -372,11 +489,14 @@ export default function Composer({
                           type="button"
                           className={`effort ${settings.effort === e ? "selected" : ""}`}
                           onClick={() => pickEffort(e)}
+                          title={EFFORT_DESCS[e]}
                         >
                           {EFFORT_LABELS[e]}
                         </button>
                       ))}
                     </div>
+                    {/* P1-2：当前档位一句话说明。 */}
+                    <div className="popover-hint">{EFFORT_DESCS[settings.effort]}</div>
                     <div className="popover-hint">
                       点服务商进第二层选模型；选到最终项菜单才收起。
                     </div>
@@ -454,7 +574,8 @@ export default function Composer({
                       onClick={() => pickSandbox(s)}
                     >
                       <span>{SANDBOX_LABELS[s]}</span>
-                      <span className="option-note">{s}</span>
+                      {/* P2-4：沙箱小字用人话，不露原始枚举名。 */}
+                      <span className="option-note">{SANDBOX_DESCS[s]}</span>
                       {settings.sandbox === s && <span className="check">✓</span>}
                     </button>
                   ))}
@@ -468,6 +589,15 @@ export default function Composer({
             {popover === "attach" && (
               <>
                 <div className="popover-title">附加文件（{attachDir || "工作区"}）</div>
+                {/* P2-10：文件名过滤框。 */}
+                <input
+                  className="field-input attach-filter"
+                  value={attachFilter}
+                  onChange={(e) => setAttachFilter(e.target.value)}
+                  placeholder="按文件名过滤…"
+                  aria-label="按文件名过滤"
+                  autoComplete="off"
+                />
                 <div className="option-list attach-list">
                   {attachDir !== settings.workdir && (
                     <button
@@ -481,7 +611,7 @@ export default function Composer({
                       ← 上一级
                     </button>
                   )}
-                  {attachFiles.map((f) => (
+                  {attachShown.map((f) => (
                     <button
                       key={f.path}
                       type="button"
@@ -500,8 +630,10 @@ export default function Composer({
                       )}
                     </button>
                   ))}
-                  {attachFiles.length === 0 && (
-                    <div className="option-note">该目录为空</div>
+                  {attachShown.length === 0 && (
+                    <div className="option-note">
+                      {attachFilter.trim() ? "没有匹配的文件" : "该目录为空"}
+                    </div>
                   )}
                 </div>
               </>

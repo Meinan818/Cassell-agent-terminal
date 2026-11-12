@@ -15,22 +15,27 @@ import type {
 import {
   GREETING_TASKS,
   THEME_KEY,
+  EFFORT_LABELS,
+  MODE_LABELS,
   greetingForHour,
   resolveTheme,
   uid,
 } from "./types";
-import type { Theme } from "./types";
+import type { Effort, Theme } from "./types";
 import Boot from "./components/Boot";
 import Mark, { type MarkState } from "./components/Mark";
 import { stateFor } from "./components/mark/ballAdapter";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
+import ConnectWizard from "./components/ConnectWizard";
 import RightPanel, { type MergeSummary } from "./components/RightPanel";
 import {
   ArchiveDrawer,
+  CommandPalette,
   HelpDrawer,
-  SettingsDrawer,
+  SettingsModal,
 } from "./components/Drawers";
+import { getCommands, type SettingsNav } from "./components/commands";
 
 const TASKS_KEY = "cassell.tasks.v1";
 
@@ -143,6 +148,135 @@ const WAVE2_CSS = `
   .app .chat { padding-top: 12px; gap: 12px; }
   .app .composer-slot { padding-bottom: 12px; }
 }
+`;
+
+/**
+ * S7 样式增量（设置 modal + Cmd-K + 通知）。App.css 不在本波文件清单内，
+ * 所以本波新增的 class 全部放在这里（<style> 在 body 内、晚于 head 里的
+ * App.css，加上 .s7 前缀避免与旧规则冲突）。令牌全部复用 S0 的令牌。
+ * 动效按 §4 的表走：modal 240ms --ease-exp（缩放 + 淡入），面板 150ms
+ * --ease-exp（淡入 + 4px 上移），列表项 hover/选中 100ms --ease。
+ */
+const S7_CSS = `
+.s7-overlay { position: fixed; inset: 0; z-index: 80; background: var(--scrim); display: flex; align-items: center; justify-content: center; animation: s7-fade 150ms var(--ease) both; }
+@keyframes s7-fade { from { opacity: 0; } to { opacity: 1; } }
+.s7-modal { width: 640px; max-width: calc(100vw - 48px); max-height: calc(100vh - 96px); background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-modal-in 240ms var(--ease-exp) both; }
+@keyframes s7-modal-in { from { opacity: 0; transform: scale(0.98) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+.s7-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 0; }
+.s7-modal-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
+.s7-modal-body { display: flex; flex: 1; min-height: 0; padding-top: 12px; }
+.s7-nav { width: 160px; flex-shrink: 0; padding: 4px 12px 24px 16px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.s7-nav button { position: relative; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
+.s7-nav button:hover { background: var(--bg-hover); color: var(--text); }
+.s7-nav button.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.s7-nav button.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
+.s7-content { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 24px 24px; animation: s7-fade 150ms var(--ease) both; }
+.s7-group { display: flex; flex-direction: column; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.s7-group:first-child { padding-top: 4px; }
+.s7-group:last-child { border-bottom: none; padding-bottom: 0; }
+.s7-group .drawer-section { margin-top: 0; }
+.s7-identity { display: flex; align-items: center; gap: 8px; }
+.s7-identity-name { font-size: 14px; font-weight: 600; }
+.s7-identity-id { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+.s7-key-row { display: flex; gap: 8px; align-items: center; }
+.s7-key-row .field-input { flex: 1; min-width: 0; }
+.s7-key-state { font-size: 13px; color: var(--text-3); }
+.s7-empty { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; font-size: 13px; color: var(--text-2); background: var(--bg-soft); }
+.s7-empty span { font-size: 12px; color: var(--text-3); line-height: 1.5; }
+.s7-empty .btn-ghost { align-self: flex-start; color: var(--accent); padding: 4px 0; }
+.s7-kbd-list { display: flex; flex-direction: column; gap: 8px; }
+.s7-kbd-list > div { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-2); }
+.s7-kbd-list kbd { font-family: var(--mono); font-size: 11px; color: var(--text-2); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; min-width: 88px; text-align: center; }
+/* ---- Cmd-K 命令面板：560px 居中，150ms --ease-exp 淡入 + 4px 上移 ---- */
+.s7-palette-overlay { position: fixed; inset: 0; z-index: 90; background: var(--scrim); display: flex; justify-content: center; padding-top: 18vh; animation: s7-fade 150ms var(--ease) both; }
+.s7-palette { width: 560px; max-width: calc(100vw - 48px); height: fit-content; max-height: 60vh; background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
+@keyframes s7-palette-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.s7-palette-input { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.s7-palette-prompt { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+.s7-palette-input input { flex: 1; min-width: 0; border: none; outline: none; background: none; font-size: 14px; color: var(--text); }
+.s7-palette-esc { font-family: var(--mono); font-size: 11px; color: var(--text-3); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.s7-palette-list { overflow-y: auto; padding: 8px; }
+.s7-palette-group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); padding: 8px 12px 4px; }
+.s7-palette-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 100ms var(--ease), color 100ms var(--ease); }
+.s7-palette-item.sel { background: var(--accent-soft); color: var(--text); }
+.s7-palette-hint { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.s7-palette-foot { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-3); }
+/* ---- 命令执行后的轻反馈（toast 已删，仪式本身就是反馈；只有没有界面可开的命令才落这行小字） ---- */
+.s7-notice { position: fixed; left: calc(50% + 116px); bottom: 96px; transform: translateX(-50%); z-index: 95; max-width: 60vw; background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); padding: 8px 16px; font-size: 13px; line-height: 1.5; animation: s7-notice-in 240ms var(--ease-exp) both; }
+@keyframes s7-notice-in { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .s7-overlay, .s7-modal, .s7-content, .s7-palette-overlay, .s7-palette, .s7-notice { animation-duration: 0.01ms !important; } }
+`;
+
+/**
+ * 审计合并样式增量（2026-11-13 可用性审计，P0/P1/P2）。同样放 App.tsx 的
+ * <style> 里，不动 App.css（C 留下的惯例）。内容：:focus-visible 焦点环、
+ * 消息操作、用量常驻行、回到底部按钮、校徽图片、向导、斜杠面板、设置小件。
+ */
+const AUDIT_CSS = `
+/* ---- P2-18：全站 :focus-visible 焦点环（鼠标点击不显示，键盘导航必须显示） ---- */
+.app :focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* ---- P2-8：校徽圆印用真校徽图片（侧栏段位牌 + 设置身份区共用 .w2-crest） ---- */
+.app .w2-crest { overflow: hidden; }
+.app .w2-crest img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
+/* ---- 设置 modal 审计小件 ---- */
+.app .s7-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; font-size: 12px; color: var(--text-2); background: var(--bg-soft); }
+.app .s7-summary-warn { border-color: var(--accent); background: var(--accent-soft); }
+.app .s7-summary .btn-ghost { white-space: nowrap; }
+.app .s7-tag-current { display: inline-block; margin-left: 6px; padding: 1px 6px; font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; vertical-align: 1px; }
+.app .option.static { cursor: default; }
+.app .s7-codex-line { display: flex; flex-direction: column; gap: 6px; }
+.app .s7-codex-input { font-size: 12px; padding: 6px 10px; }
+/* ---- 向导（ConnectWizard）：复用 s7-modal 壳，窄一点 + 步骤指示 ---- */
+.app .s7-wizard { width: 520px; max-width: calc(100vw - 48px); }
+.app .s7-wizard-steps { display: flex; gap: 16px; padding: 12px 20px 0; font-size: 12px; color: var(--text-3); }
+.app .s7-wizard-steps span { display: flex; align-items: center; gap: 6px; }
+.app .s7-wizard-steps b { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); font-size: 11px; font-weight: 600; }
+.app .s7-wizard-steps span.on { color: var(--text); }
+.app .s7-wizard-steps span.on b { background: var(--accent); border-color: var(--accent); color: #fff; }
+.app .s7-wizard-steps span.done { color: var(--text-2); }
+.app .s7-wizard-steps span.done b { border-color: var(--accent); color: var(--accent); }
+.app .s7-wizard-content { padding: 16px 20px; }
+.app .s7-wizard-foot { display: flex; justify-content: flex-end; padding: 0 20px 16px; }
+/* 向导里的按钮不换行（“重新测试”被结果文案挤成竖排的问题）。 */
+.app .s7-wizard .btn-primary, .app .s7-wizard .btn-ghost { white-space: nowrap; flex-shrink: 0; }
+/* ---- 顶栏审查入口徽标（P1-14：有待审时变色） ---- */
+.app .w2-review-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-soft); color: var(--text-3); border: 1px solid var(--border); }
+.app .w2-review-badge.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* ---- P1-4：消息操作（悬停出现；出错卡片里重试是主按钮） ---- */
+.app .msg { position: relative; }
+.app .w2-msg-actions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity 150ms var(--ease); }
+.app .msg:hover .w2-msg-actions, .app .w2-msg-actions:focus-within { opacity: 1; }
+.app .msg.user .w2-msg-actions { justify-content: flex-end; }
+.app .w2-msg-actions button { border: none; background: none; color: var(--text-3); font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer; transition: background 100ms var(--ease), color 100ms var(--ease); }
+.app .w2-msg-actions button:hover { background: var(--bg-hover); color: var(--text); }
+.app .w2-msg-actions button.danger:hover { color: #dc2626; }
+.app .w2-msg-edit { width: 100%; }
+.app .w2-msg-edit textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg-panel); color: var(--text); font: inherit; padding: 8px 10px; }
+.app .w2-msg-edit-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+/* ---- P1-5：用量常驻行（输入框上方；Cmd-K“查看状态与用量”滚动到这里并高亮） ---- */
+.app .w2-usage { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 11px; color: var(--text-3); border-radius: 8px; transition: background 300ms var(--ease); }
+.app .w2-usage.flash { background: var(--accent-soft); color: var(--text-2); }
+/* ---- P2-19：回到底部按钮（聊天区末尾的 sticky 元素：滚上去时贴在可视区右下角） ---- */
+.app .w2-jump { position: sticky; bottom: 16px; align-self: flex-end; z-index: 5; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-2); border-radius: 999px; padding: 6px 14px; font-size: 12px; box-shadow: var(--shadow); cursor: pointer; animation: s7-notice-in 200ms var(--ease-exp) both; }
+.app .w2-jump:hover { color: var(--text); border-color: var(--accent); }
+/* ---- P2-6/P2-10/P2-22：Composer 斜杠面板 + 附件过滤 ---- */
+.app .composer-wrap { position: relative; }
+.app .s7-slash { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
+.app .s7-slash-list { max-height: 280px; overflow-y: auto; padding: 6px; }
+.app .s7-slash .s7-palette-item { padding: 7px 10px; }
+.app .attach-filter { width: 100%; margin-bottom: 6px; }
+/* ---- P2-20：档案库搜索 + 删除 ---- */
+.app .s7-archive-search { margin-bottom: 10px; }
+.app .archive-actions { display: flex; gap: 6px; align-items: center; }
+/* ---- P2-1：任务行悬停重命名/删除（样式放这里，不动 App.css） ---- */
+.app .side-task-wrap { position: relative; }
+.app .w2-task-actions { position: absolute; right: 6px; top: 8px; display: none; gap: 4px; z-index: 2; }
+.app .side-task-wrap:hover .w2-task-actions, .app .w2-task-actions:focus-within { display: flex; }
+.app .w2-task-actions button { border: none; background: var(--bg-panel); color: var(--text-3); font-size: 11px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 6px; cursor: pointer; box-shadow: var(--shadow); }
+.app .w2-task-actions button:hover { color: var(--text); }
+.app .w2-task-actions button.danger:hover { color: #dc2626; }
+.app .w2-task-rename { width: 100%; font-size: 13px; padding: 6px 10px; }
+@media (prefers-reduced-motion: reduce) { .app .s7-slash, .app .w2-jump, .app .w2-msg-actions { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 `;
 
 function loadTasks(): Task[] {
@@ -373,7 +507,7 @@ function PermCard({ msg }: { msg: ChatMsg }) {
 }
 
 /** 出错卡（B 档）：红色左侧 2px 条，不要整块红底。 */
-function ErrorCard({ msg }: { msg: ChatMsg }) {
+function ErrorCard({ msg, onRetry }: { msg: ChatMsg; onRetry?: () => void }) {
   return (
     <div className="msg">
       <div className="w2-card w2-card-err" style={{ width: "100%" }}>
@@ -387,6 +521,14 @@ function ErrorCard({ msg }: { msg: ChatMsg }) {
           <div style={{ marginTop: 4, color: "var(--text-3)" }}>
             可以换个说法再试一次，或检查一下模型配置。
           </div>
+          {/* P1-4：出错卡片加“重试”主按钮（用同一条 prompt 再跑一轮）。 */}
+          {onRetry && (
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="btn-primary" onClick={onRetry}>
+                重试
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -409,7 +551,6 @@ export default function App() {
   const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
   const [markState, setMarkState] = useState<MarkState>("idle");
   const [gaze, setGaze] = useState(0);
-  const [greetIdx, setGreetIdx] = useState(0);
   /** Inspector（S6）：默认不常驻；null = 关闭，打开时对话画布不重排（浮层）。 */
   const [inspector, setInspector] = useState<InspectorView | null>(null);
   const [inspectorWide, setInspectorWide] = useState(false);
@@ -422,6 +563,22 @@ export default function App() {
   );
   /** 未配 Key 时点发送的拦截提示（文字保留在输入框里）。 */
   const [gateNotice, setGateNotice] = useState<string | null>(null);
+  /** S7：Cmd-K 命令面板开关；设置 modal 打开时落在哪个左导航组。 */
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsNav, setSettingsNav] = useState<SettingsNav>("model");
+  /** S7：命令执行后的轻反馈（一行小字，3.5s 后自动消失）。 */
+  const [notice, setNotice] = useState<string | null>(null);
+  /** 审计：连接向导开关（只在没配 Key 时由空态 CTA / gate 提示打开）。 */
+  const [wizardOpen, setWizardOpen] = useState(false);
+  /** 审计 P1-4：消息编辑与删除两步确认。 */
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [confirmDeleteMsgId, setConfirmDeleteMsgId] = useState<string | null>(null);
+  /** 审计 P1-5：用量行高亮（Cmd-K“查看状态与用量”滚动到这里）。 */
+  const [usageFlash, setUsageFlash] = useState(false);
+  /** 审计 P2-19：回到底部按钮（离开底部超过一屏时出现）。 */
+  const [showJump, setShowJump] = useState(false);
+  const [hasNewMsg, setHasNewMsg] = useState(false);
 
   const settingsRef = useRef<Settings | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
@@ -434,8 +591,11 @@ export default function App() {
   const themeOriginRef = useRef<{ x: number; y: number } | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+  /** 审计 P1-5：用量行锚点（查看状态与用量时滚动到这里）。 */
+  const usageRowRef = useRef<HTMLDivElement>(null);
   const ritualRef = useRef(false);
   const ritualTimer = useRef<number | null>(null);
+  const noticeTimer = useRef<number | null>(null);
   const modeLineTimer = useRef<number | null>(null);
   /** 本轮开始时间：>60 秒才成功时球发 long-task-done。 */
   const runStartRef = useRef<number>(0);
@@ -558,15 +718,6 @@ export default function App() {
     applyThemeVisual(resolvedTheme, origin ?? undefined);
   }, [settings, resolvedTheme, applyThemeVisual]);
 
-  /** 顶栏主题按钮：浅色 → 深色 → 跟随系统 三态循环（手动选择即退出 system）。 */
-  const handleThemeToggle = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!settings) return;
-    themeOriginRef.current = { x: e.clientX, y: e.clientY };
-    const order: Theme[] = ["light", "dark", "system"];
-    const next = order[(order.indexOf(settings.theme) + 1) % order.length];
-    patchSettings({ theme: next });
-  };
-
   const activeTask = tasks.find((t) => t.id === activeTaskId) ?? null;
 
   // ---- Chat auto-scroll: instant jump to bottom while following output ----
@@ -575,8 +726,18 @@ export default function App() {
     const el = chatRef.current;
     if (el && stickToBottom.current) {
       el.scrollTop = el.scrollHeight;
+    } else if (el) {
+      // P2-19：滚在上面时来了新消息，记下来，回到底部按钮显示“有新消息 ↓”。
+      setHasNewMsg(true);
     }
   }, [activeMessages]);
+
+  // 切任务时回到跟随状态（新任务从底部开始看）。
+  useEffect(() => {
+    stickToBottom.current = true;
+    setHasNewMsg(false);
+    setShowJump(false);
+  }, [activeTaskId]);
 
   // ---- Load settings + Codex status on mount ----
   useEffect(() => {
@@ -622,14 +783,19 @@ export default function App() {
     });
   }, []);
 
-  // ---- Greeting task rotates every 8s ----
-  useEffect(() => {
-    const t = window.setInterval(
-      () => setGreetIdx((i) => (i + 1) % GREETING_TASKS.length),
-      8000,
-    );
-    return () => window.clearInterval(t);
+  // ---- S7：命令执行后的轻反馈 + 打开设置 modal（带左导航定位） ----
+  const showNotice = useCallback((text: string) => {
+    setNotice(text);
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 3500);
   }, []);
+
+  const openSettings = useCallback((nav: SettingsNav) => {
+    setSettingsNav(nav);
+    setDrawer("settings");
+  }, []);
+  // P2-14：问候后半句固定一条（按时段生成一次），不再每 8 秒轮换——
+  // 轮换会打断正在读问候的视线，固定才安静。
 
   // ---- Ball cue dispatch (fixed contract for the ball worker) ----
   const dispatchCue = useCallback((cue: string) => {
@@ -651,7 +817,7 @@ export default function App() {
       ritualRef.current = true;
       setRitual(mode);
       setModeLine(
-        mode === "eva" ? "EVA 模式已开启，并行编排启动" : "已切回诺玛",
+        mode === "eva" ? "已切换到 EVA · 工程开发" : "已切回诺玛",
       );
       if (modeLineTimer.current) window.clearTimeout(modeLineTimer.current);
       modeLineTimer.current = window.setTimeout(
@@ -676,6 +842,66 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [inspector]);
+
+  // ---- S7 中央键盘处理（捕获阶段）：Cmd-K / Cmd-, / Cmd-N + Esc 优先级 ----
+  // Esc 只关最顶上一层：命令面板 → 设置 modal → Inspector → 档案库/帮助抽屉。
+  // 捕获阶段 + stopPropagation，避免抽屉/Inspector 各自的 Esc 监听再关一层。
+  // 什么都没开时不拦截，Boot 的 Esc 跳过开机照常工作。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+      if (mod && e.key === ",") {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen(false);
+        // P2-24：侧栏齿轮与 Cmd-, 打开上次停留的页签（或默认“模型”），
+        // 不强制回“模型”——settingsNav 在 App 里一直留着。
+        setDrawer("settings");
+        return;
+      }
+      if (mod && (e.key === "n" || e.key === "N")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen(false);
+        setActiveTaskId(null);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (paletteOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          setPaletteOpen(false);
+          return;
+        }
+        if (drawer === "settings") {
+          e.preventDefault();
+          e.stopPropagation();
+          setDrawer(null);
+          return;
+        }
+        if (inspector) {
+          e.preventDefault();
+          e.stopPropagation();
+          setInspector(null);
+          return;
+        }
+        if (drawer) {
+          e.preventDefault();
+          e.stopPropagation();
+          setDrawer(null);
+          return;
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [paletteOpen, drawer, inspector]);
 
   const evaMode = settings?.mode === "eva";
 
@@ -1064,7 +1290,7 @@ export default function App() {
                   ...t,
                   messages: t.messages.map((m) =>
                     m.id === assistantMsgId
-                      ? { ...m, streaming: false, text: `启动失败：${e}` }
+                      ? { ...m, streaming: false, kind: "error", text: `启动失败：${e}` }
                       : thinkId && m.id === thinkId
                         ? { ...m, streaming: false }
                         : m,
@@ -1214,49 +1440,271 @@ export default function App() {
     setDrawer(null);
   };
 
+  // ---- S7：Cmd-K 命令的真实动作（注册表在 ./components/commands） ----
+  const handleArchiveCurrentTask = () => {
+    const id = activeTaskIdRef.current;
+    const t = tasksRef.current.find((x) => x.id === id);
+    if (!t) {
+      showNotice("没有正在进行的任务。");
+      return;
+    }
+    handleArchiveTask(t.id);
+    showNotice(`已归档「${t.title}」。`);
+  };
+
+  const handleClearChat = () => {
+    if (runningRef.current) {
+      showNotice("任务还在跑，等跑完再清空对话。");
+      return;
+    }
+    const id = activeTaskIdRef.current;
+    const t = tasksRef.current.find((x) => x.id === id);
+    if (!t || t.messages.length === 0) {
+      showNotice("当前对话已经是空的。");
+      return;
+    }
+    setTasks((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, messages: [] } : x)),
+    );
+    showNotice("已清空当前对话。");
+  };
+
+  // 状态与用量（P1-5）：不再弹 3.5 秒就消失的提示、也不打开没有用量数字的
+  // 工作流页——用量行就常驻在输入框上方，这里滚动到它并高亮一下。
+  const handleShowUsage = () => {
+    usageRowRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setUsageFlash(true);
+    window.setTimeout(() => setUsageFlash(false), 1800);
+  };
+
+  // ---- 审计 P1-4：消息操作（复制 / 重试 / 编辑 / 删除） ----
+  // 重跑一轮：保留第 userIdx 条用户消息之前的所有消息，删掉它之后的一切，
+  // 挂一条新的流式 AI 气泡，用同一条 prompt（或编辑后的新文本）再跑一轮。
+  const rerunFromUser = useCallback(
+    (taskId: string, userIdx: number, userText: string) => {
+      if (runningRef.current) return;
+      const s = settingsRef.current;
+      const assistantId = uid();
+      const evaNote: ChatMsg | null =
+        s?.mode === "eva"
+          ? { id: uid(), role: "assistant", text: "", kind: "eva" }
+          : null;
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                messages: [
+                  ...t.messages.slice(0, userIdx + 1),
+                  ...(evaNote ? [evaNote] : []),
+                  { id: assistantId, role: "assistant", text: "", streaming: true },
+                ],
+              }
+            : t,
+        ),
+      );
+      streamMsgIdRef.current = assistantId;
+      thinkMsgIdRef.current = null;
+      lastToolMsgIdRef.current = null;
+      setRunning(true);
+      setMarkState(stateFor("runStart"));
+      dispatchCue("message-sent");
+      runStartRef.current = Date.now();
+      stickToBottom.current = true;
+      requestAnimationFrame(() => {
+        void runTurn(taskId, userText, assistantId, userText);
+      });
+    },
+    [runTurn, dispatchCue],
+  );
+
+  // 重试：找到该条 AI 回复（或出错卡片）前面最近一条用户消息，用同一条 prompt 再跑一轮。
+  const handleRetryMessage = (msgId: string) => {
+    const taskId = activeTaskIdRef.current;
+    if (!taskId) return;
+    const task = tasksRef.current.find((t) => t.id === taskId);
+    if (!task) return;
+    const idx = task.messages.findIndex((m) => m.id === msgId);
+    if (idx < 0) return;
+    let userIdx = -1;
+    for (let i = idx; i >= 0; i--) {
+      if (task.messages[i].role === "user") {
+        userIdx = i;
+        break;
+      }
+    }
+    if (userIdx < 0) {
+      showNotice("找不到要重试的那条提问。");
+      return;
+    }
+    if (runningRef.current) {
+      showNotice("任务还在跑，等它跑完再重试。");
+      return;
+    }
+    rerunFromUser(taskId, userIdx, task.messages[userIdx].text);
+  };
+
+  // 编辑：改掉这条用户消息（改第一条时任务标题跟着改），删掉它之后的所有回复，按新内容重跑一轮。
+  const handleEditUserMessage = (msgId: string, newText: string) => {
+    const taskId = activeTaskIdRef.current;
+    if (!taskId) return;
+    const task = tasksRef.current.find((t) => t.id === taskId);
+    if (!task) return;
+    const idx = task.messages.findIndex((m) => m.id === msgId);
+    if (idx < 0) return;
+    const text = newText.trim();
+    if (!text) {
+      showNotice("内容不能为空。");
+      return;
+    }
+    if (runningRef.current) {
+      showNotice("任务还在跑，等它跑完再改。");
+      return;
+    }
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        const msgs = t.messages.map((m, i) => (i === idx ? { ...m, text } : m));
+        const firstUserIdx = msgs.findIndex((m) => m.role === "user");
+        const title =
+          firstUserIdx === idx
+            ? text.length > 24
+              ? `${text.slice(0, 24)}…`
+              : text
+            : t.title;
+        return { ...t, title, messages: msgs };
+      }),
+    );
+    setEditingMsgId(null);
+    rerunFromUser(taskId, idx, text);
+  };
+
+  const handleDeleteMessage = (msgId: string) => {
+    const taskId = activeTaskIdRef.current;
+    if (!taskId) return;
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? { ...t, messages: t.messages.filter((m) => m.id !== msgId) }
+          : t,
+      ),
+    );
+    setConfirmDeleteMsgId(null);
+    showNotice("已删除一条消息。");
+  };
+
+  const handleCopyMessage = (text: string) => {
+    navigator.clipboard?.writeText(text).then(
+      () => showNotice("已复制。"),
+      () => showNotice("复制失败。"),
+    );
+  };
+
+  // ---- 审计 P2-1 / P2-20：任务重命名 / 删除 / 档案库彻底删除 ----
+  const handleRenameTask = (id: string, title: string) => {
+    const t = title.trim();
+    if (!t) return;
+    setTasks((prev) => prev.map((x) => (x.id === id ? { ...x, title: t } : x)));
+  };
+  const handleDeleteTask = (id: string) => {
+    setTasks((prev) => prev.filter((x) => x.id !== id));
+    if (activeTaskIdRef.current === id) setActiveTaskId(null);
+    showNotice("任务已删除。");
+  };
+  const handleDeleteArchivedTask = (id: string) => {
+    setTasks((prev) => prev.filter((x) => x.id !== id));
+    showNotice("已彻底删除。");
+  };
+
+  const handleAcceptAllReview = () => {
+    const pending = (review?.files ?? []).filter(
+      (f) => (f.state ?? "pending") === "pending",
+    ).length;
+    if (pending === 0) {
+      showNotice("没有待审查的变更。");
+      return;
+    }
+    handleAcceptAll();
+    setInspector("review");
+  };
+
+  const handleSwitchModeCmd = (mode: Mode) => {
+    if (settingsRef.current?.mode === mode) {
+      showNotice(mode === "eva" ? "已经是 EVA 模式了。" : "已经是诺玛模式了。");
+      return;
+    }
+    handleModeChange(mode);
+  };
+
+  const handleSetThemeCmd = (theme: Theme) => {
+    patchSettings({ theme });
+    showNotice(
+      `已切换到${theme === "light" ? "浅色" : theme === "dark" ? "深色" : "跟随系统"}主题。`,
+    );
+  };
+
+  const handleSetEffortCmd = (effort: Effort) => {
+    patchSettings({ effort });
+    showNotice(`思考强度已设为「${EFFORT_LABELS[effort]}」。`);
+  };
+
   // 原生引擎的连通测试：真发一条最小请求，不经过 Codex CLI。
   // 注意先落盘再测——Rust 侧从磁盘设置文件里读 Key 与地址。
-  const handleTestConnection = () => {
+  // providerId 可指定（设置里“只看不切换”时测查看中的服务商）；返回结果，
+  // 供连接向导直接用（设置页仍用 App 的 testing/testResult 状态显示）。
+  const handleTestConnection = (providerId?: string) => {
     const s = settingsRef.current;
-    if (!s) return;
+    if (!s) return Promise.resolve({ ok: false, detail: "设置还没加载好" });
+    const pid = providerId ?? s.provider_id;
     setTesting(true);
     setTestResult(null);
-    invoke("save_settings", { settings: s })
+    return invoke("save_settings", { settings: s })
       .then(() =>
         invoke<{ ok: boolean; detail: string }>("test_provider", {
           // 注意：Tauri v2 命令参数默认转 camelCase，Rust 侧 provider_id 对应 JS 侧 providerId
-          providerId: s.provider_id,
+          providerId: pid,
           model: s.model,
         }),
       )
-      .then((r) => setTestResult(r))
-      .catch((e) => setTestResult({ ok: false, detail: String(e) }))
+      .then((r) => {
+        setTestResult(r);
+        return r;
+      })
+      .catch((e) => {
+        const r = { ok: false, detail: String(e) };
+        setTestResult(r);
+        return r;
+      })
       .finally(() => setTesting(false));
   };
 
-  // 从服务商真实拉取模型列表（GET /models），填进当前服务商的模型目录。
-  const handleFetchModels = useCallback(async (): Promise<{
+  // 从服务商真实拉取模型列表（GET /models），填进指定服务商的模型目录。
+  // providerId 可指定；只有拉的是当前服务商时才顺带改 settings.model。
+  const handleFetchModels = useCallback(async (providerId?: string): Promise<{
     ok: boolean;
     detail: string;
   }> => {
     const s = settingsRef.current;
     if (!s) return { ok: false, detail: "设置还没加载好" };
+    const pid = providerId ?? s.provider_id;
     try {
       await invoke("save_settings", { settings: s });
       const models = await invoke<string[]>("list_models", {
         // Tauri v2 命令参数默认转 camelCase（见 test_provider 处注释）
-        providerId: s.provider_id,
+        providerId: pid,
       });
       if (models.length === 0) {
         return { ok: true, detail: "服务商没有返回任何模型（列表为空）" };
       }
-      const pid = s.provider_id;
-      patchSettings({
+      const patch: Partial<Settings> = {
         providers: s.providers.map((p) =>
           p.id === pid ? { ...p, models } : p,
         ),
-        model: models.includes(s.model) ? s.model : models[0],
-      });
+      };
+      if (pid === s.provider_id) {
+        patch.model = models.includes(s.model) ? s.model : models[0];
+      }
+      patchSettings(patch);
       return { ok: true, detail: `已拉取 ${models.length} 个模型` };
     } catch (e) {
       return { ok: false, detail: String(e) };
@@ -1293,33 +1741,77 @@ export default function App() {
   const hour = new Date().getHours();
   // 显示名默认“路明非”；问候取首字 + “专员”（路明非 → 路专员）。
   const displayName = settings.display_name?.trim() || "路明非";
-  const greeting = `${greetingForHour(hour)}，${displayName.charAt(0)}专员。${GREETING_TASKS[greetIdx]}`;
+  const greeting = `${greetingForHour(hour)}，${displayName.charAt(0)}专员。${GREETING_TASKS[0]}`;
   const hasAnyKey = Object.values(settings.api_keys).some((k) => k?.trim());
   const showEmpty = !activeTask || activeTask.messages.length === 0;
 
-  // L1 安静状态行：有任务在跑 / 有待审查变更 / 模式刚切换时出现，空闲消失。
+  // L1 安静状态行（P2-15）：固定占位、不出现/消失导致对话区跳动；运行状态与
+  // 审查计数分开——审查计数常驻在顶部“审查”入口的徽标上，这里只说运行状态。
+  // P0-4：EVA+Ultracode 运行时不说“并行核查中… 3 个智能体”（假话），只说“EVA 正在执行…”。
   const pendingCount = (review?.files ?? []).filter(
     (f) => (f.state ?? "pending") === "pending",
   ).length;
   const l1Text = running
-    ? settings.mode === "eva" && settings.ultracode
-      ? "并行核查中… 3 个智能体"
-      : settings.mode === "eva"
-        ? "EVA 正在执行…"
-        : "正在思考…"
-    : pendingCount > 0
-      ? `正在审查 ${pendingCount} 个文件`
-      : modeLine;
-  const l1Target: InspectorView =
-    pendingCount > 0 ? "review" : running ? "workflow" : "review";
+    ? settings.mode === "eva"
+      ? "EVA 正在执行…"
+      : "正在思考…"
+    : modeLine ?? "空闲";
+  const l1Target: InspectorView = running ? "workflow" : "review";
+  const l1Clickable = running || pendingCount > 0;
   // 新消息一次性出现动效：最后一条用户消息 + 流式中的 AI 气泡（150ms 淡入 + 4px 上移）。
   const messages = activeTask?.messages ?? [];
+  // P1-5：用量常驻行的数据（累计 token 用服务商真实回报的数；没有用量数据的回复不计）。
+  // 上下文占比不显示：没有上下文窗口配置，百分比算不出来，不编一个假的。
+  const usageMessages = messages.filter((m) => m.usage);
+  const usagePrompt = usageMessages.reduce((a, m) => a + (m.usage?.prompt ?? 0), 0);
+  const usageCompletion = usageMessages.reduce(
+    (a, m) => a + (m.usage?.completion ?? 0),
+    0,
+  );
+  const usageTotal = usageMessages.reduce((a, m) => a + (m.usage?.total ?? 0), 0);
   const lastUserId =
     [...messages].reverse().find((m) => m.role === "user")?.id ?? null;
+
+  // S7：Cmd-K 的命令上下文（每条命令都执行真实动作，见 ./components/commands）。
+  const paletteItems = (q: string) =>
+    getCommands(
+      {
+        mode: settings.mode,
+        theme: settings.theme,
+        effort: settings.effort,
+        providerName:
+          settings.providers.find((p) => p.id === settings.provider_id)?.name ??
+          settings.provider_id,
+        model: settings.model,
+        hasActiveTask: !!activeTask,
+        activeTaskTitle: activeTask?.title ?? null,
+        pendingReviewCount: pendingCount,
+        running,
+        tasks,
+        activeTaskId,
+        inspectorView: inspector,
+        newTask: handleNewTask,
+        setMode: handleSwitchModeCmd,
+        openSettings,
+        openInspector: setInspector,
+        setTheme: handleSetThemeCmd,
+        setEffort: handleSetEffortCmd,
+        openArchive: () => setDrawer("archive"),
+        openHelp: () => setDrawer("help"),
+        archiveCurrentTask: handleArchiveCurrentTask,
+        clearChat: handleClearChat,
+        showUsage: handleShowUsage,
+        acceptAllReview: handleAcceptAllReview,
+        jumpToTask: (id: string) => setActiveTaskId(id),
+      },
+      q,
+    );
 
   return (
     <div className="app">
       <style>{WAVE2_CSS}</style>
+      <style>{S7_CSS}</style>
+      <style>{AUDIT_CSS}</style>
       {boot && settings.boot_animation && <Boot onDone={() => setBoot(false)} />}
       {ritual && <div className="w2-ritual-glow" aria-hidden="true" />}
 
@@ -1328,11 +1820,18 @@ export default function App() {
         activeTaskId={activeTaskId}
         onSelectTask={setActiveTaskId}
         onNewTask={handleNewTask}
-        onOpenDrawer={setDrawer}
+        onRenameTask={handleRenameTask}
+        onDeleteTask={handleDeleteTask}
+        onOpenDrawer={(which) => {
+          // P2-24：齿轮打开上次停留的页签，不强制回“模型”。
+          setDrawer(which);
+        }}
+        onOpenPalette={() => setPaletteOpen(true)}
         displayName={displayName}
         mode={settings.mode}
         onModeChange={handleModeChange}
         running={running}
+        markState={markState}
         drawer={drawer}
       />
 
@@ -1350,35 +1849,37 @@ export default function App() {
           <div className="main-head-title">
             {activeTask ? activeTask.title : "新任务"}
             <span className="main-head-sub">
-              {settings.mode === "eva" ? "EVA" : "诺玛"} · {settings.provider_id}:
-              {settings.model} · {settings.effort}
+              {/* P2-3：副标题用人话——模式中文名 · 服务商中文名 · 模型名 · 思考强度中文标签；
+                  不再显示 provider_id、effort 枚举原文。 */}
+              {MODE_LABELS[settings.mode]} ·{" "}
+              {settings.providers.find((p) => p.id === settings.provider_id)?.name ??
+                settings.provider_id}{" "}
+              · {settings.model || "未选模型"} · {EFFORT_LABELS[settings.effort]}
             </span>
           </div>
           <span className="main-head-spacer" />
-          {activeTask && (
-            <button
-              type="button"
-              className="btn-ghost"
-              onClick={() => handleArchiveTask(activeTask.id)}
-            >
-              归档
-            </button>
-          )}
+          {/* P1-13/P1-14：顶栏重排——“审查”独立入口（带待审查数量徽标，有待审时变色）；
+              “归档”收进 Cmd-K（命令面板里有“归档当前任务”），顶栏拿掉；主题按钮拿掉，
+              主题只在设置 → 外观的分段控件与 Cmd-K 里切（P2-9 的“三态循环文案显示下一个状态”随之消失）。
+              位置纪律：审查入口放在对话区顶部、L1 状态行正上方——用户想检查工作成果的时刻
+              就是正在看对话的时刻，入口在视线顶端，空闲与运行时位置不挪地方。 */}
           <button
             type="button"
             className="btn-ghost"
-            onClick={handleThemeToggle}
-            aria-label="切换主题"
+            onClick={() => setInspector(inspector ?? "review")}
+            aria-label={`打开审查${pendingCount > 0 ? `，${pendingCount} 个待审查` : ""}`}
+            title="审查：逐项通过或拒绝诺玛的改动（Cmd+K 也能打开）"
           >
-            {settings.theme === "light"
-              ? "☾ 深色"
-              : settings.theme === "dark"
-                ? "◐ 跟随系统"
-                : "☀ 浅色"}
+            审查
+            {pendingCount > 0 && (
+              <span className="w2-review-badge hot">{pendingCount}</span>
+            )}
           </button>
         </header>
 
-        {l1Text && (
+        {/* P2-15：L1 状态行固定占位、不出现/消失导致对话区跳动。空闲时显示“空闲”；
+            运行时或有待审时可点（进工作流 / 审查），其余时间是安静的一行小字。 */}
+        {l1Clickable ? (
           <button
             type="button"
             className="w2-l1"
@@ -1388,6 +1889,11 @@ export default function App() {
             {l1Text}
             <span aria-hidden="true">›</span>
           </button>
+        ) : (
+          <div className="w2-l1" role="status">
+            <span className="w2-dot ok" />
+            {l1Text}
+          </div>
         )}
 
         {showEmpty ? (
@@ -1408,7 +1914,7 @@ export default function App() {
                 <button
                   type="button"
                   className="btn-primary"
-                  onClick={() => setDrawer("settings")}
+                  onClick={() => setWizardOpen(true)}
                 >
                   连接模型服务商 →
                 </button>
@@ -1421,8 +1927,11 @@ export default function App() {
             ref={chatRef}
             onScroll={(e) => {
               const el = e.currentTarget;
-              stickToBottom.current =
-                el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+              const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+              stickToBottom.current = dist < 160;
+              // P2-19：离开底部超过一屏时，右下角出现“回到底部”按钮。
+              setShowJump(dist > el.clientHeight);
+              if (dist < 160) setHasNewMsg(false);
             }}
           >
             {messages.map((m) =>
@@ -1431,7 +1940,89 @@ export default function App() {
                   key={m.id}
                   className={`msg user ${m.id === lastUserId ? "w2-live" : ""}`}
                 >
-                  <div className="msg-body">{m.text}</div>
+                  {editingMsgId === m.id ? (
+                    <div className="w2-msg-edit">
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            handleEditUserMessage(m.id, editText);
+                          } else if (e.key === "Escape") {
+                            setEditingMsgId(null);
+                          }
+                        }}
+                        aria-label="编辑这条消息"
+                        autoFocus
+                      />
+                      <div className="w2-msg-edit-row">
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          onClick={() => setEditingMsgId(null)}
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={() => handleEditUserMessage(m.id, editText)}
+                        >
+                          保存并重发
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="msg-body">
+                        {m.text}
+                        {/* P1-4：每条消息悬停出现复制 / 重试 / 编辑 / 删除（放在气泡里，不破坏消息行的 flex 布局）。 */}
+                        <div className="w2-msg-actions">
+                          <button type="button" onClick={() => handleCopyMessage(m.text)}>
+                            复制
+                          </button>
+                          <button type="button" onClick={() => handleRetryMessage(m.id)}>
+                            重试
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingMsgId(m.id);
+                              setEditText(m.text);
+                            }}
+                          >
+                            编辑
+                          </button>
+                          {confirmDeleteMsgId === m.id ? (
+                            <>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => handleDeleteMessage(m.id)}
+                              >
+                                确认删除
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteMsgId(null)}
+                              >
+                                取消
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="danger"
+                              onClick={() => setConfirmDeleteMsgId(m.id)}
+                            >
+                              删除
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : m.kind === "eva" ? (
                 <EvaNote
@@ -1450,7 +2041,7 @@ export default function App() {
               ) : m.kind === "perm" || m.kind === "ask" ? (
                 <PermCard key={m.id} msg={m} />
               ) : m.kind === "error" ? (
-                <ErrorCard key={m.id} msg={m} />
+                <ErrorCard key={m.id} msg={m} onRetry={() => handleRetryMessage(m.id)} />
               ) : (
                 <div
                   key={m.id}
@@ -1472,21 +2063,86 @@ export default function App() {
                         {m.usage.total} tokens
                       </div>
                     )}
+                    <div className="w2-msg-actions">
+                      <button type="button" onClick={() => handleCopyMessage(m.text)}>
+                        复制
+                      </button>
+                      <button type="button" onClick={() => handleRetryMessage(m.id)}>
+                        重试
+                      </button>
+                      {confirmDeleteMsgId === m.id ? (
+                        <>
+                          <button
+                            type="button"
+                            className="danger"
+                            onClick={() => handleDeleteMessage(m.id)}
+                          >
+                            确认删除
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteMsgId(null)}
+                          >
+                            取消
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="danger"
+                          onClick={() => setConfirmDeleteMsgId(m.id)}
+                        >
+                          删除
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ),
+            )}
+            {/* P2-19：离开底部超过一屏时出现；有新消息且未跟随时显示“有新消息 ↓”。 */}
+            {showJump && (
+              <button
+                type="button"
+                className="w2-jump"
+                onClick={() => {
+                  const el = chatRef.current;
+                  if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                  stickToBottom.current = true;
+                  setHasNewMsg(false);
+                  setShowJump(false);
+                }}
+              >
+                {hasNewMsg ? "有新消息 ↓" : "回到底部"}
+              </button>
             )}
           </div>
         )}
 
         <div className="composer-slot">
+          {/* P1-5：用量常驻行（输入框上方，一直可见；Cmd-K“查看状态与用量”滚动到这里并高亮）。
+              上下文占比不显示：没有上下文窗口配置，百分比算不出来，不编一个假的。 */}
+          <div
+            ref={usageRowRef}
+            className={`w2-usage ${usageFlash ? "flash" : ""}`}
+            role="status"
+          >
+            {usageMessages.length === 0 ? (
+              <span>还没有用量数据——用量会在每条 AI 回复下方显示。</span>
+            ) : (
+              <span>
+                本对话累计 ↑ {usagePrompt} · ↓ {usageCompletion} · 共 {usageTotal}{" "}
+                tokens（{usageMessages.length} 条回复）
+              </span>
+            )}
+          </div>
           {gateNotice && (
             <div className="gate-notice" role="alert">
               <span>{gateNotice}</span>
               <button
                 type="button"
                 className="btn-primary"
-                onClick={() => setDrawer("settings")}
+                onClick={() => setWizardOpen(true)}
               >
                 去配置
               </button>
@@ -1499,6 +2155,8 @@ export default function App() {
             running={running}
             onCancel={handleCancel}
             onModeChange={handleModeChange}
+            markState={markState}
+            getSlashCommands={(q) => paletteItems(q)}
           />
         </div>
       </main>
@@ -1537,7 +2195,7 @@ export default function App() {
       )}
 
       {drawer === "settings" && (
-        <SettingsDrawer
+        <SettingsModal
           settings={settings}
           onPatch={patchSettings}
           onClose={() => setDrawer(null)}
@@ -1547,16 +2205,47 @@ export default function App() {
           testResult={testResult}
           onFetchModels={handleFetchModels}
           onPickFolder={handlePickFolder}
+          initialNav={settingsNav}
+          onModeChange={handleModeChange}
+          onOpenWizard={() => {
+            setDrawer(null);
+            setWizardOpen(true);
+          }}
         />
       )}
       {drawer === "archive" && (
         <ArchiveDrawer
           tasks={tasks}
           onRestore={handleRestoreTask}
+          onDelete={handleDeleteArchivedTask}
           onClose={() => setDrawer(null)}
         />
       )}
       {drawer === "help" && <HelpDrawer onClose={() => setDrawer(null)} />}
+      {wizardOpen && (
+        <ConnectWizard
+          settings={settings}
+          onPatch={patchSettings}
+          onTestConnection={handleTestConnection}
+          onFetchModels={handleFetchModels}
+          onClose={() => setWizardOpen(false)}
+          onOpenSettings={() => {
+            setWizardOpen(false);
+            openSettings("model");
+          }}
+        />
+      )}
+      {paletteOpen && (
+        <CommandPalette
+          onClose={() => setPaletteOpen(false)}
+          getItems={paletteItems}
+        />
+      )}
+      {notice && (
+        <div className="s7-notice" role="status">
+          {notice}
+        </div>
+      )}
     </div>
   );
 }
