@@ -25,6 +25,7 @@ import {
 } from "./types";
 import type { Effort, Theme } from "./types";
 import Boot from "./components/Boot";
+import TitleBar from "./components/TitleBar";
 import Mark, { type MarkState } from "./components/Mark";
 import { stateFor } from "./components/mark/ballAdapter";
 import Sidebar from "./components/Sidebar";
@@ -193,6 +194,24 @@ const WAVE2_CSS = `
   .app .chat { padding-top: 12px; gap: 12px; }
   .app .composer-slot { padding-bottom: 12px; }
 }
+/* ---- W6 · S8 自定义窗口框 + P2-21 审查与对话同屏 ----
+ * .app 从横向三栏改成纵向：标题栏（40px）在上，三栏壳在下。壳是新包的
+ * 一层 flex 行，Sidebar / main / Inspector 的横向关系原封不动。
+ * Inspector 顶缘对齐标题栏底边（top: 40px）：浮层再也不盖标题栏，
+ * 窗口按钮在 Inspector 打开时始终可点。
+ * P2-21 用方案 ① 的“固定浮层 + 主区同步留白”：.w2-inspector 保持 fixed
+ * （不改成文档流第三栏——改文档流要动 .app 的 flex 结构与 Inspector 的
+ * 滑入动画，风险大）；只在 review 视图下 main 加 margin-right（360px，
+ * wide 时 480px），与浮层宽度一一对应，二者只留一份白、不叠加。
+ * 其他视图（终端/文件/浏览器/插件/工作流）保持浮层、不挤压对话区。
+ * margin-right 走 240ms --ease-exp，停靠/脱离不跳变。 */
+.app { flex-direction: column; }
+.w6-shell { display: flex; flex: 1; min-height: 0; }
+.w6-shell-in { animation: w6-shell-fade 300ms var(--ease) both; }
+@keyframes w6-shell-fade { from { opacity: 0; } to { opacity: 1; } }
+.app .main { transition: margin-right 240ms var(--ease-exp); }
+.w2-inspector { top: 40px; }
+@media (prefers-reduced-motion: reduce) { .w6-shell-in { animation-duration: 0.01ms !important; } }
 `;
 
 /**
@@ -613,6 +632,16 @@ function ErrorCard({ msg, onRetry }: { msg: ChatMsg; onRetry?: () => void }) {
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [boot, setBoot] = useState(true);
+  /** W6 · 开机→标题栏交接：Boot 的 onDone 在它 300ms 淡出的中途（150ms）
+   * 触发，App 随即挂载标题栏 + 三栏壳（300ms 淡入），Boot 再留 150ms 才
+   * 卸载——淡出与淡入重叠 150ms 交叉淡化，不许硬切。 */
+  const [showShell, setShowShell] = useState(false);
+  const bootHideTimer = useRef<number | null>(null);
+  const handleBootDone = useCallback(() => {
+    setShowShell(true);
+    if (bootHideTimer.current) window.clearTimeout(bootHideTimer.current);
+    bootHideTimer.current = window.setTimeout(() => setBoot(false), 150);
+  }, []);
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
   /** P0-1：真项目——列表 + 当前项目 id。持久化与任务列表同一套 localStorage 机制。 */
   const [projects, setProjects] = useState<Project[]>(() => loadProjects());
@@ -838,10 +867,16 @@ export default function App() {
       .then((s) => {
         if (!alive) return;
         setSettings(s);
-        if (!s.boot_animation) setBoot(false);
+        if (!s.boot_animation) {
+          setBoot(false);
+          setShowShell(true);
+        }
       })
       .catch(() => {
-        if (alive) setBoot(false);
+        if (alive) {
+          setBoot(false);
+          setShowShell(true);
+        }
       });
     invoke<CodexInfo>("check_codex")
       .then((info) => {
@@ -850,6 +885,13 @@ export default function App() {
       .catch(() => undefined);
     return () => {
       alive = false;
+    };
+  }, []);
+
+  // W6：卸载时清掉开机交接的 150ms 延时卸载计时器。
+  useEffect(() => {
+    return () => {
+      if (bootHideTimer.current) window.clearTimeout(bootHideTimer.current);
     };
   }, []);
 
@@ -2066,6 +2108,11 @@ export default function App() {
   const lastUserId =
     [...messages].reverse().find((m) => m.role === "user")?.id ?? null;
 
+  // P2-21（方案 ①，固定浮层 + 主区同步留白，二者只留一份）：
+  // 只在 Inspector 打开且视图为 review 时，对话区让出 360px（wide 时
+  // 480px）——审查与对话同屏；其他视图保持浮层、不挤压对话区。
+  const reviewDocked = inspector === "review";
+
   // S7：Cmd-K 的命令上下文（每条命令都执行真实动作，见 ./components/commands）。
   const paletteItems = (q: string) =>
     getCommands(
@@ -2110,7 +2157,7 @@ export default function App() {
       <style>{WAVE2_CSS}</style>
       <style>{S7_CSS}</style>
       <style>{AUDIT_CSS}</style>
-      {boot && settings.boot_animation && <Boot onDone={() => setBoot(false)} />}
+      {boot && settings.boot_animation && <Boot onDone={handleBootDone} />}
       {/* W4 仪式界面层：面纱（漫开再收住）+ 顶线（扫入/收回），均不挡输入；
           稳态光晕常驻渲染，EVA 时 800ms 淡入、切回时淡出。 */}
       {ritual && (
@@ -2130,6 +2177,21 @@ export default function App() {
         aria-hidden="true"
       />
 
+      {/* W6 · S8 标题栏：bootDone 后才挂载（Boot 全屏覆盖期间不存在，
+          不在 Boot 下面先渲染一帧）；与三栏壳一起 300ms 淡入，与 Boot
+          的 300ms 淡出重叠 150ms 交叉淡化。 */}
+      {showShell && (
+        <TitleBar
+          mode={settings.mode}
+          onModeChange={handleModeChange}
+          markState={markState}
+          gaze={gaze}
+          ritual={ritual}
+        />
+      )}
+
+      {showShell && (
+      <div className="w6-shell w6-shell-in">
       <Sidebar
         tasks={tasks}
         activeTaskId={activeTaskId}
@@ -2156,7 +2218,14 @@ export default function App() {
         ritual={ritual}
       />
 
-      <main className="main">
+      <main
+        className="main"
+        style={
+          reviewDocked
+            ? { marginRight: inspectorWide ? 480 : 360 }
+            : undefined
+        }
+      >
         <header className="main-head">
           <span
             className={`w4-wrap ${ritual ? (ritual.dir === "eva" ? "w4-wrap-eva" : "w4-wrap-norma") : ""}`}
@@ -2536,6 +2605,8 @@ export default function App() {
             })
           }
         />
+      )}
+      </div>
       )}
 
       {drawer === "settings" && (

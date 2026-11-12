@@ -98,8 +98,11 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     if (doneRef.current) return;
     doneRef.current = true;
     setLeaving(true);
-    // 开机结束 300ms 交叉淡化交接（--ease）。
-    later(onDone, 300);
+    // 开机结束 300ms 交叉淡化交接（--ease）：onDone 在淡出中途（150ms）
+    // 就触发，App 随即挂载标题栏 + 三栏壳（300ms 淡入），Boot 再留
+    // 150ms 才卸载——淡出与淡入重叠 150ms，不许硬切（见 App.tsx 的
+    // handleBootDone）。七步流程与每步时长一律不动。
+    later(onDone, 150);
   };
 
   /** 切到下一阶段：旧阶段留场淡出 600ms，新阶段 450ms 后淡入。 */
@@ -621,6 +624,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       style={{
         ...bootVars,
         transition: leaving ? "opacity 300ms var(--ease)" : undefined,
+        // 淡出期间不再挡输入：标题栏已在 Boot 之下淡入，空白处可拖、按钮可点。
+        pointerEvents: leaving ? "none" : undefined,
       }}
     >
       {/* Boot 局部关键帧（只改 Boot.tsx：不写进 App.css） */}
