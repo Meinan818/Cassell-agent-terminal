@@ -1,0 +1,57 @@
+/* mark.css — 球自己的动效（只供 Mark.tsx 用，不动 App.css）。
+ *
+ * B8：待机均匀缩放 ±0.5%，4.6s 慢周期（吸入→停顿→呼出）。
+ * 用 CSS `scale` 属性做呼吸，与 transform 上的倾身/脉冲互不干扰；
+ * 全程均匀缩放，永不压成椭圆。
+ * B5：全部过渡走 Cubic(0.645, 0.045, 0.355, 1.0)，永不超调；
+ * --spring 只留给通知小点，这里不用。
+ */
+
+@keyframes mark-breathe-46 {
+  0%,
+  100% {
+    scale: 1;
+  }
+  45% {
+    scale: 1.005;
+  }
+  55% {
+    scale: 1.005;
+  }
+}
+
+/* blocked / error 的轻 shake：左右 ≤6px，0.5s 内收住（translate 属性，不动布局） */
+@keyframes mark-shake {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  25% {
+    translate: -4px 0;
+  }
+  50% {
+    translate: 3px 0;
+  }
+  75% {
+    translate: -2px 0;
+  }
+}
+
+/* thinking / parallel 的单色细环带：低倾角水平轨道缓慢环绕 */
+@keyframes mark-ring-spin {
+  from {
+    transform: rotateX(70deg) rotate(0deg);
+  }
+  to {
+    transform: rotateX(70deg) rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark-ball {
+    animation: none !important;
+  }
+  .mark-ring {
+    animation: none !important;
+  }
+}
