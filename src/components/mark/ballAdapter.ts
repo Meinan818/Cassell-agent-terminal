@@ -185,18 +185,29 @@ export function stateFor(event: AgentEvent): BallState {
 }
 
 /** 从 DOM 读当前主题：App 把 theme-light / theme-dark 挂在 .app div 上。 */
+/**
+ * Deline 4b 根因：主题现在走 S4 的 html[data-theme]，`.app.theme-dark` 类
+ * 在代码里已不存在（grep 为零）——旧实现永远返回 "light"，深色下诺玛
+ * 与 EVA 都拿了浅色配色。所以只改 paletteFor 不够，必须先修检测。
+ */
 export function readAppTheme(): BallTheme {
   if (typeof document === "undefined") return "light";
+  const t = document.documentElement.dataset.theme;
+  if (t === "dark" || t === "light") return t;
   return document.querySelector(".app.theme-dark") ? "dark" : "light";
 }
 
-/** 跟随主题变化的 hook（MutationObserver 监听 .app 的 class 变化）。 */
+/** 跟随主题变化的 hook（监听 html[data-theme] + .app 的 class 变化）。 */
 export function useAppTheme(): BallTheme {
   const [theme, setTheme] = useState<BallTheme>(() => readAppTheme());
   useEffect(() => {
     const update = () => setTheme(readAppTheme());
     update();
     const obs = new MutationObserver(update);
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
     obs.observe(document.body, {
       attributes: true,
       attributeFilter: ["class"],
