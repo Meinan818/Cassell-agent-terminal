@@ -21,6 +21,11 @@ interface SidebarProps {
   /** P2-6：名册与输入框芯片的球接同一份 markState，不要永远 idle。 */
   markState: MarkState;
   drawer: "settings" | "archive" | "help" | null;
+  /**
+   * 切换仪式（第 3 步第四波）：App 的 handleModeChange 统一派发；
+   * 名册行与段位牌在仪式里点亮/褪去，球与顶栏共用同一份仪式。
+   */
+  ritual?: { dir: Mode; startedAt: number } | null;
 }
 
 /** P2-2：任务行相对时间（“2 小时前”）。 */
@@ -90,6 +95,7 @@ export default function Sidebar({
   running,
   markState,
   drawer,
+  ritual = null,
 }: SidebarProps) {
   const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
@@ -155,13 +161,26 @@ export default function Sidebar({
             <button
               key={r.id}
               type="button"
-              className={`w2-roster-row ${mode === r.id ? "w2-on" : ""}`}
+              className={`w2-roster-row ${mode === r.id ? "w2-on" : ""} ${
+                // W4 仪式：切入行高亮扫入（状态点脉冲一次），切出行高亮淡出；
+                // mode 在 t=0 已翻转，所以切入行就是 ritual.dir 那行。
+                ritual
+                  ? r.id === ritual.dir
+                    ? "w4-roster-in"
+                    : "w4-roster-out"
+                  : ""
+              }`}
               onClick={() => onModeChange(r.id)}
               aria-pressed={mode === r.id}
               title={`切换到${r.name}（${r.sub}）`}
             >
               {/* P2-6：当前模式那行的球接 App 的 markState；另一行永远 idle。 */}
-              <Mark size={28} eva={r.eva} state={mode === r.id ? markState : "idle"} />
+              <Mark
+                size={28}
+                eva={r.eva}
+                state={mode === r.id ? markState : "idle"}
+                ritual={ritual}
+              />
               <span style={{ minWidth: 0 }}>
                 <span className="w2-roster-name">{r.name}</span>
                 <span
@@ -331,7 +350,19 @@ export default function Sidebar({
 
       {/* ④ 段位牌：校徽小印 + 名字 + S 印章 + 等宽编号 + 状态；图标导航 */}
       <div className="side-bottom">
-        <div className="w2-rank">
+        <div
+          className={`w2-rank ${
+            // W4 仪式：to-EVA 时蓝环由 0 扩到 1px 落定，EVA 期间常驻蓝环
+            //（w4-rank-eva-on，S 印章同步变蓝）；to-诺玛时蓝环褪去。
+            ritual
+              ? ritual.dir === "eva"
+                ? "w4-rank-eva"
+                : "w4-rank-norma"
+              : mode === "eva"
+                ? "w4-rank-eva-on"
+                : ""
+          }`}
+        >
           <div className="w2-rank-top">
             {/* P2-8：校徽圆印用真校徽图片，不再写“卡”字。 */}
             <span className="w2-crest" title="卡塞尔学院">

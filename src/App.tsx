@@ -135,13 +135,52 @@ const WAVE2_CSS = `
 .app .effort { flex: 1; border: none; padding: 6px 2px; font-size: 12px; text-align: center; }
 .w2-pop-back { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-3); padding: 4px 8px; margin-bottom: 4px; width: 100%; text-align: left; border-radius: 8px; }
 .w2-pop-back:hover { background: var(--bg-hover); color: var(--text); }
-/* ---- EVA 切换仪式（1200ms）：spin + 涟漪 + 泛蓝光 ---- */
-@keyframes w2-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.w2-ritual-spin { display: inline-flex; animation: w2-spin 1200ms var(--ease-exp); position: relative; }
-.w2-ritual-spin::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 1px solid var(--accent); opacity: 0; animation: w2-ripple 1200ms var(--ease) both; }
-@keyframes w2-ripple { 0% { opacity: 0.5; transform: scale(0.8); } 100% { opacity: 0; transform: scale(1.6); } }
-.w2-ritual-glow { position: fixed; inset: 0; z-index: 70; pointer-events: none; background: radial-gradient(ellipse at 50% 0%, rgba(96, 165, 250, 0.12), transparent 60%); animation: w2-glow 600ms var(--ease) both; }
-@keyframes w2-glow { from { opacity: 0; } 30% { opacity: 1; } to { opacity: 0; } }
+/* ---- W4 · EVA 切换仪式（1350ms，分拍变身/呼气收尾） ----
+ * 球的分拍包络在 useBallEngine.ritualEnvelope（收束→闪烁→展开 / 呼气→回暖），
+ * spin 整圈是球的第二拍（startedAt+150ms 起转、1200ms 转满）；这里只管界面层：
+ * - 面纱（veil）：一层淡蓝/暖灰光晕从标题栏球的位置（顶部约 22% 处）漫开再收住，
+ *   界面跟着“吸一口气/呼一口气”，背景微微变冷/回暖；落定后由稳态光晕接手。
+ * - 顶线（sweep）：顶部 2px 强调色线，to-EVA 从左扫满、to-诺玛从右收回——
+ *   “EVA 接管了”在窗口顶缘落一笔。
+ * - 稳态光晕（steady-halo）：EVA 期间常驻的极淡蓝顶光（已有球身蓝光晕的延续），
+ *   800ms 淡入淡出；切回诺玛时随之褪去。
+ * - 顶栏球包（wrap）：to-EVA 两圈单色涟漪（第二圈延迟 150ms），to-诺玛一次
+ *   柔和呼气缩放（无旋转——收尾不是反向变身）。
+ * 全部 pointer-events: none，不挡输入；颜色只走令牌/低透明度 accent。 */
+.w4-veil { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
+.w4-veil-eva { background: radial-gradient(ellipse 70% 55% at 22% 0%, rgba(96, 165, 250, 0.14), transparent 70%); animation: w4-veil-eva 1350ms var(--ease) both; }
+@keyframes w4-veil-eva { 0% { opacity: 0; } 30% { opacity: 1; } 70% { opacity: 0.45; } 100% { opacity: 0; } }
+.w4-veil-norma { background: radial-gradient(ellipse 70% 55% at 22% 0%, rgba(214, 200, 170, 0.10), transparent 70%); animation: w4-veil-norma 1350ms var(--ease) both; }
+@keyframes w4-veil-norma { 0% { opacity: 0; } 30% { opacity: 0.8; } 100% { opacity: 0; } }
+.w4-steady-halo { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse 60% 220px at 22% 0%, rgba(96, 165, 250, 0.05), transparent 70%); opacity: 0; transition: opacity 800ms var(--ease); }
+.w4-steady-halo.on { opacity: 1; }
+.w4-sweep { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 71; pointer-events: none; background: var(--accent); opacity: 0.55; }
+.w4-sweep-eva { transform-origin: left center; animation: w4-sweep-eva 1350ms var(--ease-exp) both; }
+@keyframes w4-sweep-eva { 0% { transform: scaleX(0); } 55% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: 0; } }
+.w4-sweep-norma { transform-origin: right center; background: var(--text-3); animation: w4-sweep-norma 1350ms var(--ease-exp) both; }
+@keyframes w4-sweep-norma { 0% { transform: scaleX(1); opacity: 0.4; } 60% { transform: scaleX(0); opacity: 0.4; } 100% { transform: scaleX(0); opacity: 0; } }
+.w4-wrap { display: inline-flex; position: relative; }
+.w4-wrap-eva::after, .w4-wrap-eva::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 1px solid var(--accent); opacity: 0; animation: w4-ripple 1350ms var(--ease) both; pointer-events: none; }
+.w4-wrap-eva::before { animation-delay: 150ms; }
+@keyframes w4-ripple { 0% { opacity: 0.55; transform: scale(0.8); } 35% { opacity: 0.35; } 100% { opacity: 0; transform: scale(1.7); } }
+.w4-wrap-norma { animation: w4-exhale 1350ms var(--ease) both; }
+@keyframes w4-exhale { 0% { transform: scale(1); } 30% { transform: scale(0.98); } 100% { transform: scale(1); } }
+/* ---- W4 · 侧栏名册与段位牌在仪式中的变化 ----
+ * 名册行：切入的行高亮从透明扫入（与 w2-on 的 accent-soft 落点一致），
+ * 切出的行高亮淡出；切入行的状态点在仪式里脉冲一次。段位牌：to-EVA 时
+ * 蓝环由 0 扩到 1px 落定（EVA 期间常驻 w4-rank-eva-on），to-诺玛时蓝环褪去。 */
+.w4-roster-in { animation: w4-roster-in 1350ms var(--ease) both; }
+@keyframes w4-roster-in { 0% { background: transparent; } 25% { background: var(--accent-soft); } 100% { background: var(--accent-soft); } }
+.w4-roster-out { animation: w4-roster-out 1350ms var(--ease) both; }
+@keyframes w4-roster-out { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+.w4-roster-in .w2-dot { animation: w4-dot-pulse 1350ms var(--ease) both; }
+@keyframes w4-dot-pulse { 0% { transform: scale(1); } 25% { transform: scale(1.8); } 55% { transform: scale(1); } 100% { transform: scale(1); } }
+.w4-rank-eva { animation: w4-rank-eva 1350ms var(--ease) both; }
+@keyframes w4-rank-eva { 0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); } 30% { box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18); } 100% { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25); } }
+.w4-rank-eva-on { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25); }
+.w4-rank-eva-on .w2-seal { color: var(--accent); border-color: var(--accent); }
+.w4-rank-norma { animation: w4-rank-norma 1350ms var(--ease) both; }
+@keyframes w4-rank-norma { 0% { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25); } 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); } }
 /* ---- 矮窗口紧凑模式（≤760px 高）保留 ---- */
 @media (max-height: 760px) {
   .app .empty-state { gap: 8px; }
@@ -555,7 +594,10 @@ export default function App() {
   const [inspector, setInspector] = useState<InspectorView | null>(null);
   const [inspectorWide, setInspectorWide] = useState(false);
   /** EVA 切换仪式进行中的模式（1200ms 内防重入）；模式切换落行（C 档小字）。 */
-  const [ritual, setRitual] = useState<Mode | null>(null);
+  const [ritual, setRitual] = useState<{
+    dir: Mode;
+    startedAt: number;
+  } | null>(null);
   const [modeLine, setModeLine] = useState<string | null>(null);
   /** 系统偏好（亮/暗）：theme === "system" 时实时跟随。 */
   const [systemDark, setSystemDark] = useState(
@@ -805,17 +847,29 @@ export default function App() {
   }, []);
 
   // ---- Mode switch (single entry: sidebar roster + composer mode chip) ----
-  // 1200ms 仪式：标题栏球 spin 一整圈 + 涟漪 + 泛蓝光 + 对话落一行安静小字；
+  // W4 切换仪式（1350ms，分拍变身/呼气收尾；切换本身即时生效，仪式只是视觉过渡，
+  // 不挡输入）。分拍（to-EVA）：
+  //   0–250ms   收束：球 scale→0.94 + 变暗→0.80 + 眨眼遮盖；面纱从标题栏球处漫开，
+  //             顶线从左扫出，侧栏切入行开始点亮；
+  //   250–400ms 闪烁：球亮度 0.80→0.72→0.88 闪一次；核验环 200ms 起填充；
+  //   150–1350ms spin 整圈（球的第二拍，1200ms 转满，恰在收尾时落定）；
+  //   250–750ms 展开：球 scale→1、亮度→1，EVA 蓝眼睛与 1.7× tempo 落定
+  //             （呼吸 4.6s→2.7s、眨眼变快，肉眼可见地快起来）；
+  //   800–1150ms 核验环淡出；段位牌蓝环落定；稳态极淡蓝光晕 800ms 淡入常驻。
+  // 分拍（to-诺玛，呼气收尾，不是反向变身）：
+  //   0–400ms   呼气：球 scale→0.97、亮度→0.88，暖灰面纱漫开，顶线从右收回；
+  //   400–900ms 回暖：球 scale→1、亮度→1，呼吸放慢回 4.6s；
+  //   900–1350ms 落定：面纱收至 0，段位牌蓝环褪去，稳态蓝光晕淡出。
   // 仪式进行中再点直接忽略（防重入，不许动画排队堆积）。toast 已删——
-  // 仪式本身就是反馈，再弹 toast 是噪音。
+  // 仪式本身就是反馈，再弹 toast 是噪音。prefers-reduced-motion 时直接
+  // 切换、不要仪式。
   const handleModeChange = useCallback(
     (mode: Mode) => {
       if (ritualRef.current) return;
       const cur = settingsRef.current?.mode;
       if (!cur || cur === mode) return;
       patchSettings({ mode });
-      ritualRef.current = true;
-      setRitual(mode);
+      // 诚实文案（F 落地）：EVA 运行时也只说“工程开发”，不说“并行中”。
       setModeLine(
         mode === "eva" ? "已切换到 EVA · 工程开发" : "已切回诺玛",
       );
@@ -824,11 +878,18 @@ export default function App() {
         () => setModeLine(null),
         6000,
       );
+      if (
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        return;
+      }
+      ritualRef.current = true;
+      setRitual({ dir: mode, startedAt: performance.now() });
       if (ritualTimer.current) window.clearTimeout(ritualTimer.current);
       ritualTimer.current = window.setTimeout(() => {
         ritualRef.current = false;
         setRitual(null);
-      }, 1200);
+      }, 1350);
     },
     [patchSettings],
   );
@@ -1813,7 +1874,24 @@ export default function App() {
       <style>{S7_CSS}</style>
       <style>{AUDIT_CSS}</style>
       {boot && settings.boot_animation && <Boot onDone={() => setBoot(false)} />}
-      {ritual && <div className="w2-ritual-glow" aria-hidden="true" />}
+      {/* W4 仪式界面层：面纱（漫开再收住）+ 顶线（扫入/收回），均不挡输入；
+          稳态光晕常驻渲染，EVA 时 800ms 淡入、切回时淡出。 */}
+      {ritual && (
+        <div
+          className={`w4-veil ${ritual.dir === "eva" ? "w4-veil-eva" : "w4-veil-norma"}`}
+          aria-hidden="true"
+        />
+      )}
+      {ritual && (
+        <div
+          className={`w4-sweep ${ritual.dir === "eva" ? "w4-sweep-eva" : "w4-sweep-norma"}`}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={`w4-steady-halo ${evaMode ? "on" : ""}`}
+        aria-hidden="true"
+      />
 
       <Sidebar
         tasks={tasks}
@@ -1833,17 +1911,21 @@ export default function App() {
         running={running}
         markState={markState}
         drawer={drawer}
+        ritual={ritual}
       />
 
       <main className="main">
         <header className="main-head">
-          <span className={ritual ? "w2-ritual-spin" : undefined}>
+          <span
+            className={`w4-wrap ${ritual ? (ritual.dir === "eva" ? "w4-wrap-eva" : "w4-wrap-norma") : ""}`}
+          >
             <Mark
               size={36}
               eva={settings.mode === "eva"}
               state={markState}
               gaze={gaze}
               fast={settings.mode === "eva"}
+              ritual={ritual}
             />
           </span>
           <div className="main-head-title">
@@ -1898,7 +1980,7 @@ export default function App() {
 
         {showEmpty ? (
           <div className="empty-state">
-            <Mark size={100} eva={settings.mode === "eva"} state="idle" gaze={gaze} fast={settings.mode === "eva"} />
+            <Mark size={100} eva={settings.mode === "eva"} state="idle" gaze={gaze} fast={settings.mode === "eva"} ritual={ritual} />
             <div className="empty-greeting">{greeting}</div>
             <div className="empty-identity">
               {displayName} · S2017-0117 · 血统评级 S
@@ -2053,6 +2135,7 @@ export default function App() {
                     state={m.streaming ? markState : "idle"}
                     gaze={gaze}
                     fast={settings.mode === "eva"}
+                    ritual={ritual}
                   />
                   <div className="msg-body">
                     {m.text}

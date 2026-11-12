@@ -247,6 +247,10 @@ export interface BallPose {
   bodyRotate: number;
   /** 外层均匀缩放脉冲（入场/完成 +2%，receiving -1.5%）。 */
   pulse: number;
+  /** 切换仪式包络：外层均匀缩放乘数（收束 0.94 / 呼气 0.97，落定回 1）。 */
+  ritualScale: number;
+  /** 切换仪式包络：亮度乘数（收束变暗 0.80 / 呼气 0.88，落定回 1）。 */
+  ritualDim: number;
   /** 自旋偏航角（弧度），眼睛转到背面按 cos ≤ 0.02 隐藏。 */
   yaw: number;
   ring: boolean;
@@ -282,6 +286,68 @@ export interface BallEngineOpts {
   size: number;
   /** 悬停注视目标（Mark 内部鼠标事件算出，-1..1）；null = 自主漫游。 */
   hoverGaze?: { x: number; y: number } | null;
+  /**
+   * 切换仪式（第 3 步第四波）：App 的 handleModeChange 统一派发，
+   * 所有 Mark 实例共用同一份（同一时刻、同一方向）。startedAt 是
+   * performance.now() 时戳，与引擎时钟同源；null = 无仪式。
+   */
+  ritual?: ModeRitual | null;
+}
+
+/** 切换仪式总时长（第 3 步第四波）：分拍 1350ms，见 ritualEnvelope。 */
+export const RITUAL_MS = 1350;
+/** 切换仪式方向：to-EVA（变身）/ to-诺玛（呼气收尾）。 */
+export type RitualDir = "eva" | "norma";
+export interface ModeRitual {
+  dir: RitualDir;
+  /** performance.now() 时戳，与引擎时钟同源。 */
+  startedAt: number;
+}
+
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
+/** 某拍内的进度 0–1（拍外钳制到 0/1）。 */
+const beat = (el: number, from: number, to: number): number =>
+  clamp01((el - from) / (to - from));
+
+/**
+ * 切换仪式包络（纯函数，第 3 步第四波分拍设计）：
+ * - to-EVA（变身）：0–250ms 收束（scale 1→0.94、亮度 1→0.80）→
+ *   250–400ms 闪烁一次（亮度 0.80→0.72→0.88）→ 250–750ms 展开
+ *   （scale→1、亮度→1）；核验环 200–800ms 填充 0→1、800–1150ms 淡出。
+ *   spin 整圈是第二拍，由仪式 effect 在 startedAt+150ms 起转、1200ms
+ *   转满，恰在 1350ms 收尾时落定。
+ * - to-诺玛（呼气收尾）：0–400ms 呼气（scale 1→0.97、亮度 1→0.88）→
+ *   400–900ms 回暖（scale→1、亮度→1）；无 spin、无核验环闪光——
+ *   收尾不是反向变身。
+ * 超过 1350ms 按落定值（scale 1、亮度 1、环不透明度 0）处理。
+ */
+export function ritualEnvelope(
+  dir: RitualDir,
+  el: number,
+): { scale: number; dim: number; ringProgress: number; ringOpacity: number } {
+  if (dir === "eva") {
+    const scale =
+      el < 250
+        ? 1 - 0.06 * easeExp(beat(el, 0, 250))
+        : 0.94 + 0.06 * easeExp(beat(el, 250, 750));
+    let dim: number;
+    if (el < 250) dim = 1 - 0.2 * easeExp(beat(el, 0, 250));
+    else if (el < 400)
+      dim = 0.8 - 0.08 * Math.sin(Math.PI * beat(el, 250, 400));
+    else dim = 0.8 + 0.2 * easeExp(beat(el, 400, 750));
+    const ringProgress = beat(el, 200, 800);
+    const ringOpacity = el < 800 ? 1 : 1 - beat(el, 800, 1150);
+    return { scale, dim, ringProgress, ringOpacity };
+  }
+  const scale =
+    el < 400
+      ? 1 - 0.03 * easeExp(beat(el, 0, 400))
+      : 0.97 + 0.03 * easeExp(beat(el, 400, 900));
+  const dim =
+    el < 400
+      ? 1 - 0.12 * easeExp(beat(el, 0, 400))
+      : 0.88 + 0.12 * easeExp(beat(el, 400, 900));
+  return { scale, dim, ringProgress: 0, ringOpacity: 0 };
 }
 
 /**
@@ -406,6 +472,8 @@ function initialPose(expr: Expression, tempo: number, evaOrFast: boolean): BallP
     dyR: 0,
     bodyRotate: expr.bodyRotate,
     pulse: 0,
+    ritualScale: 1,
+    ritualDim: 1,
     yaw: 0,
     ring: expr.ring,
     shake: expr.shake,
@@ -424,7 +492,7 @@ function initialPose(expr: Expression, tempo: number, evaOrFast: boolean): BallP
 }
 
 export function useBallEngine(opts: BallEngineOpts): BallPose {
-  const { state, eva, fast, gaze, size, hoverGaze = null } = opts;
+  const { state, eva, fast, gaze, size, hoverGaze = null, ritual = null } = opts;
   const tempo = eva || fast ? 1.7 : 1;
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -456,6 +524,8 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
     blink: null as Blink | null,
     slide: null as Slide | null,
     spin: null as Spin | null,
+    /** 进行中的切换仪式（App 的 handleModeChange 派发，见仪式 effect）。 */
+    ritual: null as ModeRitual | null,
     pulseStart: 0,
     pulseAmp: 0,
     pulseDur: 0,
@@ -607,6 +677,29 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
       p.verifyDim = false;
       p.verifyPulse = false;
     }
+    // 切换仪式（第四波）：分拍包络覆盖球的缩放/亮度；to-EVA 时核验环闪一次
+    //（200–800ms 填充、800–1150ms 淡出，仅 ≥36px 的球；小球只做缩放/变暗，
+    // 不抢戏）。超时按落定值处理（scale 1、亮度 1、环不透明度 0）。
+    const rt = e.ritual;
+    if (rt) {
+      const el = now - rt.startedAt;
+      if (el >= 0 && el <= RITUAL_MS) {
+        const env = ritualEnvelope(rt.dir, el);
+        p.ritualScale = env.scale;
+        p.ritualDim = env.dim;
+        if (
+          rt.dir === "eva" &&
+          sizeRef.current >= 36 &&
+          env.ringOpacity > 0
+        ) {
+          p.verifyVisible = true;
+          p.verifyProgress = env.ringProgress;
+          p.verifyOpacity = env.ringOpacity;
+          p.verifyDim = false;
+          p.verifyPulse = false;
+        }
+      }
+    }
     return p;
   };
 
@@ -658,20 +751,25 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
     }
 
     // 自旋：目标 0→2π 线性爬升 1200ms，临界阻尼弹簧追赶（解析速度，无微分噪声）
+    // 仪式第二拍的 spin 带 150ms 延迟起转：还没到开始时间时只等，不积分、不跳变。
     if (e.spin) {
       const el = now - e.spin.start;
-      const progress = Math.min(1, el / 1200);
-      const target = e.spin.turns * 2 * Math.PI * progress;
-      const spring = tempoRef.current > 1 ? SPRING_EVA : SPRING_NORMA;
-      const [y, v] = springStep(e.yaw, e.yawV, target, spring.k, spring.c, dt);
-      e.yaw = y;
-      e.yawV = v;
-      if (progress >= 1 && Math.abs(e.yaw - target) < 0.01 && Math.abs(v) < 0.05) {
-        e.yaw = e.yaw % (2 * Math.PI);
-        e.yawV = 0;
-        e.spin = null;
-      } else {
+      if (el < 0) {
         moving = true;
+      } else {
+        const progress = Math.min(1, el / 1200);
+        const target = e.spin.turns * 2 * Math.PI * progress;
+        const spring = tempoRef.current > 1 ? SPRING_EVA : SPRING_NORMA;
+        const [y, v] = springStep(e.yaw, e.yawV, target, spring.k, spring.c, dt);
+        e.yaw = y;
+        e.yawV = v;
+        if (progress >= 1 && Math.abs(e.yaw - target) < 0.01 && Math.abs(v) < 0.05) {
+          e.yaw = e.yaw % (2 * Math.PI);
+          e.yawV = 0;
+          e.spin = null;
+        } else {
+          moving = true;
+        }
       }
     }
 
@@ -710,6 +808,8 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
     ) {
       moving = true;
     }
+    // 切换仪式进行中保持 ticker 跑（包络在 compose 里按时间算；超时即停）
+    if (e.ritual && now - e.ritual.startedAt <= RITUAL_MS) moving = true;
     return moving;
   };
 
@@ -1080,6 +1180,27 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
+  // ---- 切换仪式（第 3 步第四波）：App 的 handleModeChange 统一派发 ----
+  // 仪式是视觉过渡，不挡输入：第一拍球收束+变暗+眨眼遮盖（t=0 起）；
+  // 第二拍 spin 整圈在 startedAt+150ms 起转、1200ms 转满，恰在 1350ms
+  // 收尾时落定；核验环闪光与缩放/亮度包络由 compose() 按 ritualEnvelope 算。
+  // to-诺玛只有呼气收尾，不起 spin（收尾不是反向变身）。
+  useEffect(() => {
+    const e = eng.current;
+    if (!ritual || reducedMotion) {
+      e.ritual = null;
+      return;
+    }
+    e.ritual = ritual;
+    // 第一拍：眨眼遮盖（新身份的快/慢眨眼时刻表，见 personaBlinkCfg）
+    startBlink("both");
+    if (ritual.dir === "eva" && size >= 36) {
+      e.spin = { start: performance.now() + 150, turns: 1 };
+    }
+    ensureTicking();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ritual]);
+
   // ---- EVA 切换 spin：eva false→true 时转一整圈（1200ms） ----
   useEffect(() => {
     const e = eng.current;
@@ -1088,7 +1209,9 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
       e.prevEva = eva;
       // 只在 ≥36px 的球上做 spin（顶栏 36 / 空态 84 / 侧栏 40），
       // 28px 消息内小球与 24px toast 只换色，不重复做仪式
-      if (eva && !wasEva && size >= 36) startSpin();
+      // 仪式在跑时 spin 由仪式 effect 定时起转，这里不重复起转
+      //（否则同一圈会被两个起点各转一次）。
+      if (eva && !wasEva && size >= 36 && !ritual) startSpin();
     }
     // tempo 变化立即刷新呼吸周期与呼吸波形（ticker 停表时 pose 不会自动更新）
     setPose((p) => ({
@@ -1097,7 +1220,7 @@ export function useBallEngine(opts: BallEngineOpts): BallPose {
       breatheAnim: eva || fast ? "mark-breathe-eva" : "mark-breathe-norma",
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eva, fast, size]);
+  }, [eva, fast, size, ritual]);
 
   // ---- 悬停注视（第 3 步第二波 §5）：悬停在球上时它看向光标；离开后
   // Mark 延迟 1s 才清掉 hover，引擎随即恢复自主漫游。 ----

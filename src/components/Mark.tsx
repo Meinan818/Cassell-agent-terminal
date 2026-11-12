@@ -9,6 +9,7 @@ import {
   eyeBoost,
   useBallEngine,
   useTourState,
+  type ModeRitual,
 } from "./mark/useBallEngine";
 import type { BallState } from "./mark/expressions";
 import "./mark/mark.css";
@@ -25,6 +26,11 @@ interface MarkProps {
   gaze?: number;
   /** EVA tempo: faster blinking / motion. */
   fast?: boolean;
+  /**
+   * 切换仪式（第 3 步第四波）：App 的 handleModeChange 统一派发，所有球
+   * 共用同一份；引擎按 ritualEnvelope 算分拍包络（收束/闪烁/展开/呼气）。
+   */
+  ritual?: ModeRitual | null;
 }
 
 /**
@@ -49,6 +55,7 @@ export default function Mark({
   state = "idle",
   gaze = 0,
   fast = false,
+  ritual = null,
 }: MarkProps) {
   // 巡演模式：?ball=tour 固定顺序循环 14 态；?ball=<state> 单状态锁定。
   const tourState = useTourState(state);
@@ -83,6 +90,7 @@ export default function Mark({
     gaze,
     size,
     hoverGaze: hover,
+    ritual,
   });
   const theme = useAppTheme();
   const palette = paletteFor(eva ? "eva" : "norma", theme);
@@ -173,8 +181,10 @@ export default function Mark({
         height: size,
         position: "relative",
         flexShrink: 0,
-        transform: `scale(${1 + pose.pulse})`,
-        filter: `brightness(${pose.dim})`,
+        // 仪式包络（pose.ritualScale / pose.ritualDim）乘在入场脉冲之外：
+        // 收束 0.94 / 呼气 0.97，落定回 1；只动 transform / filter。
+        transform: `scale(${(1 + pose.pulse) * pose.ritualScale})`,
+        filter: `brightness(${pose.dim * pose.ritualDim})`,
       }}
     >
       {/* 权限核验环：细、淡、慢——不抢球本身的戏 */}
