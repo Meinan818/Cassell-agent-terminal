@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Mark from "./Mark";
+import { SEAL_TARGETS } from "./sealTargets";
 import { APP_VERSION } from "../version";
 
 /**
@@ -248,8 +249,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   // Particle field: the seal IS the particles — a true 3D particle crest.
   // GPT-6 Astra 式：数千白色光点从深空汇聚成一个有厚度、有纵深的
   // 3D 粒子模型（不是平面粒子拼图）。校徽按真校徽照片采样布点；
-  // 每个粒子带 z 轴深度：前脸 / 后脸 / 侧壁三层构成 0.55R 厚的
-  // 立体校徽；成型后绕 Y 轴缓慢摆动（±17°）+ 透视投影，厚度与
+  // 每个粒子带 z 轴深度：前脸 / 后脸 / 侧壁三层构成 0.65R 厚的
+  // 立体校徽；成型后绕 Y 轴缓慢摆动（±22°）+ 透视投影，厚度与
   // 视差一眼可见；背景是深空星野（远近星点带视差漂移）。全程只用
   // 白色粒子，照片校徽 <img> 已彻底去掉。
   useEffect(() => {
@@ -266,7 +267,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     const cx = w / 2;
     const cy = h / 2 - 30 * S;
     const R = Math.min(cssW, cssH) * 0.21 * S; // 校徽半径（设备 px）
-    const DEPTH = R * 0.55; // 校徽立体厚度（前脸到后脸）
+    const DEPTH = R * 0.65; // 校徽立体厚度（前脸到后脸）
     const FOCAL = Math.min(w, h) * 1.05; // 透视焦距：越短，纵深越夸张
 
     // ---- 柔光点精灵（预渲染，drawImage 比逐点 arc 快得多）----
@@ -296,57 +297,36 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     // ---- 背景星野：450 颗星，布在三维大空间里（z -1400..+250），
     // 远星小而暗、近星大而亮，随镜头缓慢视差漂移。----
     type Star = { x: number; y: number; z: number; size: number; base: number; tw: number };
-    const stars: Star[] = Array.from({ length: 450 }, () => ({
+    const stars: Star[] = Array.from({ length: 1000 }, () => ({
       x: (Math.random() * 2 - 1) * cssW * 0.55 * S,
       y: (Math.random() * 2 - 1) * cssH * 0.55 * S,
       z: -1400 * S + Math.random() * 1650 * S,
-      size: (0.5 + Math.random() * 1.1) * S,
-      base: 0.1 + Math.random() * 0.38,
+      size: (0.6 + Math.random() * 1.4) * S,
+      base: 0.2 + Math.random() * 0.55,
       tw: Math.random() * Math.PI * 2,
     }));
 
-    // ---- 校徽采样：亮像素 = 校徽，暗像素 = 背景 ----
+    // ---- 校徽布点：构建期由真校徽照片采样得到（sealTargets.ts），
+    // x/y 已归一化到 [-1, 1]，直接按 R 缩放。运行时不再加载图片，
+    // 没有竞态、没有兜底双环。----
     type Target = { x: number; y: number; z: number; lum: number };
-    const N_CREST = 7500;
+    const N_CREST = 6500;
     const targets: Target[] = [];
-    const buildTargets = (img: HTMLImageElement | null) => {
-      if (img) {
-        const sw = 300;
-        const sh = Math.max(1, Math.round((300 * img.naturalHeight) / img.naturalWidth));
-        const off = document.createElement("canvas");
-        off.width = sw;
-        off.height = sh;
-        const octx = off.getContext("2d");
-        if (octx) {
-          octx.drawImage(img, 0, 0, sw, sh);
-          const data = octx.getImageData(0, 0, sw, sh).data;
-          const lumAt = (x: number, y: number) => {
-            const i = (y * sw + x) * 4;
-            return 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
-          };
-          const scale = (2 * R) / Math.max(sw, sh);
-          let guard = 0;
-          while (targets.length < N_CREST && guard++ < N_CREST * 60) {
-            const sx = (Math.random() * sw) | 0;
-            const sy = (Math.random() * sh) | 0;
-            const lum = lumAt(sx, sy);
-            if (lum < 55) continue;
-            if (Math.random() > (lum - 55) / 200 + 0.15) continue;
-            const x = (sx - sw / 2) * scale;
-            const y = (sy - sh / 2) * scale;
-            // 立体厚度：前脸 40% / 后脸 25% / 侧壁体 35%，亮处微微凸起。
-            const roll = Math.random();
-            let z: number;
-            if (roll < 0.4) z = DEPTH / 2 + (Math.random() - 0.5) * 10 * S;
-            else if (roll < 0.65) z = -DEPTH / 2 + (Math.random() - 0.5) * 10 * S;
-            else z = (Math.random() * 2 - 1) * (DEPTH / 2);
-            z += (lum / 255) * 10 * S;
-            targets.push({ x, y, z, lum });
-          }
-        }
+    const buildTargets = () => {
+      for (const sp of SEAL_TARGETS.slice(0, N_CREST)) {
+        const x = sp.x * R;
+        const y = sp.y * R;
+        // 立体厚度：前脸 40% / 后脸 25% / 侧壁体 35%，亮处微微凸起。
+        const roll = Math.random();
+        let z: number;
+        if (roll < 0.4) z = DEPTH / 2 + (Math.random() - 0.5) * 10 * S;
+        else if (roll < 0.65) z = -DEPTH / 2 + (Math.random() - 0.5) * 10 * S;
+        else z = (Math.random() * 2 - 1) * (DEPTH / 2);
+        z += (sp.lum / 255) * 10 * S;
+        targets.push({ x, y, z, lum: sp.lum });
       }
       if (targets.length < 1200) {
-        // 兜底：双环 + 辐条（图片万一读不到也不空场）。
+        // 兜底：双环 + 辐条（布点表万一为空也不空场）。
         targets.length = 0;
         for (let i = 0; i < N_CREST; i++) {
           const ring = Math.random();
@@ -376,7 +356,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         const ph = Math.acos(Math.random() * 2 - 1);
         const rr = R * (1.4 + Math.random() * 2.4);
         const sizeRoll = Math.random();
-        const hero = sizeRoll > 0.95;
+        const hero = sizeRoll > 0.97;
         return {
           tx: tg.x, ty: tg.y, tz: tg.z,
           sx: Math.sin(ph) * Math.cos(th) * rr,
@@ -385,8 +365,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
           swirl: (Math.random() * 2 - 1) * Math.PI * 1.2,
           delay: Math.random() * 2.2,
           dur: 1.6 + Math.random() * 1.0,
-          size: (hero ? 5.5 + Math.random() * 4.5 : sizeRoll > 0.8 ? 3.2 + Math.random() * 2.3 : 1.8 + Math.random() * 1.4) * S,
-          base: hero ? 0.95 : 0.4 + Math.random() * 0.5,
+          size: (hero ? 5 + Math.random() * 3.5 : sizeRoll > 0.8 ? 2.8 + Math.random() * 2 : 1.5 + Math.random() * 1.3) * S,
+          base: hero ? 0.8 : 0.3 + Math.random() * 0.35,
           tw: Math.random() * Math.PI * 2,
           hero,
         };
@@ -407,8 +387,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       const fadeIn = Math.min(1, t / 0.5);
       // 成型度：0 = 还在汇聚，1 = 校徽已成型；旋转只在成型后介入。
       const formed = smooth(4.6, 5.8, t);
-      const rotY = 0.3 * Math.sin(t * 0.45) * formed; // ±17°，约 14s 一摆
-      const rotX = 0.1 * Math.sin(t * 0.36 + 1.3) * formed;
+      const rotY = 0.38 * Math.sin(t * 0.5) * formed; // ±22°，约 12.5s 一摆
+      const rotX = 0.12 * Math.sin(t * 0.4 + 1.3) * formed;
       const camY = 0.04 * Math.sin(t * 0.12); // 镜头微漂移，始终有
       const formK = smooth(2.2, 4.8, t); // 整体成型进度（核心光晕用）
       const pulse = Math.exp(-Math.pow((t - 4.8) / 0.4, 2)); // 锁定时一闪
@@ -422,10 +402,10 @@ export default function Boot({ onDone }: { onDone: () => void }) {
 
       // 核心光晕：随成型变亮，锁定时一闪，之后柔和呼吸。
       const glowR = R * 1.6;
-      const glowA = 0.1 + 0.08 * formK + 0.22 * pulse;
+      const glowA = 0.06 + 0.05 * formK + 0.15 * pulse;
       const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
       gg.addColorStop(0, `rgba(255,255,255,${glowA.toFixed(3)})`);
-      gg.addColorStop(0.5, `rgba(190,215,255,${(0.05 + 0.04 * formK).toFixed(3)})`);
+      gg.addColorStop(0.5, `rgba(190,215,255,${(0.03 + 0.03 * formK).toFixed(3)})`);
       gg.addColorStop(1, "rgba(255,255,255,0)");
       ctx.fillStyle = gg;
       ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
@@ -482,10 +462,10 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         const sz = Math.max(0.7, p.size * sc);
         ctx.globalAlpha = Math.min(1, a);
         ctx.drawImage(dot, px - sz / 2, py - sz / 2, sz, sz);
-        // 最亮的 5% 再叠一层大光晕（bloom）。
+        // 最亮的 3% 再叠一层大光晕（bloom）。
         if (p.hero && e > 0.6) {
           const hs = sz * 4;
-          ctx.globalAlpha = Math.min(0.22, a * 0.22);
+          ctx.globalAlpha = Math.min(0.15, a * 0.15);
           ctx.drawImage(dot, px - hs / 2, py - hs / 2, hs, hs);
         }
       }
@@ -494,24 +474,12 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       raf = requestAnimationFrame(draw);
     };
 
-    // 校徽图是本地 56KB，正常几十毫秒就绪；600ms 还没好就用兜底先播，
-    // 绝不等图。开始画的那一刻才是汇聚时钟的 t=0。
-    let started = false;
-    const begin = (img: HTMLImageElement | null) => {
-      if (started) return;
-      started = true;
-      buildTargets(img);
-      initParticles();
-      raf = requestAnimationFrame(draw);
-    };
-    const img = new Image();
-    img.onload = () => begin(img);
-    img.onerror = () => begin(null);
-    img.src = "/cassell-seal.jpg";
-    const fallbackTimer = window.setTimeout(() => begin(null), 600);
+    // 布点是构建期预计算的，同步就绪：直接建粒子、开画，没有异步等图。
+    buildTargets();
+    initParticles();
+    raf = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(raf);
-      window.clearTimeout(fallbackTimer);
     };
   }, [phase]);
 
