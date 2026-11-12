@@ -1,0 +1,39 @@
+[package]
+name = "cassell-agent-terminal"
+version = "0.1.6"
+description = "卡塞尔专员终端 — Cassell College specialist AI agent desktop terminal (Tauri 2 + React + Codex CLI engine)"
+authors = ["Meinan818"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "cassell_agent_terminal_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["process", "io-util", "rt-multi-thread", "macros", "sync", "time", "fs"] }
+# 直连模型服务商（OpenAI 兼容的 /v1/chat/completions），
+# 让应用自己就是 agent，不再依赖外部命令行工具。
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
