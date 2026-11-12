@@ -2105,6 +2105,15 @@ export default function App() {
     0,
   );
   const usageTotal = usageMessages.reduce((a, m) => a + (m.usage?.total ?? 0), 0);
+  // S9：工作流页要的本轮工具调用（从 kind:"tool" 的消息汇总；消息没有
+  // 时间戳，故每步耗时仍显示“未接入”，不现凑）。
+  const toolCallItems = messages
+    .filter((m) => m.kind === "tool")
+    .map((m) => {
+      const first = m.text.split("\n")[0] ?? "";
+      const args = first.match(/（(.*)）$/)?.[1] ?? "";
+      return { label: m.toolLabel ?? "工具", detail: args };
+    });
   const lastUserId =
     [...messages].reverse().find((m) => m.role === "user")?.id ?? null;
 
@@ -2583,6 +2592,13 @@ export default function App() {
           onToggleWide={() => setInspectorWide((w) => !w)}
           running={running}
           runningTaskTitle={activeTask?.title ?? null}
+          usageTotal={{
+            prompt: usagePrompt,
+            completion: usageCompletion,
+            total: usageTotal,
+            replies: usageMessages.length,
+          }}
+          toolCalls={toolCallItems}
           workdir={settings.workdir}
           review={review}
           reviewError={reviewError}

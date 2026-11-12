@@ -35,6 +35,15 @@ interface RightPanelProps {
   onToggleWide: () => void;
   running: boolean;
   runningTaskTitle: string | null;
+  /** 本对话累计用量（App 已算出；无用量数据时 replies 为 0）。 */
+  usageTotal?: {
+    prompt: number;
+    completion: number;
+    total: number;
+    replies: number;
+  } | null;
+  /** 本轮工具调用（App 从 kind:"tool" 的消息汇总；无分步耗时）。 */
+  toolCalls?: { label: string; detail: string }[];
   workdir: string;
   review: ReviewState | null;
   reviewError: string | null;
@@ -204,6 +213,8 @@ export default function RightPanel(props: RightPanelProps) {
     onToggleWide,
     running,
     runningTaskTitle,
+    usageTotal,
+    toolCalls,
     workdir,
     review,
     reviewError,
@@ -1026,7 +1037,10 @@ export default function RightPanel(props: RightPanelProps) {
                   { k: "状态", v: running ? "进行中" : "空闲" },
                   {
                     k: "工具调用",
-                    v: "未接入——App 持有工具调用消息，未传给本面板（见缺 prop 清单）",
+                    v:
+                      toolCalls && toolCalls.length > 0
+                        ? `共 ${toolCalls.length} 次：${toolCalls.map((t) => t.label).join("、")}`
+                        : "本轮还没有工具调用",
                   },
                   {
                     k: "每步耗时",
@@ -1034,7 +1048,10 @@ export default function RightPanel(props: RightPanelProps) {
                   },
                   {
                     k: "累计用量",
-                    v: "未接入——App 已算出本对话累计 token，未传给本面板（见缺 prop 清单）",
+                    v:
+                      usageTotal && usageTotal.replies > 0
+                        ? `↑ ${usageTotal.prompt} · ↓ ${usageTotal.completion} · 共 ${usageTotal.total} tokens（${usageTotal.replies} 条回复）`
+                        : "还没有用量数据",
                   },
                 ].map((row) => (
                   <div
@@ -1046,6 +1063,25 @@ export default function RightPanel(props: RightPanelProps) {
                   </div>
                 ))}
               </div>
+              {toolCalls && toolCalls.length > 0 && (
+                <div
+                  style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}
+                >
+                  {toolCalls.map((t, i) => (
+                    <div key={i} style={{ fontSize: 12, lineHeight: 1.6 }}>
+                      <span style={{ fontFamily: "var(--mono)", color: "var(--text-2)" }}>
+                        {t.label}
+                      </span>
+                      {t.detail ? (
+                        <span style={{ color: "var(--text-3)" }}>
+                          {" "}
+                          （{t.detail.length > 120 ? `${t.detail.slice(0, 120)}…` : t.detail}）
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
