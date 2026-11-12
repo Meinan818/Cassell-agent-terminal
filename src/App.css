@@ -1,5 +1,7 @@
 /* 卡塞尔专员终端 — 设计系统 (S0 令牌地基)
- * 字体：Inter 打包（public/fonts/Inter.woff2，可变字重 100-900，latin 子集），回退栈保留；
+ * 字体：Inter（public/fonts/Inter.woff2，可变字重 100-900，latin 子集）+
+ * 思源黑体 Noto Sans SC（public/fonts/NotoSansSC.woff2，可变字重 100-900，全量 CJK），
+ * 离线打包不依赖系统字体；字体栈 Inter 在前管英文/数字、思源黑体管中文、系统字体只做兜底；
  * 颜色：:root 暗色默认 + html[data-theme='light'] 浅色覆盖，文档级；
  * 间距基数 4px（只用 4/8/12/16/24/32/48）；圆角分层 8/12/16/24；
  * 缓动：--ease-exp / --ease / --spring（--spring 只用于通知小点 +14% 超调）。
@@ -11,6 +13,16 @@
   font-weight: 100 900;
   font-display: swap;
   src: url("/fonts/Inter.woff2") format("woff2");
+}
+
+/* 思源黑体 Noto Sans SC：可变字重 100-900（全量 CJK 覆盖），与 Inter 互补——
+ * Inter 管英文/数字（无 CJK 字形），思源黑体管中文；离线打包，不依赖系统字体、不走 CDN。 */
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/NotoSansSC.woff2") format("woff2");
 }
 
 /* 主题揭示用的可动画半径（theme-switch-plan.md §3.2：羽化带 80px）。 */
@@ -29,8 +41,8 @@
   --r-sm: 8px;
   --r-input: 24px;
   --r-pill: 999px;
-  --font: "Inter", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-    "Noto Sans SC", sans-serif;
+  --font: "Inter", "Noto Sans SC", -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
   --serif: "Noto Serif SC", Georgia, serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   /* 暗色默认 */
@@ -158,6 +170,8 @@ html {
 body {
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   background: var(--bg);
   color: var(--text);
 }
@@ -495,14 +509,28 @@ select {
   overflow-wrap: anywhere;
 }
 
+/* 流式光标：GPT 式小圆点（不是竖条 ▍、不是方块）——跟在流式文字末尾，
+ * 8px 圆点 + 柔和呼吸/脉冲（透明度与缩放轻微起伏）。 */
 .stream-caret {
-  animation: caret-blink 0.9s steps(2) infinite;
-  color: var(--accent);
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 3px;
+  vertical-align: baseline;
+  animation: caret-pulse 1.2s ease-in-out infinite;
 }
 
-@keyframes caret-blink {
+@keyframes caret-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
   50% {
-    opacity: 0;
+    opacity: 0.45;
+    transform: scale(0.72);
   }
 }
 

@@ -2482,7 +2482,7 @@ export default function App() {
                   />
                   <div className="msg-body">
                     {m.text}
-                    {m.streaming && <span className="stream-caret">▍</span>}
+                    {m.streaming && <span className="stream-caret" />}
                     {m.usage && (
                       <div className="msg-usage">
                         ↑ {m.usage.prompt} · ↓ {m.usage.completion} · 共{" "}
