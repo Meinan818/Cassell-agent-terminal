@@ -12,9 +12,12 @@ import type {
 } from "./types";
 import {
   GREETING_TASKS,
+  THEME_KEY,
   greetingForHour,
+  resolveTheme,
   uid,
 } from "./types";
+import type { Theme } from "./types";
 import Boot from "./components/Boot";
 import Mark, { type MarkState } from "./components/Mark";
 import Sidebar from "./components/Sidebar";
@@ -106,6 +109,10 @@ export default function App() {
   const [gaze, setGaze] = useState(0);
   const [greetIdx, setGreetIdx] = useState(0);
   const [modeToast, setModeToast] = useState(false);
+  /** 系统偏好（亮/暗）：theme === "system" 时实时跟随。 */
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
   /** 未配 Key 时点发送的拦截提示（文字保留在输入框里）。 */
   const [gateNotice, setGateNotice] = useState<string | null>(null);
 
@@ -114,6 +121,10 @@ export default function App() {
   const runningRef = useRef(false);
   const markTimer = useRef<number | null>(null);
   const saveTimer = useRef<number | null>(null);
+  /** 主题切换：B 层收尾定时器 / 是否已做过首次静默应用 / 上次点击的按钮中心。 */
+  const themeTimer = useRef<number | null>(null);
+  const themeAppliedRef = useRef(false);
+  const themeOriginRef = useRef<{ x: number; y: number } | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const prevMode = useRef(false);
@@ -128,6 +139,105 @@ export default function App() {
   tasksRef.current = tasks;
   activeTaskIdRef.current = activeTaskId;
   runningRef.current = running;
+
+  // ---- Theme (S4): 文档级 html[data-theme]，两层过渡 ----
+  // 实时监听系统偏好：theme === "system" 时系统一切、应用跟着切。
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  const resolvedTheme = settings
+    ? resolveTheme(settings.theme, systemDark)
+    : "dark";
+
+  /**
+   * 把解析后的亮/暗主题写到 documentElement（CSS 令牌挂在 html[data-theme] 上）。
+   * 两层过渡（theme-switch-plan.md §3.2）：
+   *  A 层：View Transitions 羽化圆形揭示，700ms，--ease-exp，从 origin（主题按钮中心）扩散；
+   *  B 层：.theme-animating 全站颜色交叉淡化，450ms，--ease，700ms 后摘掉。
+   * 首次应用是静默的（首绘脚本已经定了正确的主题，不做动画、不发事件）。
+   */
+  const applyThemeVisual = useCallback(
+    (next: "light" | "dark", origin?: { x: number; y: number }) => {
+      const root = document.documentElement;
+      const current = root.dataset.theme;
+      const isSwitch = themeAppliedRef.current && current !== next;
+      if (!themeAppliedRef.current) {
+        // 首次：直接落位，不挂过渡、不发事件。
+        root.dataset.theme = next;
+        themeAppliedRef.current = true;
+        return;
+      }
+      if (!isSwitch) return;
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)")
+        .matches;
+      const setTheme = () => {
+        root.dataset.theme = next;
+      };
+      // B 层先行：全站颜色交叉淡化（无 View Transition 环境下这就是唯一过渡）。
+      root.classList.add("theme-animating");
+      if (themeTimer.current) window.clearTimeout(themeTimer.current);
+      themeTimer.current = window.setTimeout(
+        () => root.classList.remove("theme-animating"),
+        reduced ? 200 : 700,
+      );
+      // A 层：羽化圆形揭示（不支持或减少动效时只走 B 层）。
+      const startVT = (
+        document as Document & {
+          startViewTransition?: (cb: () => void) => void;
+        }
+      ).startViewTransition;
+      if (!reduced && typeof startVT === "function") {
+        const x = origin?.x ?? window.innerWidth / 2;
+        const y = origin?.y ?? window.innerHeight / 2;
+        const r =
+          Math.hypot(
+            Math.max(x, window.innerWidth - x),
+            Math.max(y, window.innerHeight - y),
+          ) + 64;
+        root.style.setProperty("--vt-x", `${x}px`);
+        root.style.setProperty("--vt-y", `${y}px`);
+        root.style.setProperty("--vt-r", `${r}px`);
+        startVT.call(document, setTheme);
+      } else {
+        setTheme();
+      }
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta)
+        meta.setAttribute("content", next === "light" ? "#f7f7f5" : "#141414");
+      // S4 集成点：主题切换完成时通知球眨一次眼（160ms，“眨了下眼适应光线”）。
+      // 本步不改 Mark.tsx；下一波由球的接线方监听此事件。
+      window.dispatchEvent(
+        new CustomEvent("theme-switched", { detail: { theme: next } }),
+      );
+    },
+    [],
+  );
+
+  // 偏好或系统偏好一变，就按解析后的主题应用（带两层过渡）。
+  useEffect(() => {
+    if (!settings) return;
+    try {
+      localStorage.setItem(THEME_KEY, settings.theme);
+    } catch {
+      // 首绘镜像写不进去不阻塞：Rust 设置文件仍是事实来源。
+    }
+    const origin = themeOriginRef.current;
+    themeOriginRef.current = null;
+    applyThemeVisual(resolvedTheme, origin ?? undefined);
+  }, [settings, resolvedTheme, applyThemeVisual]);
+
+  /** 顶栏主题按钮：浅色 → 深色 → 跟随系统 三态循环（手动选择即退出 system）。 */
+  const handleThemeToggle = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!settings) return;
+    themeOriginRef.current = { x: e.clientX, y: e.clientY };
+    const order: Theme[] = ["light", "dark", "system"];
+    const next = order[(order.indexOf(settings.theme) + 1) % order.length];
+    patchSettings({ theme: next });
+  };
 
   const activeTask = tasks.find((t) => t.id === activeTaskId) ?? null;
 
@@ -770,7 +880,7 @@ export default function App() {
 
   if (!settings) {
     return (
-      <div className="app theme-light">
+      <div className="app">
         <div className="boot">
           <div className="boot-welcome">正在启动…</div>
         </div>
@@ -786,7 +896,7 @@ export default function App() {
   const showEmpty = !activeTask || activeTask.messages.length === 0;
 
   return (
-    <div className={`app theme-${settings.theme}`}>
+    <div className="app">
       {boot && settings.boot_animation && <Boot onDone={() => setBoot(false)} />}
 
       <Sidebar
@@ -827,12 +937,14 @@ export default function App() {
           <button
             type="button"
             className="btn-ghost"
-            onClick={() =>
-              patchSettings({ theme: settings.theme === "light" ? "dark" : "light" })
-            }
+            onClick={handleThemeToggle}
             aria-label="切换主题"
           >
-            {settings.theme === "light" ? "☾ 深色" : "☀ 浅色"}
+            {settings.theme === "light"
+              ? "☾ 深色"
+              : settings.theme === "dark"
+                ? "◐ 跟随系统"
+                : "☀ 浅色"}
           </button>
         </header>
 

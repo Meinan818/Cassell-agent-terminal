@@ -3,7 +3,14 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type Mode = "norma" | "eva";
 export type Approval = "auto" | "read-only";
 export type Sandbox = "read-only" | "workspace-write" | "danger-full-access";
-export type Theme = "light" | "dark";
+export type Theme = "light" | "dark" | "system";
+/** 主题偏好在 localStorage 里的镜像 key（只供首绘脚本读，Rust 设置文件仍是唯一事实来源）。 */
+export const THEME_KEY = "cassell.theme";
+/** 把偏好解析成实际生效的亮/暗主题：system 跟随系统偏好。 */
+export function resolveTheme(theme: Theme, systemDark: boolean): "light" | "dark" {
+  if (theme === "system") return systemDark ? "dark" : "light";
+  return theme;
+}
 
 export interface ProviderConfig {
   id: string;
