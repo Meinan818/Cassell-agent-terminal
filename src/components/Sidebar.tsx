@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import type { Mode, Task } from "../types";
+import { useState } from "react";
+import type { Mode, Project, Task } from "../types";
 import Mark, { type MarkState } from "./Mark";
 
 interface SidebarProps {
@@ -7,6 +7,13 @@ interface SidebarProps {
   activeTaskId: string | null;
   onSelectTask: (id: string) => void;
   onNewTask: () => void;
+  /** P0-1：真项目列表——点即切换；名字 + 路径 + 任务数一行。 */
+  projects: Project[];
+  activeProjectId: string | null;
+  onSelectProject: (id: string) => void;
+  onNewProject: () => void;
+  /** 项目名可改（双击项目行重命名，默认名是文件夹名）。 */
+  onRenameProject: (id: string, name: string) => void;
   /** P2-1：任务行悬停重命名（双击标题也可）与删除（两步确认）。 */
   onRenameTask: (id: string, title: string) => void;
   onDeleteTask: (id: string) => void;
@@ -85,6 +92,11 @@ export default function Sidebar({
   activeTaskId,
   onSelectTask,
   onNewTask,
+  projects,
+  activeProjectId,
+  onSelectProject,
+  onNewProject,
+  onRenameProject,
   onRenameTask,
   onDeleteTask,
   onOpenDrawer,
@@ -97,31 +109,34 @@ export default function Sidebar({
   drawer,
   ritual = null,
 }: SidebarProps) {
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
-  const [projectsOpen, setProjectsOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  /** 项目行重命名（双击项目行；与任务重命名同一套交互）。 */
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState("");
 
-  const projects = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const t of tasks) {
-      if (t.archived) continue;
-      map.set(t.project, (map.get(t.project) ?? 0) + 1);
-    }
-    return [...map.entries()].sort((a, b) => b[1] - a[1]);
-  }, [tasks]);
+  /** P0-1：任务列表只显示当前项目的任务——切项目后列表跟着走。
+   * 没有项目时（全新用户还没打开过文件夹）列表为空，空态引导去新建项目。 */
+  const visible = tasks.filter(
+    (t) => !t.archived && (activeProjectId === null || t.project === activeProjectId),
+  );
 
-  const visible = tasks.filter((t) => {
-    if (t.archived) return false;
-    if (projectFilter && t.project !== projectFilter) return false;
-    return true;
-  });
+  /** 任务的 project 字段是项目 id，显示时解析成名字；旧数据里的
+   * “默认项目”这类名字在迁移前原样显示。 */
+  const projectNameOf = (projectId: string) =>
+    projects.find((p) => p.id === projectId)?.name ?? projectId;
 
   const saveRename = (t: Task) => {
     if (editingId !== t.id) return;
     if (editTitle.trim()) onRenameTask(t.id, editTitle);
     setEditingId(null);
+  };
+
+  const saveProjectRename = (p: Project) => {
+    if (editingProjectId !== p.id) return;
+    if (editProjectName.trim()) onRenameProject(p.id, editProjectName);
+    setEditingProjectId(null);
   };
 
   const roster: {
@@ -214,7 +229,75 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* ③ 最近：带状态标签；项目分组收进下方可折叠的一组 */}
+      {/* ③ 项目（P0-1 / 位-17）：独立一组，名册之下、最近之上，不再是
+          “最近”下面的过滤器。一个项目 = 一个文件夹，点即切换；
+          “+ 新建项目”放组顶部——最高频的项目操作，第一眼就能看到。 */}
+      <div className="side-section">
+        <div className="side-section-title">项目</div>
+        <button className="w2-side-action" onClick={onNewProject} type="button">
+          ＋ 新建项目
+          <span className="w2-kbd">选文件夹</span>
+        </button>
+        {projects.map((p) => {
+          const count = tasks.filter(
+            (t) => !t.archived && t.project === p.id,
+          ).length;
+          const isActive = p.id === activeProjectId;
+          return editingProjectId === p.id ? (
+            <input
+              key={p.id}
+              className="field-input w2-task-rename"
+              value={editProjectName}
+              autoFocus
+              onChange={(e) => setEditProjectName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveProjectRename(p);
+                else if (e.key === "Escape") setEditingProjectId(null);
+              }}
+              onBlur={() => saveProjectRename(p)}
+              aria-label="重命名项目"
+              autoComplete="off"
+            />
+          ) : (
+            <button
+              key={p.id}
+              type="button"
+              className={`side-project side-project-col ${isActive ? "active" : ""}`}
+              onClick={() => onSelectProject(p.id)}
+              onDoubleClick={() => {
+                setEditingProjectId(p.id);
+                setEditProjectName(p.name);
+              }}
+              aria-pressed={isActive}
+              title={p.path ? `${p.name}\n${p.path}\n双击重命名` : `${p.name}\n双击重命名`}
+            >
+              <span className="side-project-top">
+                <span className="side-project-name">{p.name}</span>
+                <span className="side-project-count">{count}</span>
+              </span>
+              <span className="side-project-path">
+                {p.path || "还没有选择文件夹"}
+              </span>
+            </button>
+          );
+        })}
+        {projects.length === 0 && (
+          <div className="side-empty">
+            还没有项目
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={onNewProject}
+              >
+                打开一个项目文件夹
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ④ 最近：只列当前项目的任务；切项目后这里跟着换。 */}
       <div className="side-section side-tasks">
         <div className="side-section-title">最近</div>
         {visible.map((t) => {
@@ -259,7 +342,7 @@ export default function Sidebar({
                     ) : null}
                   </span>
                   <span className="side-task-meta">
-                    {t.project} · {relTime(t.createdAt)}
+                    {projectNameOf(t.project)} · {relTime(t.createdAt)}
                   </span>
                 </button>
               )}
@@ -310,45 +393,16 @@ export default function Sidebar({
         })}
         {visible.length === 0 && (
           <div className="side-empty">
-            {tasks.length === 0 ? "还没有任务" : "没有匹配的任务"}
-          </div>
-        )}
-
-        <button
-          type="button"
-          className="w2-side-action"
-          onClick={() => setProjectsOpen(!projectsOpen)}
-          aria-expanded={projectsOpen}
-          style={{ marginTop: 8 }}
-        >
-          项目
-          <span className="w2-kbd">
-            {projects.length} 个 {projectsOpen ? "▾" : "▸"}
-          </span>
-        </button>
-        {projectsOpen && (
-          <div style={{ animation: "w2-fade 150ms var(--ease) both" }}>
-            {projects.map(([name, count]) => (
-              <button
-                key={name}
-                type="button"
-                className={`side-project ${projectFilter === name ? "active" : ""}`}
-                onClick={() =>
-                  setProjectFilter(projectFilter === name ? null : name)
-                }
-              >
-                <span className="side-project-name">{name}</span>
-                <span className="side-project-count">{count}</span>
-              </button>
-            ))}
-            {projects.length === 0 && (
-              <div className="side-empty">暂无项目</div>
-            )}
+            {tasks.length === 0
+              ? "还没有任务"
+              : activeProjectId === null
+                ? "先打开一个项目文件夹"
+                : "这个项目还没有任务"}
           </div>
         )}
       </div>
 
-      {/* ④ 段位牌：校徽小印 + 名字 + S 印章 + 等宽编号 + 状态；图标导航 */}
+      {/* ⑤ 段位牌：校徽小印 + 名字 + S 印章 + 等宽编号 + 状态；图标导航 */}
       <div className="side-bottom">
         <div
           className={`w2-rank ${

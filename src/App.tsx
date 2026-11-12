@@ -7,6 +7,7 @@ import type {
   CodexInfo,
   InspectorView,
   Mode,
+  Project,
   ReviewFile,
   ReviewState,
   Settings,
@@ -17,6 +18,7 @@ import {
   THEME_KEY,
   EFFORT_LABELS,
   MODE_LABELS,
+  folderName,
   greetingForHour,
   resolveTheme,
   uid,
@@ -38,6 +40,10 @@ import {
 import { getCommands, type SettingsNav } from "./components/commands";
 
 const TASKS_KEY = "cassell.tasks.v1";
+/** P0-1：项目列表与当前项目 id 的持久化——跟任务列表走同一套机制
+ *（localStorage，一样的 try/catch 兜底，不发明新办法）。 */
+const PROJECTS_KEY = "cassell.projects.v1";
+const ACTIVE_PROJECT_KEY = "cassell.active-project.v1";
 
 /**
  * Wave 2 (S5+S6) 样式增量。App.css 不在本波文件清单内，所以本波新增的
@@ -316,6 +322,13 @@ const AUDIT_CSS = `
 .app .w2-task-actions button.danger:hover { color: #dc2626; }
 .app .w2-task-rename { width: 100%; font-size: 13px; padding: 6px 10px; }
 @media (prefers-reduced-motion: reduce) { .app .s7-slash, .app .w2-jump, .app .w2-msg-actions { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+/* ---- P0-1：真项目——侧栏项目行两行式（名字 + 任务数 / 路径） ---- */
+.app .side-project-col { flex-direction: column; align-items: stretch; gap: 2px; }
+.app .side-project-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.app .side-project-top .side-project-name { min-width: 0; flex: 1; }
+.app .side-project-top .side-project-count { flex-shrink: 0; }
+.app .side-project-path { display: block; font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app .side-project.active .side-project-path { color: var(--text-2); }
 `;
 
 function loadTasks(): Task[] {
@@ -326,6 +339,29 @@ function loadTasks(): Task[] {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+/** 读已保存的项目列表（没有 = 全新用户，返回 []，不凭空编一个）。 */
+function loadProjects(): Project[] {
+  try {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Project[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (p) => p && typeof p.id === "string" && typeof p.name === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function loadActiveProjectId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_PROJECT_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -578,6 +614,11 @@ export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [boot, setBoot] = useState(true);
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
+  /** P0-1：真项目——列表 + 当前项目 id。持久化与任务列表同一套 localStorage 机制。 */
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects());
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(() =>
+    loadActiveProjectId(),
+  );
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
@@ -625,6 +666,9 @@ export default function App() {
   const settingsRef = useRef<Settings | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
   const runningRef = useRef(false);
+  /** handleSend 里要用最新的项目（新建任务时归属当前项目，见 P0-1）。 */
+  const projectsRef = useRef<Project[]>([]);
+  const activeProjectIdRef = useRef<string | null>(null);
   const markTimer = useRef<number | null>(null);
   const saveTimer = useRef<number | null>(null);
   /** 主题切换：B 层收尾定时器 / 是否已做过首次静默应用 / 上次点击的按钮中心。 */
@@ -651,6 +695,12 @@ export default function App() {
   tasksRef.current = tasks;
   activeTaskIdRef.current = activeTaskId;
   runningRef.current = running;
+  projectsRef.current = projects;
+  activeProjectIdRef.current = activeProjectId;
+
+  /** 当前项目（找不到时为 null——比如保存的 id 指向已删的项目）。 */
+  const activeProject =
+    projects.find((p) => p.id === activeProjectId) ?? null;
 
   // ---- Theme (S4): 文档级 html[data-theme]，两层过渡 ----
   // 实时监听系统偏好：theme === "system" 时系统一切、应用跟着切。
@@ -812,6 +862,27 @@ export default function App() {
     }
   }, [tasks]);
 
+  // ---- Persist projects locally（与任务同一套机制） ----
+  useEffect(() => {
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    } catch {
+      // 写不进去不阻塞：项目仍在内存里可用。
+    }
+  }, [projects]);
+
+  useEffect(() => {
+    try {
+      if (activeProjectId) {
+        localStorage.setItem(ACTIVE_PROJECT_KEY, activeProjectId);
+      } else {
+        localStorage.removeItem(ACTIVE_PROJECT_KEY);
+      }
+    } catch {
+      // 写不进去不阻塞。
+    }
+  }, [activeProjectId]);
+
   // ---- Persist settings (debounced) ----
   const patchSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((cur) => {
@@ -824,6 +895,67 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // ---- P0-1：项目首次落地（只跑一次，等设置加载完才跑） ----
+  // 旧版本没有项目概念：任务的 project 是写死的"默认项目"，工作区是全局
+  // settings.workdir。第一次升级时把旧东西收进一个真项目里，不丢任务：
+  //   - 还没有项目列表：按 settings.workdir 建一个项目（名字取文件夹名；
+  //     workdir 为空但有旧任务时，建一个 path 为空的"默认项目"收留它们）；
+  //     旧任务全部归属到这个项目；当前项目 = 它。
+  //   - 已有项目列表：当前 id 失效就回到第一个；把 project 字段指向
+  //     不存在项目的任务（旧数据残留）收进当前项目；workdir 同步成
+  //     当前项目的 path（用户上次可能在设置里改过全局 workdir）。
+  // 全新用户（没有 workdir、没有旧任务）不建项目——空态会引导他
+  // "打开一个项目文件夹"，而不是凭空给他一个假项目。
+  // 工作区切换的机制：settings.workdir 是"当前项目的工作区"的镜像。
+  // runTurn 按次传 workdir、审查/终端/文件页读 settings.workdir，
+  // 所以切项目只要用现有的 patchSettings 改 workdir，各处自动跟过去，
+  // 不需要改 Rust、不需要改引擎命令。
+  const projectSeededRef = useRef(false);
+  useEffect(() => {
+    if (!settings || projectSeededRef.current) return;
+    projectSeededRef.current = true;
+    const list = projectsRef.current;
+    let activeId = activeProjectIdRef.current;
+    if (list.length === 0) {
+      const legacyTasks = tasksRef.current;
+      if (settings.workdir || legacyTasks.length > 0) {
+        const seed: Project = {
+          id: uid(),
+          name: settings.workdir ? folderName(settings.workdir) : "默认项目",
+          path: settings.workdir,
+        };
+        setProjects([seed]);
+        setActiveProjectId(seed.id);
+        if (legacyTasks.length > 0) {
+          setTasks((prev) =>
+            prev.map((t) => (t.project === seed.id ? t : { ...t, project: seed.id })),
+          );
+        }
+      }
+      // 全新用户：不建项目，空态引导新建。
+    } else {
+      if (!list.some((p) => p.id === activeId)) {
+        activeId = list[0].id;
+        setActiveProjectId(activeId);
+      }
+      const active = list.find((p) => p.id === activeId);
+      if (active) {
+        if (tasksRef.current.some((t) => !list.some((p) => p.id === t.project))) {
+          setTasks((prev) =>
+            prev.map((t) =>
+              list.some((p) => p.id === t.project)
+                ? t
+                : { ...t, project: active.id },
+            ),
+          );
+        }
+        if (settings.workdir !== active.path) {
+          patchSettings({ workdir: active.path });
+        }
+      }
+    }
+  }, [settings, patchSettings]);
 
   // ---- S7：命令执行后的轻反馈 + 打开设置 modal（带左导航定位） ----
   const showNotice = useCallback((text: string) => {
@@ -1402,10 +1534,26 @@ export default function App() {
       let taskId = activeTaskIdRef.current;
       if (!taskId) {
         taskId = uid();
+        // P0-1：任务归属当前项目，不再写死"默认项目"。
+        // 还没有项目时（全新用户直接发了消息），就地建一个收留它的项目：
+        // 有工作区就用工作区文件夹名，没有就叫"默认项目"。
+        let projectId = activeProjectIdRef.current;
+        if (!projectId || !projectsRef.current.some((p) => p.id === projectId)) {
+          const fallback: Project = {
+            id: uid(),
+            name: settingsRef.current?.workdir
+              ? folderName(settingsRef.current.workdir)
+              : "默认项目",
+            path: settingsRef.current?.workdir ?? "",
+          };
+          projectId = fallback.id;
+          setProjects((prev) => [...prev, fallback]);
+          setActiveProjectId(fallback.id);
+        }
         const task: Task = {
           id: taskId,
           title: text.length > 24 ? `${text.slice(0, 24)}…` : text,
-          project: "默认项目",
+          project: projectId,
           messages: [],
           createdAt: Date.now(),
         };
@@ -1772,15 +1920,100 @@ export default function App() {
     }
   }, [patchSettings]);
 
+  // ---- P0-1：真项目——新建 / 切换 / 重命名 ----
+  // 切项目 = 换工作现场：settings.workdir 同步成新项目的 path（走现有的
+  // save_settings 落盘），审查/终端/文件/引擎都读它，全部自动跟过去；
+  // 任务列表跟着项目走：切到该项目最近的一个任务，没有就回到空态。
+  const handleSelectProject = useCallback(
+    (id: string) => {
+      if (id === activeProjectIdRef.current) return;
+      const p = projectsRef.current.find((x) => x.id === id);
+      if (!p) return;
+      setActiveProjectId(id);
+      patchSettings({ workdir: p.path });
+      const newest = tasksRef.current
+        .filter((t) => !t.archived && t.project === id)
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      setActiveTaskId(newest ? newest.id : null);
+    },
+    [patchSettings],
+  );
+
+  const handleNewProject = useCallback(async () => {
+    try {
+      const picked = await invoke<string | null>("pick_folder");
+      if (!picked) return; // 用户取消：什么都不做
+      // 同一个文件夹只建一个项目：已经存在就切过去，不建重名行
+      //（否则列表里会出现两个名字、路径都一样的项目，分不清）。
+      const existing = projectsRef.current.find((p) => p.path === picked);
+      if (existing) {
+        handleSelectProject(existing.id);
+        showNotice(`项目「${existing.name}」已存在，已切换过去。`);
+        return;
+      }
+      const project: Project = {
+        id: uid(),
+        name: folderName(picked),
+        path: picked,
+      };
+      setProjects((prev) => [...prev, project]);
+      setActiveProjectId(project.id);
+      patchSettings({ workdir: picked });
+      setActiveTaskId(null);
+      showNotice(`已新建项目「${project.name}」。`);
+    } catch {
+      showNotice("没能打开文件夹选择框。");
+    }
+  }, [patchSettings, showNotice, handleSelectProject]);
+
+  const handleRenameProject = useCallback((id: string, name: string) => {
+    const n = name.trim();
+    if (!n) return;
+    setProjects((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, name: n } : p)),
+    );
+  }, []);
+
   // 系统原生文件夹选择对话框
+  // P0-1：设置里的这一行现在是"当前项目的目录"（不再是全局唯一设置）。
+  // 选了文件夹 = 改当前项目的目录（settings.workdir 跟着同步）；
+  // 还没有项目时，选文件夹就地新建一个项目（名字取文件夹名）。
   const handlePickFolder = useCallback(async () => {
     try {
       const picked = await invoke<string | null>("pick_folder");
-      if (picked) patchSettings({ workdir: picked });
+      if (!picked) return; // 用户取消：保持原工作区不变
+      const cur = projectsRef.current.find(
+        (p) => p.id === activeProjectIdRef.current,
+      );
+      if (cur) {
+        setProjects((prev) =>
+          prev.map((p) => (p.id === cur.id ? { ...p, path: picked } : p)),
+        );
+        patchSettings({ workdir: picked });
+      } else {
+        // 还没有项目：先看这个文件夹是不是已经有个项目（可能是在
+        // 另一处建的），有就切过去，没有才新建。
+        const existing = projectsRef.current.find((p) => p.path === picked);
+        if (existing) {
+          setActiveProjectId(existing.id);
+          patchSettings({ workdir: picked });
+          showNotice(`项目「${existing.name}」已存在，已切换过去。`);
+          return;
+        }
+        const project: Project = {
+          id: uid(),
+          name: folderName(picked),
+          path: picked,
+        };
+        setProjects((prev) => [...prev, project]);
+        setActiveProjectId(project.id);
+        patchSettings({ workdir: picked });
+        showNotice(`已新建项目「${project.name}」。`);
+      }
     } catch {
       // 用户取消或打开失败：保持原工作区不变
     }
-  }, [patchSettings]);
+  }, [patchSettings, showNotice]);
 
   // 当前服务商一旦配好 Key，拦截提示自动消失
   useEffect(() => {
@@ -1851,6 +2084,10 @@ export default function App() {
         tasks,
         activeTaskId,
         inspectorView: inspector,
+        projects,
+        activeProjectId,
+        newProject: handleNewProject,
+        switchProject: handleSelectProject,
         newTask: handleNewTask,
         setMode: handleSwitchModeCmd,
         openSettings,
@@ -1898,6 +2135,11 @@ export default function App() {
         activeTaskId={activeTaskId}
         onSelectTask={setActiveTaskId}
         onNewTask={handleNewTask}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onSelectProject={handleSelectProject}
+        onNewProject={handleNewProject}
+        onRenameProject={handleRenameProject}
         onRenameTask={handleRenameTask}
         onDeleteTask={handleDeleteTask}
         onOpenDrawer={(which) => {
@@ -1999,6 +2241,25 @@ export default function App() {
                   onClick={() => setWizardOpen(true)}
                 >
                   连接模型服务商 →
+                </button>
+              </div>
+            )}
+            {/* P0-1：空态入口——新用户第一次打开、最需要它的时候。
+                一个项目就是电脑里的一个文件夹，点开即原生文件夹选择框，
+                选完即建成项目（名字默认文件夹名）；任务、审查、终端、
+                文件页都跟着这个项目走。 */}
+            {projects.length === 0 && (
+              <div className="setup-cta">
+                <div className="setup-cta-title">先打开一个项目文件夹</div>
+                <div className="setup-cta-text">
+                  一个项目就是电脑里的一个文件夹：诺玛只在这个文件夹里读写文件，任务、审查、终端都跟着它走。
+                </div>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleNewProject}
+                >
+                  打开一个项目文件夹
                 </button>
               </div>
             )}
@@ -2288,6 +2549,7 @@ export default function App() {
           testResult={testResult}
           onFetchModels={handleFetchModels}
           onPickFolder={handlePickFolder}
+          currentProjectName={activeProject?.name ?? null}
           initialNav={settingsNav}
           onModeChange={handleModeChange}
           onOpenWizard={() => {

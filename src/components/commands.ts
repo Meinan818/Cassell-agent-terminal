@@ -1,4 +1,4 @@
-import type { Effort, InspectorView, Mode, Task, Theme } from "../types";
+import type { Effort, InspectorView, Mode, Project, Task, Theme } from "../types";
 import { EFFORTS, EFFORT_LABELS } from "../types";
 
 /**
@@ -29,6 +29,11 @@ export interface CommandContext {
   tasks: Task[];
   activeTaskId: string | null;
   inspectorView: InspectorView | null;
+  /** P0-1：真项目——新建与切换都走这里。 */
+  projects: Project[];
+  activeProjectId: string | null;
+  newProject: () => void;
+  switchProject: (id: string) => void;
   newTask: () => void;
   setMode: (mode: Mode) => void;
   openSettings: (nav: SettingsNav) => void;
@@ -66,7 +71,8 @@ const THEME_LABELS: Record<Theme, string> = {
  *
  * 位置纪律（2026-11-13 用户定）：顺序按使用频率 + 流程排，分组体现层级，
  * 不要按字母表随手排——
- * - 分组顺序：任务（新建任务是最高频动作）→ 模式（切换人格是第二高频）
+ * - 分组顺序：任务（新建任务是最高频动作）→ 项目（切换项目 = 换工作现场，
+ *   先定“在哪干活”，再定“怎么干活”）→ 模式（切换人格是第二高频）
  *   → 设置（打开设置是第三高频，模型与强度都挂在设置下面）→ 审查
  *   （工作中的检查动作）→ 外观（主题偶尔换）→ 系统（档案库/帮助最少用）
  *   → 危险操作（批量接受并合并单独垫底，不跟导航命令混在一起）。
@@ -74,6 +80,8 @@ const THEME_LABELS: Record<Theme, string> = {
  *   最常用的房间（切换模型 / 打开审查），然后是跟随的动作（思考强度 /
  *   全部接受并合并），最后是收尾检查（查看状态与用量）。
  * - 模式组里“对方模式”排在前面：面板打开时，你最可能点的就是切过去。
+ * - 项目组里“新建项目…”排在最前（最高频的项目操作），再是逐个切换；
+ *   当前项目带“当前”标记，不重复列在切换里。
  * - 下架的命令：“压缩上下文”（P1-7：上下文配置要动 Rust，不在第 3 步
  *   scope 内；命令已下架，不要留占位，等接上引擎再上架）。
  */
@@ -144,6 +152,25 @@ function staticCommands(ctx: CommandContext): CommandItem[] {
       keywords: ["clear", "清空", "清除", "删除对话"],
       run: ctx.clearChat,
     },
+    // ---- 项目：先定“在哪干活”。新建在前（最高频的项目操作），再逐个切换。 ----
+    {
+      id: "new-project",
+      group: "项目",
+      title: "新建项目…",
+      hint: "打开文件夹自己选",
+      keywords: ["new project", "新建项目", "打开项目", "项目", "文件夹", "new-project"],
+      run: ctx.newProject,
+    },
+    ...ctx.projects.map(
+      (p): CommandItem => ({
+        id: `switch-project-${p.id}`,
+        group: "项目",
+        title: `切换到项目：${p.name}`,
+        hint: p.id === ctx.activeProjectId ? "当前" : p.path || "未选文件夹",
+        keywords: ["project", "切换项目", "项目", p.name, p.path],
+        run: () => ctx.switchProject(p.id),
+      }),
+    ),
     // ---- 模式：第二高频。对方模式在前。 ----
     ...modeItems,
     // ---- 设置：第三高频。先入口（打开设置，落在最常用的模型组），再切换模型，再思考强度。 ----
@@ -256,6 +283,12 @@ function staticCommands(ctx: CommandContext): CommandItem[] {
   return list;
 }
 
+/** 任务的 project 字段存的是项目 id，这里解析成名字显示；找不到时
+ * 原样显示（旧数据里的“默认项目”这类名字在迁移前就长这样）。 */
+function projectNameOf(ctx: CommandContext, projectId: string): string {
+  return ctx.projects.find((p) => p.id === projectId)?.name ?? projectId;
+}
+
 /** 动态命令：按标题模糊搜任务，回车跳转（§4.3“跳到任务…”）。
  * 覆盖标题 + 项目名 + 首条消息正文（P2-2：只搜标题找不到“上次讨论部署的那次对话”）。 */
 function taskCommands(ctx: CommandContext, query: string): CommandItem[] {
@@ -265,7 +298,7 @@ function taskCommands(ctx: CommandContext, query: string): CommandItem[] {
     .filter((t) => !t.archived)
     .filter((t) => {
       if (t.title.toLowerCase().includes(q)) return true;
-      if (t.project.toLowerCase().includes(q)) return true;
+      if (projectNameOf(ctx, t.project).toLowerCase().includes(q)) return true;
       const first = t.messages.find((m) => m.role === "user")?.text ?? "";
       return first.toLowerCase().includes(q);
     })
@@ -275,8 +308,8 @@ function taskCommands(ctx: CommandContext, query: string): CommandItem[] {
         id: `jump-task-${t.id}`,
         group: "跳到任务",
         title: t.title,
-        hint: t.project,
-        keywords: [t.title, t.project],
+        hint: projectNameOf(ctx, t.project),
+        keywords: [t.title, projectNameOf(ctx, t.project)],
         run: () => ctx.jumpToTask(t.id),
       }),
     );

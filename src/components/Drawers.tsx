@@ -115,6 +115,7 @@ export function SettingsModal({
   testResult,
   onFetchModels,
   onPickFolder,
+  currentProjectName = null,
   initialNav = "model",
   onModeChange,
   onOpenWizard,
@@ -130,6 +131,9 @@ export function SettingsModal({
   /** 从指定服务商拉模型列表（只看不切换时也拉得到）。 */
   onFetchModels: (providerId: string) => Promise<{ ok: boolean; detail: string }>;
   onPickFolder: () => void;
+  /** P0-1：当前项目的名字（没有项目时为 null）——工作区这一行
+   * 现在是“当前项目的目录”，文案要说明它属于当前项目。 */
+  currentProjectName?: string | null;
   /** 从哪组打开（默认落在最常用的“模型”组；Cmd-K“切换模型…”也进这一组）。 */
   initialNav?: SettingsNav;
   /** 模式切换走 App 的统一入口（P1-11：仪式 + 模式行，不要静默切换）。 */
@@ -303,8 +307,14 @@ export function SettingsModal({
                     编号与血统评级是学院档案，只读，不可改。
                   </p>
                 </div>
+                {/* P0-1：这一行不再是全局唯一设置——它是“当前项目的目录”。
+                    选文件夹 = 改当前项目的目录；还没有项目时，选文件夹
+                    就地新建一个项目。换项目请在侧栏“项目”组点一下。 */}
                 <div className="s7-group">
-                  <div className="drawer-section">工作区</div>
+                  <div className="drawer-section">
+                    当前项目的目录
+                    {currentProjectName ? ` · ${currentProjectName}` : ""}
+                  </div>
                   <div className="drawer-row">
                     <span className="drawer-note">
                       {settings.workdir || "还没有选择项目文件夹"}
@@ -314,7 +324,9 @@ export function SettingsModal({
                     </button>
                   </div>
                   <p className="drawer-note">
-                    诺玛只在这个目录里读写文件。审查队列按这里的 Git 状态生成。
+                    {currentProjectName
+                      ? `这是「${currentProjectName}」的目录：诺玛只在这个目录里读写文件，审查队列按这里的 Git 状态生成。换项目请在侧栏“项目”组切换。`
+                      : "还没有项目：选一个文件夹就会新建一个项目，诺玛只在那个目录里读写文件。"}
                   </p>
                 </div>
                 {/* 位-7：显示名放专员页最底部、不抢焦点（不 autoFocus）。 */}

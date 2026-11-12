@@ -89,6 +89,7 @@ export interface ChatMsg {
 export interface Task {
   id: string;
   title: string;
+  /** 归属的项目 id（指向 Project.id，不再是写死的“默认项目”字符串）。 */
   project: string;
   messages: ChatMsg[];
   createdAt: number;
@@ -106,6 +107,24 @@ export interface ReviewFile {
   additions: number;
   deletions: number;
   state?: "pending" | "approved" | "rejected";
+}
+
+/**
+ * 项目（P0-1）：一个项目 = 电脑里的一个文件夹。
+ * id 是本地唯一标识（uid）；name 默认取文件夹名、用户可改；
+ * path 是该项目的工作区目录——任务、审查、终端、文件页都跟着它走。
+ */
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
+}
+
+/** 取路径的最后一段作默认项目名（同时兼容 / 与 \ 分隔符；空路径返回空串）。 */
+export function folderName(path: string): string {
+  const clean = path.replace(/[/\\]+$/, "");
+  const last = clean.split(/[/\\]/).pop() ?? "";
+  return last || path;
 }
 
 export interface ReviewState {
