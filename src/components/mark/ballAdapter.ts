@@ -12,7 +12,7 @@ export type BallTheme = "light" | "dark";
 export interface BallPalette {
   /** 球体背景（线性渐变，顶部提亮在 0–15% 内收完，保证 5 点亮度极差 ≤40）。 */
   ballBackground: string;
-  /** 眼睛颜色（诺玛/EVA 均为白色，无高光）。 */
+  /** 眼睛颜色（诺玛深色为墨色、其余为白色，无高光）。 */
   eyeColor: string;
   /** 思考环带颜色（球本体色，低透明度，单色）。 */
   ringColor: string;
@@ -22,10 +22,13 @@ export interface BallPalette {
 
 /**
  * B4 压平渐变（实测数字见下方 luminance 校验）：
- * - 诺玛：#141414 纯墨 + 顶部极淡提亮 #1e1e1e（+10/255 ≈ +3.9pts，在 +8% 以内，
- *   无硬高光点）；亮暗主题同一套墨色。
+ * - 诺玛浅色：#141414 纯墨 + 顶部极淡提亮 #1e1e1e（+10/255 ≈ +3.9pts，在 +8% 以内，
+ *   无硬高光点）；浅底上墨球清晰。
+ * - 诺玛深色（Deline 4：随主题反色）：#f5f5f5 纯白 + 顶部提亮纯白 #ffffff
+ *   （亮度极差 10，在 ≤40 以内）；深底上白球清晰，眼睛同步反为墨色 #141414。
+ *   墨球贴近黑底看不见是 S1+S2+S3（9351873）留下的 bug：亮暗同一套墨色。
  * - EVA 浅色：#2563EB 基底 + 顶部提亮一档 #3b82f6；深色：#3b82f6 基底 +
- *   顶部提亮一档 #60a5fa。
+ *   顶部提亮一档 #60a5fa。EVA 不动：两套蓝色在两种底上都可见。
  * 渐变全部是 linear-gradient(180deg, lift 0%, base 15%, base 100%)——
  * 15% 处已回到基底色，所以沿垂直中心线采 5 点（10/30/50/70/90%）时
  * 只有第 1 点带一点提亮，极差 ≤40、相邻差 ≤15（见 sampleLuminance）。
@@ -49,16 +52,22 @@ export function paletteFor(mode: BallMode, theme: BallTheme): BallPalette {
       glow: "0 4px 12px rgba(0, 0, 0, 0.10)",
     };
   }
-  // 诺玛：亮暗主题同一套墨色；深色下用极淡白光晕代替阴影。
+  // 诺玛：随主题反色，保证对比度——深色白球黑眼，浅色墨球白眼。
+  if (theme === "dark") {
+    return {
+      ballBackground:
+        "linear-gradient(180deg, #ffffff 0%, #f5f5f5 15%, #f5f5f5 100%)",
+      eyeColor: "#141414",
+      ringColor: "rgba(245, 245, 245, 0.5)",
+      glow: "0 0 16px rgba(255, 255, 255, 0.10)",
+    };
+  }
   return {
     ballBackground:
       "linear-gradient(180deg, #1e1e1e 0%, #141414 15%, #141414 100%)",
     eyeColor: "#ffffff",
     ringColor: "rgba(20, 20, 20, 0.5)",
-    glow:
-      theme === "dark"
-        ? "0 0 16px rgba(255, 255, 255, 0.10)"
-        : "0 4px 12px rgba(0, 0, 0, 0.10)",
+    glow: "0 4px 12px rgba(0, 0, 0, 0.10)",
   };
 }
 
@@ -115,9 +124,9 @@ export const PALETTE_STOPS: Record<string, GradientStop[]> = {
     { color: "#141414", at: 100 },
   ],
   "norma-dark": [
-    { color: "#1e1e1e", at: 0 },
-    { color: "#141414", at: 15 },
-    { color: "#141414", at: 100 },
+    { color: "#ffffff", at: 0 },
+    { color: "#f5f5f5", at: 15 },
+    { color: "#f5f5f5", at: 100 },
   ],
   "eva-light": [
     { color: "#3b82f6", at: 0 },
