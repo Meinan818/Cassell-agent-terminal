@@ -5,18 +5,45 @@
  * 全程均匀缩放，永不压成椭圆。
  * B5：全部过渡走 Cubic(0.645, 0.045, 0.355, 1.0)，永不超调；
  * --spring 只留给通知小点，这里不用。
+ *
+ * 第 3 步第二波 §6：呼吸波形按人格分开（周期由 pose.breathePeriod 给，
+ * 波形由 keyframe 的百分比定；百分比 = 各段时长 / 周期）：
+ * - mark-breathe-norma：慢吸入 2s（0–43.5%）→ 停顿 0.6s（43.5–56.5%）
+ *   → 慢呼出 2s（56.5–100%），4.6s 周期，缓慢平稳的心跳。
+ * - mark-breathe-eva：吸入 1.2s（0–44.4%）→ 短停顿 0.3s（44.4–55.5%）
+ *   → 呼出 1.2s（55.5–100%），约 2.7s 周期；呼出末尾（约 92% 处）带一次
+ *   极轻的二次脉冲（scale 1.0015，像警觉的心跳漏一拍再补上）。
  */
 
-@keyframes mark-breathe-46 {
+@keyframes mark-breathe-norma {
   0%,
   100% {
     scale: 1;
   }
-  45% {
+  43.5% {
     scale: 1.005;
   }
-  55% {
+  56.5% {
     scale: 1.005;
+  }
+}
+
+@keyframes mark-breathe-eva {
+  0%,
+  100% {
+    scale: 1;
+  }
+  44.4% {
+    scale: 1.005;
+  }
+  55.5% {
+    scale: 1.005;
+  }
+  88% {
+    scale: 1;
+  }
+  92% {
+    scale: 1.0015;
   }
 }
 
@@ -47,11 +74,25 @@
   }
 }
 
+/* 权限核验环的 EVA 脉冲：填充时 1s 呼吸脉冲（不透明度 0.55↔1） */
+@keyframes mark-verify-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mark-ball {
     animation: none !important;
   }
   .mark-ring {
+    animation: none !important;
+  }
+  .mark-verify-ring {
     animation: none !important;
   }
 }

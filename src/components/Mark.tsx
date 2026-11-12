@@ -1,3 +1,4 @@
+import { useRef, useState } from "react";
 import { paletteFor, useAppTheme } from "./mark/ballAdapter";
 import {
   EYE_CENTER_Y,
@@ -51,12 +52,37 @@ export default function Mark({
 }: MarkProps) {
   // 巡演模式：?ball=tour 固定顺序循环 14 态；?ball=<state> 单状态锁定。
   const tourState = useTourState(state);
+  // 悬停注视（第 3 步第二波 §5）：悬停在球上时它看向光标；离开后 1s
+  // 回到自主漫游（延迟清掉 hover，引擎随即恢复漫游调度）。
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+  const clearHoverTimer = () => {
+    if (hoverTimer.current !== null) {
+      window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+    }
+  };
+  const onHoverMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    clearHoverTimer();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const nx = (e.clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
+    const ny = (e.clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
+    setHover({
+      x: Math.max(-1, Math.min(1, nx)),
+      y: Math.max(-1, Math.min(1, ny)),
+    });
+  };
+  const onHoverLeave = () => {
+    clearHoverTimer();
+    hoverTimer.current = window.setTimeout(() => setHover(null), 1000);
+  };
   const pose = useBallEngine({
     state: tourState,
     eva,
     fast,
     gaze,
     size,
+    hoverGaze: hover,
   });
   const theme = useAppTheme();
   const palette = paletteFor(eva ? "eva" : "norma", theme);
@@ -113,9 +139,11 @@ export default function Mark({
   const arcStyle = (proj: { x: number; scaleX: number; hidden: boolean }): React.CSSProperties => ({
     position: "absolute",
     left: R,
-    top: eyeTop + eyeH * 0.28,
+    // 笑弧：弧顶在眼顶 + (0.83 − smileArc) 眼高处，弧高 = smileArc × 眼高
+    //（smileArc 0.55 时与旧版固定值完全一致；弧度由 expressions.ts 的参数表定）
+    top: eyeTop + eyeH * (0.83 - pose.smileArc),
     width: eyeW,
-    height: eyeH * 0.55,
+    height: eyeH * pose.smileArc,
     borderTop: `${Math.max(2, size * 0.045)}px solid ${palette.eyeColor}`,
     borderLeft: "none",
     borderRight: "none",
@@ -127,12 +155,19 @@ export default function Mark({
 
   const ringSize = size * 0.07;
   const dotSize = Math.max(3, size * 0.04);
+  // 权限核验环（第 3 步第二波 §4）：1.5px 细线，半径 = 球半径 + 6px，
+  // 颜色走球本体色低透明度（palette.ringColor）；进度按 pose.verifyProgress。
+  const verifyR = R + 6;
+  const verifyC = 2 * Math.PI * verifyR;
 
   return (
     <div
       className="mark"
       role="img"
       aria-label={eva ? "EVA" : "诺玛"}
+      onMouseEnter={onHoverMove}
+      onMouseMove={onHoverMove}
+      onMouseLeave={onHoverLeave}
       style={{
         width: size,
         height: size,
@@ -142,6 +177,40 @@ export default function Mark({
         filter: `brightness(${pose.dim})`,
       }}
     >
+      {/* 权限核验环：细、淡、慢——不抢球本身的戏 */}
+      {pose.verifyVisible && (
+        <svg
+          className="mark-verify-ring"
+          aria-hidden
+          width={size + 12}
+          height={size + 12}
+          viewBox={`0 0 ${size + 12} ${size + 12}`}
+          style={{
+            position: "absolute",
+            left: -6,
+            top: -6,
+            opacity: pose.verifyOpacity,
+            animation:
+              pose.verifyPulse && !pose.reducedMotion
+                ? "mark-verify-pulse 1s ease-in-out infinite"
+                : "none",
+            pointerEvents: "none",
+          }}
+        >
+          <circle
+            cx={(size + 12) / 2}
+            cy={(size + 12) / 2}
+            r={verifyR}
+            fill="none"
+            stroke={palette.ringColor}
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeDasharray={verifyC}
+            strokeDashoffset={verifyC * (1 - pose.verifyProgress)}
+            transform={`rotate(-90 ${(size + 12) / 2} ${(size + 12) / 2})`}
+          />
+        </svg>
+      )}
       {/* 思考环带：单色细环，低倾角水平轨道缓慢环绕；退出时 0.5s 淡出回缩 */}
       <div
         className="mark-ring"
@@ -185,13 +254,14 @@ export default function Mark({
           // B6：日常注视只动眼睛，身体角度不动；倾身只在状态切换时作为
           // 整体旋转（pose.bodyRotate，上限 ±6°）。
           rotate: `${pose.bodyRotate}deg`,
-          // B8：待机均匀缩放 ±0.5%，4.6s 慢周期（CSS scale 属性，与
-          // transform 互不干扰；EVA tempo 下周期除以 1.7）。
+          // B8 + 第 3 步第二波 §6：呼吸波形按人格分开——诺玛
+          // mark-breathe-norma（2s 吸入→0.6s 停顿→2s 呼出），EVA
+          // mark-breathe-eva（1.2s→0.3s→1.2s + 呼出末尾二次脉冲）。
           animation: pose.reducedMotion
             ? "none"
             : pose.shake
-              ? `mark-breathe-46 ${pose.breathePeriod}s ease-in-out infinite, mark-shake 0.5s ease-in-out`
-              : `mark-breathe-46 ${pose.breathePeriod}s ease-in-out infinite`,
+              ? `${pose.breatheAnim} ${pose.breathePeriod}s ease-in-out infinite, mark-shake 0.5s ease-in-out`
+              : `${pose.breatheAnim} ${pose.breathePeriod}s ease-in-out infinite`,
           transition:
             "box-shadow 300ms cubic-bezier(0.645, 0.045, 0.355, 1.0)",
         }}
