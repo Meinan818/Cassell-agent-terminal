@@ -312,12 +312,20 @@ const AUDIT_CSS = `
 /* ---- 顶栏审查入口徽标（P1-14：有待审时变色） ---- */
 .app .w2-review-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-soft); color: var(--text-3); }
 .app .w2-review-badge.hot { background: var(--accent); color: #fff; }
-/* ---- P1-4：消息操作（悬停出现；出错卡片里重试是主按钮） ---- */
+/* ---- P1-4：消息操作（悬停出现；出错卡片里重试是主按钮） ----
+ * 绝对定位脱离文档流：旧写法 opacity:0 藏起来仍占约 24px 高，
+ * 在用户气泡里留一块死空白。锚点是 .msg-body；用户气泡下沿有
+ * 8px 内边距，按钮组“骑”在边线上 4px；助手消息则贴在正文下方。
+ * 按钮组总高约 15px（11px 字、行高 1.2、上下 1px 内边距），
+ * 塞进 .chat 的 16px 消息间距，不盖住下一条消息。
+ * 藏起时 pointer-events:none，避免看不见的按钮挡住下一条消息的点击。 */
 .app .msg { position: relative; }
-.app .w2-msg-actions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity 150ms var(--ease); }
-.app .msg:hover .w2-msg-actions, .app .w2-msg-actions:focus-within { opacity: 1; }
-.app .msg.user .w2-msg-actions { justify-content: flex-end; }
-.app .w2-msg-actions button { border: none; background: none; color: var(--text-3); font-size: 11px; padding: 3px 8px; border-radius: 6px; cursor: pointer; transition: background 100ms var(--ease), color 100ms var(--ease); }
+.app .msg-body { position: relative; }
+.app .w2-msg-actions { position: absolute; top: 100%; display: flex; gap: 2px; margin-top: 0; opacity: 0; pointer-events: none; transition: opacity 150ms var(--ease); z-index: 3; }
+.app .msg:hover .w2-msg-actions, .app .w2-msg-actions:focus-within { opacity: 1; pointer-events: auto; }
+.app .msg.user .w2-msg-actions { justify-content: flex-end; right: 0; top: calc(100% - 4px); }
+.app .msg.assistant .w2-msg-actions { left: 0; }
+.app .w2-msg-actions button { border: none; background: none; color: var(--text-3); font-size: 11px; line-height: 1.2; padding: 1px 7px; border-radius: 6px; cursor: pointer; transition: background 100ms var(--ease), color 100ms var(--ease); }
 .app .w2-msg-actions button:hover { background: var(--bg-hover); color: var(--text); }
 .app .w2-msg-actions button.danger:hover { color: #dc2626; }
 .app .w2-msg-edit { width: 100%; }
