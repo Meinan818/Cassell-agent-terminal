@@ -99,7 +99,7 @@ export default function TitleBar({
       data-tauri-drag-region="deep"
     >
       <style>{`
-        .w6-titlebar { display: flex; align-items: center; gap: 12px; height: 40px; flex-shrink: 0; padding: 0 0 0 12px; background: var(--bg-panel); border-bottom: 1px solid var(--border); user-select: none; -webkit-user-select: none; position: relative; z-index: 20; animation: w6-fade-in 300ms var(--ease) both; }
+        .w6-titlebar { display: flex; align-items: center; gap: 12px; height: 40px; flex-shrink: 0; padding: 0 0 0 12px; background: var(--bg-panel); user-select: none; -webkit-user-select: none; position: relative; z-index: 20; animation: w6-fade-in 300ms var(--ease) both; }
         @keyframes w6-fade-in { from { opacity: 0; } to { opacity: 1; } }
         .w6-tb-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
         .w6-tb-title { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; }

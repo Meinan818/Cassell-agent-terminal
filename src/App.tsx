@@ -59,7 +59,7 @@ const WAVE2_CSS = `
 .app .composer-slot { padding: 8px 24px 24px; }
 .app .msg-usage { font-family: var(--mono); }
 /* ---- L1 安静状态行：对话区顶部一行 12px 小字，无底无边框 ---- */
-.w2-l1 { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 12px; color: var(--text-3); padding: 8px 24px; background: none; border: none; border-bottom: 1px solid var(--border); transition: color 150ms var(--ease); }
+.w2-l1 { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 12px; color: var(--text-3); padding: 8px 24px; background: none; border: none; transition: color 150ms var(--ease); }
 .w2-l1:hover { color: var(--text-2); }
 .w2-l1 .w2-dot { margin-left: 0; }
 /* ---- 侧栏名册 ---- */
@@ -67,7 +67,6 @@ const WAVE2_CSS = `
 .w2-roster-row { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px 8px 12px; border-radius: 8px; transition: background 150ms var(--ease); }
 .w2-roster-row:hover { background: var(--bg-hover); }
 .w2-roster-row.w2-on { background: var(--accent-soft); }
-.w2-roster-row.w2-on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
 .w2-roster-name { font-size: 13px; font-weight: 600; line-height: 1.4; }
 .w2-roster-sub { font-size: 11px; color: var(--text-3); line-height: 1.4; }
 .w2-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-left: auto; }
@@ -84,16 +83,20 @@ const WAVE2_CSS = `
 .w2-side-action { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
 .w2-side-action:hover { background: var(--bg-hover); color: var(--text); }
 .w2-kbd { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); }
-.w2-search-input { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); color: var(--text); padding: 8px 12px; outline: none; font-size: 13px; animation: w2-fade 150ms var(--ease) both; }
-.w2-search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.w2-search-input { width: 100%; border-radius: 8px; background: var(--bg-panel); color: var(--text); padding: 8px 12px; outline: none; font-size: 13px; animation: w2-fade 150ms var(--ease) both; }
+.w2-search-input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
 .w2-task-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; }
 /* ---- 段位牌 ---- */
-.w2-rank { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; transition: border-color 150ms var(--ease); }
-.w2-rank:hover { border-color: var(--border-strong); }
+/* ---- 段位牌 · 卡塞尔学院专员证件（去线条重做）----
+ * 一张证件，不是一个设置盒子：无框，L1 panel 底 + 柔和阴影浮在 rail 侧栏上；
+ * 第一行发证方（校徽真照片 24px 无环 + 卡塞尔学院 + S 印章），第二行名字 17px/700，
+ * 第三行等宽编号 + 在线，第四行三个纯图标按钮。EVA 态改 accent-soft 洗色 + 柔光晕，不画蓝环。 */
+.w2-rank { background: var(--bg-panel); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow-sm); }
 .w2-rank-top { display: flex; align-items: center; gap: 8px; }
-.w2-crest { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--forest); color: var(--forest); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 10px; font-weight: 700; flex-shrink: 0; }
-.w2-rank-name { font-size: 14px; font-weight: 600; }
-.w2-seal { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 14px; font-weight: 700; color: var(--seal-fg); background: var(--seal-bg); border: 1px solid var(--border-strong); margin-left: auto; flex-shrink: 0; }
+.w2-rank-school { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--text-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w2-crest { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 10px; font-weight: 700; flex-shrink: 0; overflow: hidden; }
+.w2-rank-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.3; }
+.w2-seal { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--seal-fg); background: var(--seal-bg); border: 1px solid var(--border-strong); margin-left: auto; flex-shrink: 0; }
 .w2-rank-id { font-family: var(--mono); font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
 .w2-icon-nav { display: flex; gap: 4px; }
 .w2-icon-btn { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
@@ -102,14 +105,23 @@ const WAVE2_CSS = `
 .w2-invite { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 .w2-invite button { font-size: 11px; color: var(--accent); padding: 2px 4px; border-radius: 4px; }
 /* ---- 时间线三档：B 内联卡片 / C 安静状态行 ---- */
-.w2-card { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-panel); overflow: hidden; transition: border-color 150ms var(--ease); }
-.w2-card:hover { border-color: var(--border-strong); }
+.w2-card { border-radius: 16px; background: var(--bg-panel); overflow: hidden; box-shadow: var(--shadow-sm); transition: box-shadow 150ms var(--ease); }
+.w2-card:hover { box-shadow: var(--shadow); }
+/* ---- 报错卡重做（去线条 + 去 2012）：无框、无红底、无 pill、无蓝主按钮 ----
+ * 错误就是一条普通的助手回合：球头像 + 红色 600 字重标题行 + 14px 正文
+ * + 12px 弱色提示；重试是行内文字链（accent 色、带 →、悬停下划线），
+ * 自然融入对话流，不像个报错弹窗。红色全站只用在这一行标题。 */
+.w2-err { flex: 1; min-width: 0; padding-top: 4px; }
+.w2-err-title { font-size: 13px; font-weight: 600; color: var(--danger); line-height: 1.5; }
+.w2-err-body { font-size: 14px; line-height: 1.7; color: var(--text-2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; margin-top: 4px; }
+.w2-err-hint { font-size: 12px; color: var(--text-3); line-height: 1.6; margin-top: 8px; }
+.w2-err-retry { background: none; border: none; padding: 0; margin-top: 10px; font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; transition: opacity 150ms var(--ease); }
+.w2-err-retry:hover { opacity: 0.8; text-decoration: underline; }
 .w2-card-head { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; font-size: 12px; color: var(--text-2); }
 .w2-card-title { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; max-width: 40%; }
 .w2-card-sum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; color: var(--text-3); font-size: 12px; }
 .w2-card-body { padding: 0 12px 12px; font-size: 13px; line-height: 1.65; color: var(--text-2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; animation: w2-fade 150ms var(--ease) both; }
 .w2-card-body .w2-card-link { font-size: 12px; color: var(--accent); padding: 4px 0 0; }
-.w2-card-err { border-left: 2px solid var(--danger); }
 .w2-quiet { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); background: none; border: none; padding: 2px 0; transition: color 150ms var(--ease); }
 .w2-quiet:hover { color: var(--text-2); }
 .msg.eva-note-row { flex-direction: column; align-items: flex-start; gap: 8px; }
@@ -118,10 +130,10 @@ const WAVE2_CSS = `
 .w2-live { animation: w2-msg-in 150ms var(--ease) both; }
 @keyframes w2-fade { from { opacity: 0; } to { opacity: 1; } }
 /* ---- Inspector（L2 浮层，不挤压对话区） ---- */
-.w2-inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 60; display: flex; flex-direction: column; background: var(--bg-panel); border-left: 1px solid var(--border); box-shadow: var(--shadow); animation: w2-insp-in 240ms var(--ease-exp) both; }
+.w2-inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 60; display: flex; flex-direction: column; background: var(--bg-panel); box-shadow: var(--shadow); animation: w2-insp-in 240ms var(--ease-exp) both; }
 .w2-inspector.w2-wide { width: 480px; }
 @keyframes w2-insp-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
-.w2-insp-head { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 12px 8px; border-bottom: 1px solid var(--border); }
+.w2-insp-head { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 12px 8px; }
 .w2-insp-title-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .w2-seg { display: flex; flex: 1; gap: 2px; background: var(--bg-soft); border-radius: 999px; padding: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
 .w2-seg::-webkit-scrollbar { display: none; }
@@ -147,8 +159,7 @@ const WAVE2_CSS = `
  * spin 整圈是球的第二拍（startedAt+150ms 起转、1200ms 转满）；这里只管界面层：
  * - 面纱（veil）：一层淡蓝/暖灰光晕从标题栏球的位置（顶部约 22% 处）漫开再收住，
  *   界面跟着“吸一口气/呼一口气”，背景微微变冷/回暖；落定后由稳态光晕接手。
- * - 顶线（sweep）：顶部 2px 强调色线，to-EVA 从左扫满、to-诺玛从右收回——
- *   “EVA 接管了”在窗口顶缘落一笔。
+ * - 顶线（sweep）：已删——1350ms 瞬态的 2px 硬线是用户最讨厌的东西，面纱光晕已足够承载仪式。
  * - 稳态光晕（steady-halo）：EVA 期间常驻的极淡蓝顶光（已有球身蓝光晕的延续），
  *   800ms 淡入淡出；切回诺玛时随之褪去。
  * - 顶栏球包（wrap）：to-EVA 两圈单色涟漪（第二圈延迟 150ms），to-诺玛一次
@@ -161,11 +172,6 @@ const WAVE2_CSS = `
 @keyframes w4-veil-norma { 0% { opacity: 0; } 30% { opacity: 0.8; } 100% { opacity: 0; } }
 .w4-steady-halo { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(ellipse 60% 220px at 22% 0%, rgba(96, 165, 250, 0.05), transparent 70%); opacity: 0; transition: opacity 800ms var(--ease); }
 .w4-steady-halo.on { opacity: 1; }
-.w4-sweep { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 71; pointer-events: none; background: var(--accent); opacity: 0.55; }
-.w4-sweep-eva { transform-origin: left center; animation: w4-sweep-eva 1350ms var(--ease-exp) both; }
-@keyframes w4-sweep-eva { 0% { transform: scaleX(0); } 55% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: 0; } }
-.w4-sweep-norma { transform-origin: right center; background: var(--text-3); animation: w4-sweep-norma 1350ms var(--ease-exp) both; }
-@keyframes w4-sweep-norma { 0% { transform: scaleX(1); opacity: 0.4; } 60% { transform: scaleX(0); opacity: 0.4; } 100% { transform: scaleX(0); opacity: 0; } }
 .w4-wrap { display: inline-flex; position: relative; }
 .w4-wrap-eva::after, .w4-wrap-eva::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 1px solid var(--accent); opacity: 0; animation: w4-ripple 1350ms var(--ease) both; pointer-events: none; }
 .w4-wrap-eva::before { animation-delay: 150ms; }
@@ -175,7 +181,8 @@ const WAVE2_CSS = `
 /* ---- W4 · 侧栏名册与段位牌在仪式中的变化 ----
  * 名册行：切入的行高亮从透明扫入（与 w2-on 的 accent-soft 落点一致），
  * 切出的行高亮淡出；切入行的状态点在仪式里脉冲一次。段位牌：to-EVA 时
- * 蓝环由 0 扩到 1px 落定（EVA 期间常驻 w4-rank-eva-on），to-诺玛时蓝环褪去。 */
+ * 卡面由 panel 洗成 accent-soft（EVA 期间常驻 w4-rank-eva-on 洗色 + 柔蓝光晕），
+ * to-诺玛时洗色褪去——不画 1px 蓝环（去线条）。 */
 .w4-roster-in { animation: w4-roster-in 1350ms var(--ease) both; }
 @keyframes w4-roster-in { 0% { background: transparent; } 25% { background: var(--accent-soft); } 100% { background: var(--accent-soft); } }
 .w4-roster-out { animation: w4-roster-out 1350ms var(--ease) both; }
@@ -183,11 +190,11 @@ const WAVE2_CSS = `
 .w4-roster-in .w2-dot { animation: w4-dot-pulse 1350ms var(--ease) both; }
 @keyframes w4-dot-pulse { 0% { transform: scale(1); } 25% { transform: scale(1.8); } 55% { transform: scale(1); } 100% { transform: scale(1); } }
 .w4-rank-eva { animation: w4-rank-eva 1350ms var(--ease) both; }
-@keyframes w4-rank-eva { 0% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); } 30% { box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18); } 100% { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25); } }
-.w4-rank-eva-on { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25); }
+@keyframes w4-rank-eva { 0% { background: var(--bg-panel); box-shadow: var(--shadow-sm); } 30% { background: color-mix(in srgb, var(--accent-soft) 55%, var(--bg-panel)); box-shadow: 0 8px 28px rgba(96, 165, 250, 0.16); } 100% { background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg-panel)); box-shadow: 0 8px 24px rgba(96, 165, 250, 0.12); } }
+.w4-rank-eva-on { background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg-panel)); box-shadow: 0 8px 24px rgba(96, 165, 250, 0.12); }
 .w4-rank-eva-on .w2-seal { color: var(--accent); border-color: var(--accent); }
 .w4-rank-norma { animation: w4-rank-norma 1350ms var(--ease) both; }
-@keyframes w4-rank-norma { 0% { box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25); } 100% { box-shadow: 0 0 0 0 rgba(96, 165, 250, 0); } }
+@keyframes w4-rank-norma { 0% { background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg-panel)); box-shadow: 0 8px 24px rgba(96, 165, 250, 0.12); } 100% { background: var(--bg-panel); box-shadow: var(--shadow-sm); } }
 /* ---- 矮窗口紧凑模式（≤760px 高）保留 ---- */
 @media (max-height: 760px) {
   .app .empty-state { gap: 8px; }
@@ -224,20 +231,19 @@ const WAVE2_CSS = `
 const S7_CSS = `
 .s7-overlay { position: fixed; inset: 0; z-index: 80; background: var(--scrim); display: flex; align-items: center; justify-content: center; animation: s7-fade 150ms var(--ease) both; }
 @keyframes s7-fade { from { opacity: 0; } to { opacity: 1; } }
-.s7-modal { width: 640px; max-width: calc(100vw - 48px); max-height: calc(100vh - 96px); background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-modal-in 240ms var(--ease-exp) both; }
+.s7-modal { width: 640px; max-width: calc(100vw - 48px); max-height: calc(100vh - 96px); background: var(--bg-panel); color: var(--text); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-modal-in 240ms var(--ease-exp) both; }
 @keyframes s7-modal-in { from { opacity: 0; transform: scale(0.98) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 .s7-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 0; }
 .s7-modal-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
 .s7-modal-body { display: flex; flex: 1; min-height: 0; padding-top: 12px; }
-.s7-nav { width: 160px; flex-shrink: 0; padding: 4px 12px 24px 16px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+.s7-nav { width: 160px; flex-shrink: 0; padding: 4px 12px 24px 16px; display: flex; flex-direction: column; gap: 4px; }
 .s7-nav button { position: relative; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
 .s7-nav button:hover { background: var(--bg-hover); color: var(--text); }
 .s7-nav button.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
-.s7-nav button.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--accent); }
 .s7-content { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 24px 24px; animation: s7-fade 150ms var(--ease) both; }
-.s7-group { display: flex; flex-direction: column; gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.s7-group { display: flex; flex-direction: column; gap: 12px; padding: 16px 0; }
 .s7-group:first-child { padding-top: 4px; }
-.s7-group:last-child { border-bottom: none; padding-bottom: 0; }
+.s7-group:last-child { padding-bottom: 0; }
 .s7-group .drawer-section { margin-top: 0; }
 .s7-identity { display: flex; align-items: center; gap: 8px; }
 .s7-identity-name { font-size: 14px; font-weight: 600; }
@@ -245,28 +251,28 @@ const S7_CSS = `
 .s7-key-row { display: flex; gap: 8px; align-items: center; }
 .s7-key-row .field-input { flex: 1; min-width: 0; }
 .s7-key-state { font-size: 13px; color: var(--text-3); }
-.s7-empty { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 12px; padding: 12px; font-size: 13px; color: var(--text-2); background: var(--bg-soft); }
+.s7-empty { display: flex; flex-direction: column; gap: 4px; border-radius: 12px; padding: 12px; font-size: 13px; color: var(--text-2); background: var(--bg-soft); }
 .s7-empty span { font-size: 12px; color: var(--text-3); line-height: 1.5; }
 .s7-empty .btn-ghost { align-self: flex-start; color: var(--accent); padding: 4px 0; }
 .s7-kbd-list { display: flex; flex-direction: column; gap: 8px; }
 .s7-kbd-list > div { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-2); }
-.s7-kbd-list kbd { font-family: var(--mono); font-size: 11px; color: var(--text-2); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; min-width: 88px; text-align: center; }
+.s7-kbd-list kbd { font-family: var(--mono); font-size: 11px; color: var(--text-2); background: var(--bg-soft); border-radius: 4px; padding: 2px 6px; min-width: 88px; text-align: center; }
 /* ---- Cmd-K 命令面板：560px 居中，150ms --ease-exp 淡入 + 4px 上移 ---- */
 .s7-palette-overlay { position: fixed; inset: 0; z-index: 90; background: var(--scrim); display: flex; justify-content: center; padding-top: 18vh; animation: s7-fade 150ms var(--ease) both; }
-.s7-palette { width: 560px; max-width: calc(100vw - 48px); height: fit-content; max-height: 60vh; background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
+.s7-palette { width: 560px; max-width: calc(100vw - 48px); height: fit-content; max-height: 60vh; background: var(--bg-panel); color: var(--text); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
 @keyframes s7-palette-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-.s7-palette-input { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.s7-palette-input { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
 .s7-palette-prompt { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
 .s7-palette-input input { flex: 1; min-width: 0; border: none; outline: none; background: none; font-size: 14px; color: var(--text); }
-.s7-palette-esc { font-family: var(--mono); font-size: 11px; color: var(--text-3); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.s7-palette-esc { font-family: var(--mono); font-size: 11px; color: var(--text-3); background: var(--bg-soft); border-radius: 4px; padding: 2px 6px; }
 .s7-palette-list { overflow-y: auto; padding: 8px; }
 .s7-palette-group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); padding: 8px 12px 4px; }
 .s7-palette-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 100ms var(--ease), color 100ms var(--ease); }
 .s7-palette-item.sel { background: var(--accent-soft); color: var(--text); }
 .s7-palette-hint { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
-.s7-palette-foot { display: flex; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-3); }
+.s7-palette-foot { display: flex; gap: 16px; padding: 8px 16px; font-size: 11px; color: var(--text-3); }
 /* ---- 命令执行后的轻反馈（toast 已删，仪式本身就是反馈；只有没有界面可开的命令才落这行小字） ---- */
-.s7-notice { position: fixed; left: calc(50% + 116px); bottom: 96px; transform: translateX(-50%); z-index: 95; max-width: 60vw; background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); padding: 8px 16px; font-size: 13px; line-height: 1.5; animation: s7-notice-in 240ms var(--ease-exp) both; }
+.s7-notice { position: fixed; left: calc(50% + 116px); bottom: 96px; transform: translateX(-50%); z-index: 95; max-width: 60vw; background: var(--bg-panel); color: var(--text); border-radius: 999px; box-shadow: var(--shadow); padding: 8px 16px; font-size: 13px; line-height: 1.5; animation: s7-notice-in 240ms var(--ease-exp) both; }
 @keyframes s7-notice-in { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @media (prefers-reduced-motion: reduce) { .s7-overlay, .s7-modal, .s7-content, .s7-palette-overlay, .s7-palette, .s7-notice { animation-duration: 0.01ms !important; } }
 `;
@@ -283,10 +289,10 @@ const AUDIT_CSS = `
 .app .w2-crest { overflow: hidden; }
 .app .w2-crest img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; display: block; }
 /* ---- 设置 modal 审计小件 ---- */
-.app .s7-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; font-size: 12px; color: var(--text-2); background: var(--bg-soft); }
-.app .s7-summary-warn { border-color: var(--accent); background: var(--accent-soft); }
+.app .s7-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; font-size: 12px; color: var(--text-2); background: var(--bg-soft); }
+.app .s7-summary-warn { background: var(--accent-soft); }
 .app .s7-summary .btn-ghost { white-space: nowrap; }
-.app .s7-tag-current { display: inline-block; margin-left: 6px; padding: 1px 6px; font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; vertical-align: 1px; }
+.app .s7-tag-current { display: inline-block; margin-left: 6px; padding: 1px 6px; font-size: 10px; color: var(--accent); background: var(--accent-soft); border-radius: 999px; vertical-align: 1px; }
 .app .option.static { cursor: default; }
 .app .s7-codex-line { display: flex; flex-direction: column; gap: 6px; }
 .app .s7-codex-input { font-size: 12px; padding: 6px 10px; }
@@ -294,18 +300,18 @@ const AUDIT_CSS = `
 .app .s7-wizard { width: 520px; max-width: calc(100vw - 48px); }
 .app .s7-wizard-steps { display: flex; gap: 16px; padding: 12px 20px 0; font-size: 12px; color: var(--text-3); }
 .app .s7-wizard-steps span { display: flex; align-items: center; gap: 6px; }
-.app .s7-wizard-steps b { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); font-size: 11px; font-weight: 600; }
+.app .s7-wizard-steps b { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--bg-soft); font-size: 11px; font-weight: 600; }
 .app .s7-wizard-steps span.on { color: var(--text); }
-.app .s7-wizard-steps span.on b { background: var(--accent); border-color: var(--accent); color: #fff; }
+.app .s7-wizard-steps span.on b { background: var(--accent); color: #fff; }
 .app .s7-wizard-steps span.done { color: var(--text-2); }
-.app .s7-wizard-steps span.done b { border-color: var(--accent); color: var(--accent); }
+.app .s7-wizard-steps span.done b { background: var(--accent-soft); color: var(--accent); }
 .app .s7-wizard-content { padding: 16px 20px; }
 .app .s7-wizard-foot { display: flex; justify-content: flex-end; padding: 0 20px 16px; }
 /* 向导里的按钮不换行（“重新测试”被结果文案挤成竖排的问题）。 */
 .app .s7-wizard .btn-primary, .app .s7-wizard .btn-ghost { white-space: nowrap; flex-shrink: 0; }
 /* ---- 顶栏审查入口徽标（P1-14：有待审时变色） ---- */
-.app .w2-review-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-soft); color: var(--text-3); border: 1px solid var(--border); }
-.app .w2-review-badge.hot { background: var(--accent); border-color: var(--accent); color: #fff; }
+.app .w2-review-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-soft); color: var(--text-3); }
+.app .w2-review-badge.hot { background: var(--accent); color: #fff; }
 /* ---- P1-4：消息操作（悬停出现；出错卡片里重试是主按钮） ---- */
 .app .msg { position: relative; }
 .app .w2-msg-actions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity 150ms var(--ease); }
@@ -315,17 +321,17 @@ const AUDIT_CSS = `
 .app .w2-msg-actions button:hover { background: var(--bg-hover); color: var(--text); }
 .app .w2-msg-actions button.danger:hover { color: #dc2626; }
 .app .w2-msg-edit { width: 100%; }
-.app .w2-msg-edit textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg-panel); color: var(--text); font: inherit; padding: 8px 10px; }
+.app .w2-msg-edit textarea { width: 100%; min-height: 64px; resize: vertical; border-radius: 8px; background: var(--bg-soft); color: var(--text); font: inherit; padding: 8px 10px; box-shadow: 0 0 0 3px var(--accent-soft); }
 .app .w2-msg-edit-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
 /* ---- P1-5：用量常驻行（输入框上方；Cmd-K“查看状态与用量”滚动到这里并高亮） ---- */
 .app .w2-usage { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 11px; color: var(--text-3); border-radius: 8px; transition: background 300ms var(--ease); }
 .app .w2-usage.flash { background: var(--accent-soft); color: var(--text-2); }
 /* ---- P2-19：回到底部按钮（聊天区末尾的 sticky 元素：滚上去时贴在可视区右下角） ---- */
-.app .w2-jump { position: sticky; bottom: 16px; align-self: flex-end; z-index: 5; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-2); border-radius: 999px; padding: 6px 14px; font-size: 12px; box-shadow: var(--shadow); cursor: pointer; animation: s7-notice-in 200ms var(--ease-exp) both; }
-.app .w2-jump:hover { color: var(--text); border-color: var(--accent); }
+.app .w2-jump { position: sticky; bottom: 16px; align-self: flex-end; z-index: 5; background: var(--bg-panel); color: var(--text-2); border-radius: 999px; padding: 6px 14px; font-size: 12px; box-shadow: var(--shadow); cursor: pointer; animation: s7-notice-in 200ms var(--ease-exp) both; }
+.app .w2-jump:hover { color: var(--text); }
 /* ---- P2-6/P2-10/P2-22：Composer 斜杠面板 + 附件过滤 ---- */
 .app .composer-wrap { position: relative; }
-.app .s7-slash { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
+.app .s7-slash { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30; background: var(--bg-panel); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
 .app .s7-slash-list { max-height: 280px; overflow-y: auto; padding: 6px; }
 .app .s7-slash .s7-palette-item { padding: 7px 10px; }
 .app .attach-filter { width: 100%; margin-bottom: 6px; }
@@ -600,30 +606,32 @@ function PermCard({ msg }: { msg: ChatMsg }) {
   );
 }
 
-/** 出错卡（B 档）：红色左侧 2px 条，不要整块红底。 */
-function ErrorCard({ msg, onRetry }: { msg: ChatMsg; onRetry?: () => void }) {
+/** 出错卡重做（去线条 + 去 2012）：无框、无红底、无 pill、无蓝主按钮。
+ * 错误就是一条普通的助手回合：球头像 + 红色 600 标题行 + 正文 + 弱色提示，
+ * 重试是行内文字链，自然融入对话流。 */
+function ErrorCard({ msg, onRetry, eva, fast, ritual, gaze }: {
+  msg: ChatMsg;
+  onRetry?: () => void;
+  eva: boolean;
+  fast: boolean;
+  ritual: { dir: Mode; startedAt: number } | null;
+  gaze: number;
+}) {
   return (
     <div className="msg">
-      <div className="w2-card w2-card-err" style={{ width: "100%" }}>
-        <div className="w2-card-head">
-          <span className="w2-card-title">出错了</span>
-          <span className="w2-card-sum">先看一眼原因，再决定下一步</span>
-          <span className="w2-pill bad">错误</span>
+      <Mark size={28} eva={eva} state="idle" gaze={gaze} fast={fast} ritual={ritual} />
+      <div className="w2-err">
+        <div className="w2-err-title">出错了</div>
+        <div className="w2-err-body">{msg.text}</div>
+        <div className="w2-err-hint">
+          可以换个说法再试一次，或检查一下模型配置。
         </div>
-        <div className="w2-card-body">
-          {msg.text}
-          <div style={{ marginTop: 4, color: "var(--text-3)" }}>
-            可以换个说法再试一次，或检查一下模型配置。
-          </div>
-          {/* P1-4：出错卡片加“重试”主按钮（用同一条 prompt 再跑一轮）。 */}
-          {onRetry && (
-            <div style={{ marginTop: 10 }}>
-              <button type="button" className="btn-primary" onClick={onRetry}>
-                重试
-              </button>
-            </div>
-          )}
-        </div>
+        {/* P1-4：出错加“重试”文字链（用同一条 prompt 再跑一轮），不用主按钮。 */}
+        {onRetry && (
+          <button type="button" className="w2-err-retry" onClick={onRetry}>
+            重试 →
+          </button>
+        )}
       </div>
     </div>
   );
@@ -2167,17 +2175,11 @@ export default function App() {
       <style>{S7_CSS}</style>
       <style>{AUDIT_CSS}</style>
       {boot && settings.boot_animation && <Boot onDone={handleBootDone} />}
-      {/* W4 仪式界面层：面纱（漫开再收住）+ 顶线（扫入/收回），均不挡输入；
+      {/* W4 仪式界面层：面纱（漫开再收住），不挡输入；
           稳态光晕常驻渲染，EVA 时 800ms 淡入、切回时淡出。 */}
       {ritual && (
         <div
           className={`w4-veil ${ritual.dir === "eva" ? "w4-veil-eva" : "w4-veil-norma"}`}
-          aria-hidden="true"
-        />
-      )}
-      {ritual && (
-        <div
-          className={`w4-sweep ${ritual.dir === "eva" ? "w4-sweep-eva" : "w4-sweep-norma"}`}
           aria-hidden="true"
         />
       )}
@@ -2462,7 +2464,15 @@ export default function App() {
               ) : m.kind === "perm" || m.kind === "ask" ? (
                 <PermCard key={m.id} msg={m} />
               ) : m.kind === "error" ? (
-                <ErrorCard key={m.id} msg={m} onRetry={() => handleRetryMessage(m.id)} />
+                <ErrorCard
+                  key={m.id}
+                  msg={m}
+                  onRetry={() => handleRetryMessage(m.id)}
+                  eva={settings.mode === "eva"}
+                  fast={settings.mode === "eva"}
+                  ritual={ritual}
+                  gaze={gaze}
+                />
               ) : (
                 <div
                   key={m.id}

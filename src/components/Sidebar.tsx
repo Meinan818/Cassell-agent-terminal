@@ -422,11 +422,12 @@ export default function Sidebar({
             <span className="w2-crest" title="卡塞尔学院">
               <img src="/cassell-seal.jpg" alt="卡塞尔学院校徽" />
             </span>
-            <span className="w2-rank-name">{displayName}</span>
+            <span className="w2-rank-school">卡塞尔学院</span>
             <span className="w2-seal" title="血统评级 S">
               S
             </span>
           </div>
+          <div className="w2-rank-name">{displayName}</div>
           <div className="w2-rank-id">
             S2017-0117
             <span

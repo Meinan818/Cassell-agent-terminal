@@ -101,7 +101,6 @@ function DiffView({ text }: { text: string }) {
         fontSize: 11,
         lineHeight: 1.7,
         background: "var(--bg-soft)",
-        border: "1px solid var(--border)",
         borderRadius: 8,
         padding: "8px 10px",
         overflowX: "hidden",
@@ -583,7 +582,6 @@ export default function RightPanel(props: RightPanelProps) {
                       role="status"
                       style={{
                         background: "var(--danger-soft)",
-                        border: "1px solid var(--border)",
                         borderRadius: 8,
                         padding: 12,
                         display: "flex",
@@ -619,7 +617,7 @@ export default function RightPanel(props: RightPanelProps) {
                         <div
                           key={f.path}
                           className={`review-file state-${state}`}
-                          style={staged ? { borderColor: "var(--danger)" } : undefined}
+                          style={staged ? { background: "var(--danger-soft)" } : undefined}
                         >
                           <div className="review-file-head">
                             <span className="review-status">{STATUS_LABEL[f.status] ?? f.status}</span>
@@ -1023,7 +1021,6 @@ export default function RightPanel(props: RightPanelProps) {
               )}
               <div
                 style={{
-                  border: "1px solid var(--border)",
                   borderRadius: 8,
                   padding: 12,
                   display: "flex",
