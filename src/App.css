@@ -456,16 +456,18 @@ select {
   gap: 12px;
 }
 
-/* 用户气泡：无气泡（Claude / Gemini 式）——右对齐纯文字，无底色、无边框、无圆角；
- * 回合分隔靠对齐（用户右 / 助手左 + 球头像）+ 24px turn 间距 + 用户字 15px。 */
+/* 用户气泡：Grok 式现代极简高级气泡（Deline 5，纠正 Deline 1/2 的“无气泡”）——
+ * 不是原来那个灰底圆角矩形，也不是无气泡：底色用 --user-bubble 极淡 tint
+ * （深色比底色稍亮、浅色比底色稍深）、无边框、大而柔和的圆角、留白充足；
+ * 克制、柔和、有质感，一眼高级。 */
 .msg.user {
   justify-content: flex-end;
 }
 
 .msg.user .msg-body {
-  background: none;
-  border-radius: 0;
-  padding: 2px 0;
+  background: var(--user-bubble);
+  border-radius: 20px;
+  padding: 10px 16px;
   max-width: 78%;
   line-height: 1.65;
   font-size: 15px;
