@@ -1,8 +1,11 @@
 mod agent;
 mod codex;
+mod dsml;
+mod frozen;
 mod fsutil;
 mod goal;
 mod lore;
+mod models;
 mod settings;
 mod shell;
 

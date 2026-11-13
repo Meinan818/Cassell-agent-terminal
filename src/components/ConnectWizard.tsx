@@ -60,6 +60,9 @@ export default function ConnectWizard({
   const [baseUrl, setBaseUrl] = useState(
     settings.providers.find((p) => p.id === settings.provider_id)?.base_url ?? "",
   );
+  const [kind, setKind] = useState(
+    settings.providers.find((p) => p.id === settings.provider_id)?.kind ?? "direct",
+  );
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testRes, setTestRes] = useState<{ ok: boolean; detail: string } | null>(null);
@@ -75,6 +78,7 @@ export default function ConnectWizard({
     setSelId(id);
     setKey(settings.api_keys[id] ?? "");
     setBaseUrl(p.base_url);
+    setKind(p.kind ?? "direct");
     setTestRes(null);
     setFetchRes(null);
     setStep(2);
@@ -85,7 +89,7 @@ export default function ConnectWizard({
     onPatch({
       api_keys: { ...settings.api_keys, [provider.id]: key },
       providers: settings.providers.map((p) =>
-        p.id === provider.id ? { ...p, base_url: baseUrl } : p,
+        p.id === provider.id ? { ...p, base_url: baseUrl, kind } : p,
       ),
     });
     setTestRes(null);
@@ -225,6 +229,18 @@ export default function ConnectWizard({
                   placeholder="例如 https://api.deepseek.com/v1"
                   autoComplete="off"
                 />
+                <label className="field-label" htmlFor="wizard-access-kind">
+                  接入方式
+                </label>
+                <select
+                  id="wizard-access-kind"
+                  className="field-input"
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value)}
+                >
+                  <option value="direct">官方直连</option>
+                  <option value="relay">中转站（反代）</option>
+                </select>
                 <p className="drawer-note">
                   Key 只保存在本机设置文件里，不会上传到任何地方。
                 </p>

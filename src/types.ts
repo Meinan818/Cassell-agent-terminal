@@ -23,6 +23,8 @@ export interface ProviderConfig {
   env_key: string;
   models: string[];
   default_model: string;
+  /** 接入方式："direct" 官方直连 / "relay" 中转站（P0-3，按这个查模型映射表）。 */
+  kind?: string;
 }
 
 export interface ExtensionItem {
@@ -43,6 +45,8 @@ export interface Settings {
   approval: Approval;
   /** 删除确认： "always" 每次都问（默认）| "never" 不再询问。持久化在 Rust 设置文件。 */
   delete_confirm: DeleteConfirm;
+  /** 压缩模型：压缩历史时用的模型，和主模型分开配（P0-3）。 */
+  compression_model?: string;
   sandbox: Sandbox;
   theme: Theme;
   streaming: boolean;

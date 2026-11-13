@@ -28,6 +28,9 @@ tokio = { version = "1", features = ["process", "io-util", "rt-multi-thread", "m
 # 让应用自己就是 agent，不再依赖外部命令行工具。
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+# P0-1：冻结前缀的 sha256 校验；P0-2：DSML 标记解析。
+sha2 = "0.10"
+regex = "1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

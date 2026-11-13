@@ -100,6 +100,12 @@ pub struct GoalSession {
     /// 已经为“没验证就宣称完成”提醒过模型一次。
     #[serde(default)]
     pub verification_nudged: bool,
+    /// P0-1 冻结前缀（system 正文 + 工具定义表，会话内字节稳定）。
+    /// 目标会话创建时建好并写进 frozen.json；续跑、倒带、应用重启后
+    /// 读回来复用（hash 对上才用），会话中途改显示名/人设不改它——
+    /// 冻结的就是冻结的，新会话才按新输入重建。
+    #[serde(default)]
+    pub frozen: Option<crate::frozen::FrozenPrefix>,
     pub created_at: u64,
 }
 
@@ -124,6 +130,7 @@ impl GoalSession {
             checklist: Vec::new(),
             unverified_writes: Vec::new(),
             verification_nudged: false,
+            frozen: None,
             created_at: now_secs(),
         }
     }
@@ -610,6 +617,34 @@ fn save_manifest(app: &AppHandle, manifest: &CheckpointManifest) -> Result<(), S
     Ok(())
 }
 
+/// P0-1：冻结快照存取（天枢的 `.frozen.json` 做法）。
+/// 目标会话创建时把冻结前缀写进检查点目录；倒带 / 应用重启后读回来，
+/// hash 对上就用原样字节，不用按当前输入重拼；读不到 / 对不上返回 None，
+/// 调用方按当前输入重建（下一轮 run 时）。
+pub fn save_frozen(
+    app: &AppHandle,
+    goal_id: &str,
+    frozen: &crate::frozen::FrozenPrefix,
+) -> Result<(), String> {
+    let dir = checkpoints_dir(app, goal_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建检查点目录失败：{e}"))?;
+    let text = serde_json::to_string_pretty(frozen).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("frozen.json"), text).map_err(|e| format!("写冻结快照失败：{e}"))?;
+    Ok(())
+}
+
+pub fn load_frozen(app: &AppHandle, goal_id: &str) -> Option<crate::frozen::FrozenPrefix> {
+    let p = checkpoints_dir(app, goal_id).join("frozen.json");
+    let text = std::fs::read_to_string(&p).ok()?;
+    let frozen: crate::frozen::FrozenPrefix = serde_json::from_str(&text).ok()?;
+    if frozen.verify() {
+        Some(frozen)
+    } else {
+        eprintln!("[frozen] {goal_id} 的 frozen.json hash 对不上，丢弃、按当前输入重建");
+        None
+    }
+}
+
 /// 写文件之前先备份：只在目标模式下调，每次写都留一份版本化备份。
 /// 目标是：倒带回第 N 回合时，代码能恢复到第 N 回合结束时的样子。
 pub fn backup_before_write(
@@ -962,6 +997,9 @@ pub async fn rewind_checkpoint_cmd(
         }
         if let Some(session) = map.get_mut(&goal_id) {
             session.messages = messages;
+            // P0-1：冻结前缀跟着对话一起回到快照点——读回 frozen.json，
+            // hash 对上就用原样字节；读不到/对不上就留空，下一轮按当前输入重建。
+            session.frozen = load_frozen(&app, &goal_id);
             // 清单跟着对话一起回到快照点：从恢复后的消息里重算，
             // 找不到清单块就清空——不留未来回合的打勾状态，也不编假数据。
             session.checklist = checklist_of(&session.messages);

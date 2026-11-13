@@ -523,6 +523,21 @@ export function SettingsModal({
                     placeholder="例如 https://api.deepseek.com/v1 或 http://127.0.0.1:8790/v1"
                     autoComplete="off"
                   />
+                  <label className="field-label" htmlFor="settings-access-kind">
+                    接入方式
+                  </label>
+                  <select
+                    id="settings-access-kind"
+                    className="field-input"
+                    value={provider?.kind ?? "direct"}
+                    onChange={(e) => updateProvider({ kind: e.target.value })}
+                  >
+                    <option value="direct">官方直连</option>
+                    <option value="relay">中转站（反代）</option>
+                  </select>
+                  <p className="drawer-note">
+                    同一个模型在官方与中转站上的 ID 不一样（官方 V4.1-Flash 是 deepseek-flash，中转站上是 deepseek-v4-flash），按接入方式自动换算。
+                  </p>
                   <div className="drawer-row">
                     <button
                       type="button"
@@ -605,6 +620,20 @@ export function SettingsModal({
                       )}
                     </div>
                   )}
+                  <label className="field-label" htmlFor="settings-compression-model">
+                    压缩模型
+                  </label>
+                  <input
+                    id="settings-compression-model"
+                    className="field-input"
+                    value={settings.compression_model ?? "deepseek-flash"}
+                    onChange={(e) => onPatch({ compression_model: e.target.value })}
+                    placeholder="deepseek-flash"
+                    autoComplete="off"
+                  />
+                  <p className="drawer-note">
+                    压缩历史时用的模型，和上面选的主模型分开改；改主模型不会动它。
+                  </p>
                 </div>
                 {/* P2-16：高级折叠已删。Codex CLI 路径收进模型组底部一行小字。 */}
                 <div className="s7-group s7-codex-line">

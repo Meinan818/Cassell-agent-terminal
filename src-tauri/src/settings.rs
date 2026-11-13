@@ -20,6 +20,14 @@ pub struct ProviderConfig {
     /// Model ids the user can pick from (free text also allowed).
     pub models: Vec<String>,
     pub default_model: String,
+    /// 接入方式：`direct` 官方直连 / `relay` 中转站（P0-3）。
+    /// 发请求前按这个查模型映射表；老设置文件里没有这个字段时默认 direct。
+    #[serde(default = "default_access_kind")]
+    pub kind: String,
+}
+
+fn default_access_kind() -> String {
+    "direct".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +60,9 @@ pub struct Settings {
     /// 删除确认： "always"（每次删文件都单独问，默认）| "never"（不再询问，直接执行）。
     /// 用户可在设置 → 权限里改；持久化在 settings.json。
     pub delete_confirm: String,
+    /// 压缩模型：压缩历史时用的模型，和主模型分开配（P0-3）。
+    /// 改主模型、迁移退役 ID 都不碰它。老设置文件里没有时默认 deepseek-flash。
+    pub compression_model: String,
     /// read-only | workspace-write | danger-full-access
     pub sandbox: String,
     /// light | dark
@@ -81,6 +92,7 @@ impl Default for Settings {
             ultracode: false,
             approval: "auto".to_string(),
             delete_confirm: "always".to_string(),
+            compression_model: crate::models::default_compression_model(),
             sandbox: "workspace-write".to_string(),
             theme: "light".to_string(),
             streaming: true,
@@ -104,6 +116,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
             env_key: "DEEPSEEK_API_KEY".to_string(),
             models: vec!["deepseek-flash".to_string(), "deepseek-v4-pro".to_string()],
             default_model: "deepseek-flash".to_string(),
+            kind: "direct".to_string(),
         },
         ProviderConfig {
             id: "kimi".to_string(),
@@ -116,6 +129,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
                 "moonshot-v1-32k".to_string(),
             ],
             default_model: "kimi-k2".to_string(),
+            kind: "direct".to_string(),
         },
         ProviderConfig {
             id: "qwen".to_string(),
@@ -128,6 +142,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
                 "qwen-max".to_string(),
             ],
             default_model: "qwen-plus".to_string(),
+            kind: "direct".to_string(),
         },
         ProviderConfig {
             id: "openai".to_string(),
@@ -136,6 +151,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
             env_key: "OPENAI_API_KEY".to_string(),
             models: vec!["gpt-6.1".to_string(), "gpt-4o".to_string()],
             default_model: "gpt-6.1".to_string(),
+            kind: "direct".to_string(),
         },
     ]
 }
@@ -243,6 +259,19 @@ pub fn load_settings(app: &AppHandle) -> Settings {
     }
     if settings.delete_confirm != "always" && settings.delete_confirm != "never" {
         settings.delete_confirm = "always".to_string();
+    }
+    // P0-3：接入方式归一（写错的按 direct）；退役模型 ID 迁移到替代 ID，
+    // 只动主模型，压缩模型不碰。
+    for p in settings.providers.iter_mut() {
+        p.kind = crate::models::access_kind(&p.kind).to_string();
+    }
+    let (migrated, record) = crate::models::migrate_model_id(&settings.model);
+    if let Some((old, new)) = record {
+        eprintln!("[models] 模型 ID 已迁移：{old} → {new}（退役 ID，压缩模型未动）");
+        settings.model = migrated;
+    }
+    if settings.compression_model.trim().is_empty() {
+        settings.compression_model = crate::models::default_compression_model();
     }
     settings
 }

@@ -616,6 +616,9 @@ pub async fn run_agent_native(
 }
 
 /// 单回合（最多 8 轮工具调用）的固定上下文。
+/// P0-1：工具定义表是冻结前缀的一部分，建好后存在这里，
+//  每轮请求直接用，不再每轮现算；system 正文也一样，
+//  冻结部分 + 本轮附录已拼好存在 system_with_appendix 里。
 struct TurnCtx {
     model: String,
     effort: String,
@@ -626,6 +629,8 @@ struct TurnCtx {
     workdir: String,
     authorized: bool,
     delete_confirm: String,
+    tools: Value,
+    system_with_appendix: String,
 }
 
 /// 单回合的产出（交给目标循环汇总）。
@@ -669,6 +674,8 @@ async fn run_inner_turn(
     let mut finished_naturally = false;
     let mut cancelled = false;
     let mut stalled = false;
+    // P0-2：本轮（最多 8 次请求）内 DSML 提醒最多发一次。
+    let mut dsml_nudged = false;
 
     'rounds: for _round in 0..crate::goal::ROUNDS_PER_TURN {
         // 用户点了停止：立刻收尾，不再发下一轮请求
@@ -677,11 +684,26 @@ async fn run_inner_turn(
             break 'rounds;
         }
         session.rounds_used += 1;
+        // P0-1：发请求时只发“冻结前缀 + 附录”的 system 正文。
+        // 存着的 messages[0] 永远是冻结部分（不含附录），附录每轮现算、
+        // 只存在发出去的这份拷贝里，不写回会话——前缀字节一字不动。
+        // 工具表也取冻结的，不再每轮现算。
+        let mut send_messages = messages.clone();
+        if let Some(first) = send_messages.first_mut() {
+            if first.get("role").and_then(|r| r.as_str()) == Some("system") {
+                first["content"] = json!(ctx.system_with_appendix);
+            } else {
+                send_messages.insert(
+                    0,
+                    json!({"role": "system", "content": ctx.system_with_appendix}),
+                );
+            }
+        }
         let body = json!({
             "model": ctx.model,
-            "messages": messages,
+            "messages": send_messages,
             "temperature": effort_temperature(&ctx.effort),
-            "tools": tool_definitions(&ctx.run_mode, &ctx.mode),
+            "tools": ctx.tools,
             "tool_choice": "auto",
             "stream": true,
             "stream_options": {"include_usage": true}
@@ -806,6 +828,55 @@ async fn run_inner_turn(
         prompt_sum += round_prompt;
         completion_sum += round_completion;
         total_sum += round_total;
+
+        // P0-2 DSML 恢复：反代网关可能把 tool_calls 压成正文里的 DSML
+        // 标记（或直接弄丢），结构化字段为空。正文非空时先试着从正文
+        // 里恢复出来，恢复出的调用带 "type": "function" 与合成 id，
+        // 直接走下面的正常执行路径；恢复不出来、但正文明显像在调用
+        // 工具时，提醒模型用结构化调用重发一次（每轮最多一次），
+        // 还不出来就按正常结束——绝不无限重试、不悄悄结束。
+        if tool_calls.is_empty() && !round_text.trim().is_empty() {
+            let known: Vec<String> = ctx
+                .tools
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| {
+                            t.pointer("/function/name")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let recovered = crate::dsml::recover_tool_calls(&round_text, &known);
+            if !recovered.is_empty() {
+                let source = recovered[0].source;
+                for (i, call) in recovered.iter().enumerate() {
+                    tool_calls.push(json!({
+                        "id": format!("dsml-{}-{}", session.rounds_used, i),
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": serde_json::to_string(&call.arguments)
+                                .unwrap_or_else(|_| "{}".to_string())
+                        }
+                    }));
+                }
+                eprintln!(
+                    "[dsml] 从正文恢复了 {} 个工具调用（{}）",
+                    tool_calls.len(),
+                    source
+                );
+            } else if !dsml_nudged && crate::dsml::looks_like_tool_attempt(&round_text) {
+                dsml_nudged = true;
+                // 先把模型这轮的正文记进历史，再提醒它重发结构化调用。
+                messages.push(json!({"role": "assistant", "content": round_text}));
+                messages.push(json!({"role": "user", "content": "（系统提醒：你刚才的回复里似乎想调用工具，但调用没有按结构化格式发出、也没被执行。请把同一个调用用结构化工具调用重新发出，不要只写在正文里。）"}));
+                eprintln!("[dsml] 正文疑似工具调用但恢复失败，已提醒模型重发（本轮只提醒一次）");
+                continue 'rounds;
+            }
+        }
 
         let msg = json!({
             "role": "assistant",
@@ -980,14 +1051,11 @@ async fn run_agent_native_inner(
         ""
     };
     // 龙族知识库接线（知识库 §40 四层喂法）：
-    // 冻结前缀放最前面且固定不变——人设提示词 + §0 常驻速查 + 诚实规则，
-    // 这样 DeepSeek 前缀缓存才能命中（P0-1 会 formalize 这套，先把位置放对）。
-    // 按需注入的章节追加在 system 消息末尾；不问龙族问题时一个字都不喂。
+    // P0-1：冻结前缀放最前面且固定不变——人设提示词 + §0 常驻速查 +
+    // 诚实规则 + 计划/目标纪律 + 工作区说明；按需注入的章节不进冻结部分，
+    // 只走每轮请求时的附录（appendixDelta），这样 DeepSeek 前缀缓存才能命中。
     // 匹配只看当前用户消息，不看历史，避免旧对话里的龙族词误触发。
-    let lore_tail = match crate::lore::build_lore_injection(&req.prompt) {
-        Some(injection) => format!("\n\n{injection}"),
-        None => String::new(),
-    };
+    let appendix = crate::lore::build_lore_injection(&req.prompt).unwrap_or_default();
     // P0-6 目标模式的工作纪律（只在目标模式下进 system 消息，放在冻结
     // 前缀之后、动态部分；目标会话内固定不变，有利前缀缓存）。
     let goal_block = if req.goal_text.is_some() {
@@ -995,13 +1063,19 @@ async fn run_agent_native_inner(
     } else {
         ""
     };
-    let mut messages: Vec<Value> = vec![json!({
-        "role": "system",
-        "content": format!("{persona}\n\n{}\n\n[龙族知识回答规则]\n{}\n\n{plan_hint}{goal_block}\n当前工作区：{}\n允许的操作：{}{auth_hint}{lore_tail}",
+    // P0-1：冻结前缀（system 正文 + 工具定义表）。本轮先按当前输入建一个；
+    // 目标会话里若已有 hash 对得上的存货，下面会用存货（字节权威）。
+    let fresh_frozen = crate::frozen::FrozenPrefix::build(
+        format!("{persona}\n\n{}\n\n[龙族知识回答规则]\n{}\n\n{plan_hint}{goal_block}\n当前工作区：{}\n允许的操作：{}{auth_hint}",
             crate::lore::core_quick_ref(),
             crate::lore::HONESTY_RULES,
             if req.authorized { workdir.as_str() } else { "未授权（请先选择文件夹）" },
-            if req.sandbox == "read-only" { "只能读取，不能修改" } else { "可以读写文件并执行命令" })
+            if req.sandbox == "read-only" { "只能读取，不能修改" } else { "可以读写文件并执行命令" }),
+        tool_definitions(&req.run_mode, &req.mode),
+    );
+    let mut messages: Vec<Value> = vec![json!({
+        "role": "system",
+        "content": fresh_frozen.system,
     })];
     if let Some(h) = &req.history {
         for m in h.iter().rev().take(20).rev() {
@@ -1020,17 +1094,6 @@ async fn run_agent_native_inner(
     // 8 轮只是内部单回合单位：普通对话也自动续跑到总预算（24 轮），
     // 目标模式跑到 40 轮；中途不问用户要不要继续、不弹“继续”按钮。
     // 续跑带完整上下文（含 tool_calls 与工具结果），模型不用重新读文件找进度。
-    let turn_ctx = TurnCtx {
-        model: req.model.clone(),
-        effort: req.effort.clone(),
-        run_mode: req.run_mode.clone(),
-        mode: req.mode.clone(),
-        sandbox: req.sandbox.clone(),
-        approval: req.approval.clone(),
-        workdir: workdir.clone(),
-        authorized: req.authorized,
-        delete_confirm: req.delete_confirm.clone(),
-    };
     let mut session: GoalSession;
     let mut goal_mode = false;
     if let Some(gid) = req.goal_id.clone() {
@@ -1119,6 +1182,63 @@ async fn run_agent_native_inner(
         session = eph;
     }
 
+    // P0-1：冻结前缀定稿。目标会话：已存的、hash 对上的直接复用
+    // （字节权威）；没有/对不上就用本轮新建的，存进会话并写 frozen.json。
+    // 普通对话没有持久会话，每轮用新建的。
+    let frozen = if goal_mode {
+        let reuse = session
+            .frozen
+            .as_ref()
+            .filter(|f| f.verify())
+            .cloned();
+        match reuse {
+            Some(f) => {
+                eprintln!("[frozen] 复用会话冻结前缀 {}", &f.hash[..12]);
+                f
+            }
+            None => {
+                if session.frozen.is_some() {
+                    eprintln!("[frozen] 会话冻结前缀 hash 对不上，重建边界");
+                }
+                let f = fresh_frozen.clone();
+                session.frozen = Some(f.clone());
+                if let Err(e) = crate::goal::save_frozen(&app, &session.id, &f) {
+                    eprintln!("[frozen] 写 frozen.json 失败：{e}");
+                }
+                f
+            }
+        }
+    } else {
+        fresh_frozen.clone()
+    };
+    // 会话消息里的 system 正文以冻结前缀为准（附录不进这里）。
+    if let Some(first) = session.messages.first_mut() {
+        if first.get("role").and_then(|r| r.as_str()) == Some("system") {
+            first["content"] = json!(frozen.system);
+        }
+    }
+    // P0-3：按接入方式把模型名翻成这条线上的真实 ID。
+    let wire_model = crate::models::resolve_model(&provider.kind, &req.model);
+    if wire_model != req.model {
+        eprintln!(
+            "[models] 模型 ID 映射（{}）：{} → {}",
+            provider.kind, req.model, wire_model
+        );
+    }
+    let turn_ctx = TurnCtx {
+        model: wire_model,
+        effort: req.effort.clone(),
+        run_mode: req.run_mode.clone(),
+        mode: req.mode.clone(),
+        sandbox: req.sandbox.clone(),
+        approval: req.approval.clone(),
+        workdir: workdir.clone(),
+        authorized: req.authorized,
+        delete_confirm: req.delete_confirm.clone(),
+        tools: frozen.tools.clone(),
+        system_with_appendix: frozen.with_appendix(&appendix),
+    };
+
     let mut final_text = String::new();
     let mut tools_run: Vec<String> = Vec::new();
     let mut prompt_total: u64 = 0;
@@ -1135,10 +1255,17 @@ async fn run_agent_native_inner(
         }
         if session.rounds_used >= session.rounds_budget {
             stop_reason = "budget".to_string();
-            stop_detail = format!(
-                "已经连续跑了 {} 轮，还没做完。直接发消息让我继续，或者立个目标让我自己跑到底。",
-                session.rounds_budget
-            );
+            stop_detail = if goal_mode {
+                format!(
+                    "已经连续跑了 {} 轮，目标还没做完。直接发消息让我继续跑，或者点暂停、晚点再接着做。",
+                    session.rounds_budget
+                )
+            } else {
+                format!(
+                    "已经连续跑了 {} 轮，还没做完。直接发消息让我继续，或者立个目标让我自己跑到底。",
+                    session.rounds_budget
+                )
+            };
             if goal_mode {
                 session.status = GoalStatus::Budget;
             }
@@ -1293,8 +1420,10 @@ pub async fn test_provider(
         .build()
         .map_err(|e| e.to_string())?;
 
+    // P0-3：测连通也按接入方式翻模型 ID（直连与反代的 ID 不一样）。
+    let wire_model = crate::models::resolve_model(&provider.kind, &model);
     let body = json!({
-        "model": model,
+        "model": wire_model,
         "messages": [{"role": "user", "content": "Reply with exactly: OK"}],
         "max_tokens": 16,
         "stream": false
