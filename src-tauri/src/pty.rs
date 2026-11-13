@@ -107,6 +107,10 @@ pub async fn pty_spawn(
         .openpty(size)
         .map_err(|e| format!("打不开 PTY：{e}"))?;
     let mut cmd = CommandBuilder::new(shell_program());
+    // 前端是 xterm.js（xterm 兼容终端）：TERM 必须配成 xterm-256color。
+    // 不配时子进程继承到的 TERM=dumb，bash 会关掉 readline（方向键
+    // 变成字面 ^[[A、翻不了历史），clear/vim/top 这类程序直接报错。
+    cmd.env("TERM", "xterm-256color");
     if !workdir.trim().is_empty() {
         cmd.cwd(&workdir);
     }
