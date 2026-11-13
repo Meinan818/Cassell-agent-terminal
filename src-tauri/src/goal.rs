@@ -260,59 +260,145 @@ pub fn is_repeating(session: &GoalSession) -> bool {
     session.recent_calls.iter().all(|c| c == first)
 }
 
+/// 列表项的写法种类：同一份清单只用一种写法；空行后写法变了就是新一段。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ListKind {
+    Checkbox,
+    Dash,
+    Star,
+    Numbered,
+}
+
+fn is_numbered(t: &str) -> bool {
+    if let Some(dot) = t.find(|c| c == '.' || c == ')') {
+        let (num, rest) = t.split_at(dot);
+        !num.is_empty()
+            && num.chars().all(|c| c.is_ascii_digit())
+            && rest.len() > 1
+            && rest.as_bytes()[1] == b' '
+    } else {
+        false
+    }
+}
+
+fn list_kind(t: &str) -> Option<ListKind> {
+    if t.starts_with("- [ ]") || t.starts_with("- [x]") || t.starts_with("- [X]") {
+        Some(ListKind::Checkbox)
+    } else if t.starts_with("- ") {
+        Some(ListKind::Dash)
+    } else if t.starts_with("* ") {
+        Some(ListKind::Star)
+    } else if is_numbered(t) {
+        Some(ListKind::Numbered)
+    } else {
+        None
+    }
+}
+
+/// 一行是不是清单项的形状：- [ ] / - [x]、- 文本、* 文本、1. 文本。
+fn is_list_line(t: &str) -> bool {
+    list_kind(t).is_some()
+}
+
+/// 把一行清单项解析成 CheckItem；空项返回 None（不成项、不撑数）。
+fn parse_checklist_line(t: &str) -> Option<CheckItem> {
+    // - [ ] / - [x] 复选框。
+    if let Some(rest) = t
+        .strip_prefix("- [ ]")
+        .or_else(|| t.strip_prefix("- [x]").or_else(|| t.strip_prefix("- [X]")))
+    {
+        let done = !t.starts_with("- [ ]");
+        let item = rest.trim().to_string();
+        return if item.is_empty() {
+            None
+        } else {
+            Some(CheckItem { text: item, done })
+        };
+    }
+    // - 文本 / * 文本（无复选框，未完成）。
+    if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+        let item = rest.trim().to_string();
+        return if item.is_empty() {
+            None
+        } else {
+            Some(CheckItem { text: item, done: false })
+        };
+    }
+    // 1. 文本 / 1) 文本（数字列表，未完成）。
+    if is_numbered(t) {
+        if let Some(dot) = t.find(|c| c == '.' || c == ')') {
+            let item = t[dot + 2..].trim().to_string();
+            return if item.is_empty() {
+                None
+            } else {
+                Some(CheckItem { text: item, done: false })
+            };
+        }
+    }
+    None
+}
+
 /// 从一轮的正文里解析“目标清单”块（模型按目标提示词在首轮列出）。
 /// 找不到就返回空——没有清单就不显示，绝不编一个假的。
 /// 接受的写法：- [ ] / - [x]（首选）、- 文本、* 文本、1. 文本——
 /// 模型常写数字列表（实测任务 1 就是 1. 2. 3.），只认复选框会漏掉。
+///
+/// 清单块到哪结束：第一个非空、非列表项的行就是块尾（“路专员，做完了”
+/// 之类的汇报正文、“**验证结果**”小节都到此为止）。旧实现只认 "## "
+/// 标题才停，结果最终汇报里的“**验证结果** + 数字列表”被当成清单项
+/// 吞进来（实测：清单 4/8 项、4 项“没做完”，活干完了还被判卡住）。
+/// 空行本身不结束块——往后看一眼：下一行非空内容还是同种写法的列表项
+/// 就继续（行距不算数）；写法变了（复选框清单后跟数字列表）或不是列表
+/// 项，就是新一段，到此为止。
 pub fn parse_checklist(text: &str) -> Vec<CheckItem> {
+    let lines: Vec<&str> = text.lines().collect();
     let mut items = Vec::new();
     let mut in_block = false;
-    for line in text.lines() {
-        let t = line.trim();
-        if t.starts_with("## ") && t.contains("目标清单") {
-            in_block = true;
+    let mut kind: Option<ListKind> = None;
+    let mut i = 0;
+    while i < lines.len() {
+        let t = lines[i].trim();
+        if !in_block {
+            if t.starts_with("## ") && t.contains("目标清单") {
+                in_block = true;
+            }
+            i += 1;
             continue;
         }
-        if in_block && t.starts_with("## ") {
+        if t.starts_with("## ") {
             break;
         }
-        if !in_block {
+        if t.is_empty() {
+            // 空行：看下一行非空内容——还是同种写法的列表项就继续，
+            // 写法变了或不是列表项就结束。
+            let mut j = i + 1;
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+            if j >= lines.len() {
+                break;
+            }
+            let nt = lines[j].trim();
+            let resumes = match kind {
+                None => is_list_line(nt),
+                Some(k) => list_kind(nt) == Some(k),
+            };
+            if nt.starts_with("## ") || !resumes {
+                break;
+            }
+            i += 1;
             continue;
         }
-        // - [ ] / - [x] 复选框。
-        if let Some(rest) = t
-            .strip_prefix("- [ ]")
-            .or_else(|| t.strip_prefix("- [x]").or_else(|| t.strip_prefix("- [X]")))
-        {
-            let done = !t.starts_with("- [ ]");
-            let item = rest.trim().to_string();
-            if !item.is_empty() {
-                items.push(CheckItem { text: item, done });
-            }
-            continue;
+        if !is_list_line(t) {
+            break;
         }
-        // - 文本 / * 文本（无复选框，未完成）。
-        if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
-            let item = rest.trim().to_string();
-            if !item.is_empty() {
-                items.push(CheckItem { text: item, done: false });
-            }
-            continue;
+        if kind.is_none() {
+            kind = list_kind(t);
         }
-        // 1. 文本 / 1) 文本（数字列表，未完成）。
-        if let Some(dot) = t.find(|c| c == '.' || c == ')') {
-            let (num, rest) = t.split_at(dot);
-            if !num.is_empty()
-                && num.chars().all(|c| c.is_ascii_digit())
-                && rest.len() > 1
-                && rest.as_bytes()[1] == b' '
-            {
-                let item = rest[2..].trim().to_string();
-                if !item.is_empty() {
-                    items.push(CheckItem { text: item, done: false });
-                }
-            }
+        if let Some(item) = parse_checklist_line(t) {
+            items.push(item);
         }
+        i += 1;
     }
     items
 }
@@ -1155,6 +1241,51 @@ mod tests {
     fn checklist_of_empty_when_no_block() {
         let msgs = vec![json!({"role": "assistant", "content": "普通回复，没有清单。"})];
         assert!(checklist_of(&msgs).is_empty());
+    }
+
+    #[test]
+    fn checklist_stops_at_report_prose() {
+        // 实测假卡住的根因：最终汇报里清单后面跟了“**验证结果** + 数字列表”，
+        // 旧解析只认 "## " 才停，把 4 条验证步骤也算成未完成清单项（4/8 项）。
+        let text = "先说结论：\n## 目标清单\n- [x] 读 start.txt 确认链条要求\n- [x] 把四个文件的 VERSION 改成 2\n- [x] 运行 grep 验证\n- [x] 重新读取四个文件确认落盘\n\n路专员，链条走完，全部验证通过。\n\n**验证结果**：\n1. `grep -rn VERSION` 输出四行均为 VERSION=2，退出码 0。\n2. 严格逐文件断言 PASS，退出码 0。\n3. `grep -c \"VERSION=1\"` 均为 0，无残留。\n4. read_file 逐份重读，内容与预期一致。\n";
+        let items = parse_checklist(text);
+        assert_eq!(items.len(), 4);
+        assert!(items.iter().all(|i| i.done));
+    }
+
+    #[test]
+    fn checklist_stops_at_numbered_list_after_blank() {
+        // 清单后只隔空行、直接跟数字列表：也不算进清单。
+        let text = "## 目标清单\n- [x] 做 A\n\n1. 验证步骤一\n2. 验证步骤二\n";
+        let items = parse_checklist(text);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "做 A");
+    }
+
+    #[test]
+    fn checklist_keeps_blank_lines_between_items() {
+        // 清单项之间隔空行（行距），下一行还是列表项：继续算。
+        let text = "## 目标清单\n- [ ] 做 A\n\n- [ ] 做 B\n";
+        let items = parse_checklist(text);
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn checklist_stops_at_prose_mid_block() {
+        // 清单列到一半、后面跟汇报正文：只取正文前面的项。
+        let text = "## 目标清单\n- [ ] 读 start.txt 确认链条要求\n- [ ] 把 VERSION 改成 2\n\n先看起点。\n";
+        let items = parse_checklist(text);
+        assert_eq!(items.len(), 2);
+        assert!(!items.iter().any(|i| i.done));
+    }
+
+    #[test]
+    fn checklist_contiguous_mixed_kinds_parse() {
+        // 紧挨着、中间没空行：不同写法也算同一份清单（行距没断就是一块）。
+        let text = "## 目标清单\n- [x] 做 A\n1. 做 B\n2. 做 C\n";
+        let items = parse_checklist(text);
+        assert_eq!(items.len(), 3);
+        assert!(items[0].done);
     }
 
     // 清单门（P0-6 补洞）：DSML_DROP 场景——网关丢掉调用、模型只回一句
