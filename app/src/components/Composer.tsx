@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Approval,
+  ContextStatus,
   Effort,
   FileEntry,
   Mode,
@@ -37,6 +38,13 @@ interface ComposerProps {
   goalActive: boolean;
   /** P0-5 修改方案：App 点"修改方案"时 +1，输入框聚焦。 */
   focusNonce: number;
+  /** P1-17：上下文状态（上轮实报用量 + 顾问决策）。没跑过时为 null，
+      仪表条隐藏，不编数字。 */
+  contextStatus: ContextStatus | null;
+  /** P1-17：仪表条上点“现在压缩”（近上限时才出现）。 */
+  onCompactRequest: () => void;
+  /** P1-17：点仪表条打开上下文仪表盘抽屉。 */
+  onOpenContext: () => void;
 }
 
 type Popover = "model" | "perm" | "attach" | "mode" | null;
@@ -45,6 +53,64 @@ type Popover = "model" | "perm" | "attach" | "mode" | null;
 function dispatchBallCue(cue: string) {
   window.dispatchEvent(
     new CustomEvent("cassell:ball-cue", { detail: { cue } }),
+  );
+}
+
+/** P1-17：Composer 常驻的上下文仪表条。数字全部来自后端实报，
+    窗口未知时不渲染（不编数字）。 */
+function ContextMeter({
+  status,
+  onCompactRequest,
+  onOpenContext,
+}: {
+  status: ContextStatus;
+  onCompactRequest: () => void;
+  onOpenContext: () => void;
+}) {
+  const windowTokens = status.window_tokens ?? 0;
+  const ratio =
+    windowTokens > 0
+      ? Math.min(1, status.prompt_tokens / windowTokens)
+      : 0;
+  const pct = Math.round(ratio * 100);
+  const state =
+    ratio >= 0.85 ? "critical" : ratio >= 0.7 ? "warn" : "ok";
+  const fmt = (n: number) => n.toLocaleString("en-US");
+  return (
+    <div className={`ctx-meter ctx-${state}`} role="status">
+      <button
+        type="button"
+        className="ctx-meter-bar"
+        onClick={onOpenContext}
+        title="打开上下文仪表盘"
+        aria-label={`上下文已用 ${pct}%，打开仪表盘`}
+      >
+        <span
+          className="ctx-meter-fill"
+          style={{ width: `${Math.max(2, pct)}%` }}
+        />
+      </button>
+      <button
+        type="button"
+        className="ctx-meter-text"
+        onClick={onOpenContext}
+        title="打开上下文仪表盘"
+      >
+        上下文 {fmt(status.prompt_tokens)} / {fmt(windowTokens)}（{pct}%）
+        {status.hit_rate != null &&
+          ` · 缓存命中 ${Math.round(status.hit_rate * 100)}%`}
+      </button>
+      {state === "warn" && <span className="ctx-meter-note">快满了</span>}
+      {state === "critical" && (
+        <button
+          type="button"
+          className="ctx-compact-btn"
+          onClick={onCompactRequest}
+        >
+          现在压缩
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -63,6 +129,9 @@ export default function Composer({
   onGoalModeChange,
   goalActive,
   focusNonce,
+  contextStatus,
+  onCompactRequest,
+  onOpenContext,
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [popover, setPopover] = useState<Popover>(null);
@@ -366,6 +435,18 @@ export default function Composer({
           settings.mode === "eva" ? "给 EVA 下达指令" : "给诺玛下达指令"
         }
       />
+
+      {/* P1-17：上下文仪表条（常驻）。只在有实报数据、窗口已知时出现；
+          ≥70% 标“快满了”，≥85% 挂“现在压缩”按钮。点条打开仪表盘抽屉。 */}
+      {contextStatus &&
+        contextStatus.has_data &&
+        contextStatus.window_tokens != null && (
+          <ContextMeter
+            status={contextStatus}
+            onCompactRequest={onCompactRequest}
+            onOpenContext={onOpenContext}
+          />
+        )}
 
       <div className="composer-row">
         <button

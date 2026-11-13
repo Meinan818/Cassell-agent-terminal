@@ -2660,3 +2660,199 @@ span.w2-goal-chip.w2-on {
   font-size: 12px;
   white-space: nowrap;
 }
+
+/* ---------- P1-17 上下文仪表条（Composer 常驻） ---------- */
+/* 无框线、柔和底色、平滑过渡；warn 用墨蓝、critical 用红，不用金色。 */
+.ctx-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--bg-soft);
+  animation: live-rise 300ms var(--ease) both;
+}
+.ctx-meter-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+}
+.ctx-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 350ms var(--ease), background 250ms var(--ease);
+}
+.ctx-meter.ctx-warn .ctx-meter-fill {
+  background: #3b82f6;
+}
+.ctx-meter.ctx-critical .ctx-meter-fill {
+  background: var(--danger);
+}
+.ctx-meter-text {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  padding: 0;
+  cursor: pointer;
+  background: none;
+}
+.ctx-meter-note {
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.ctx-compact-btn {
+  font-size: 12px;
+  color: #fff;
+  background: var(--danger);
+  border-radius: 999px;
+  padding: 4px 12px;
+  white-space: nowrap;
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease);
+}
+.ctx-compact-btn:hover {
+  opacity: 0.88;
+}
+.ctx-compact-btn:active {
+  transform: scale(0.97);
+}
+
+/* ---------- P1-17 仪表盘抽屉 ---------- */
+.ctx-drawer-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  overflow: hidden;
+  margin: 4px 0 8px;
+}
+.ctx-drawer-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 350ms var(--ease), background 250ms var(--ease);
+}
+.ctx-drawer-fill.warn {
+  background: #3b82f6;
+}
+.ctx-drawer-fill.critical {
+  background: var(--danger);
+}
+.ctx-archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ctx-archive-item {
+  background: var(--bg-soft);
+  border-radius: 12px;
+  padding: 10px 12px;
+  animation: live-rise 300ms var(--ease) both;
+}
+.ctx-archive-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.ctx-recall {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ctx-recall-msg {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ctx-recall-role {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.ctx-recall-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ctx-actions {
+  display: flex;
+  gap: 8px;
+}
+.ctx-action-btn {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  transition: opacity 200ms var(--ease), transform 200ms var(--ease);
+}
+.ctx-action-btn:hover {
+  opacity: 0.88;
+}
+.ctx-action-btn:active {
+  transform: scale(0.98);
+}
+
+/* ---------- P1-13/P1-17 压缩卡片与摘要卡片 ---------- */
+.compact-card,
+.recap-card {
+  background: var(--bg-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  animation: live-rise 300ms var(--ease) both;
+}
+.compact-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.compact-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.compact-card-meta {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.compact-card-body {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.compact-card-link {
+  margin-top: 8px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--accent);
+  background: none;
+}
+.compact-card-link:hover {
+  opacity: 0.8;
+}

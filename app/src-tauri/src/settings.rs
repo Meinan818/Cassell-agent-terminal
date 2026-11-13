@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +28,14 @@ pub struct ProviderConfig {
 
 fn default_access_kind() -> String {
     "direct".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_compression_tier() -> String {
+    "auto".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +71,15 @@ pub struct Settings {
     /// 压缩模型：压缩历史时用的模型，和主模型分开配（P0-3）。
     /// 改主模型、迁移退役 ID 都不碰它。老设置文件里没有时默认 deepseek-flash。
     pub compression_model: String,
+    /// P1-1：自动压缩开关。开着时目标模式由 CacheAdvisor 按公式决定
+    /// 什么时候压；关了就只手动压（/compact 与仪表盘按钮）。
+    /// 老设置文件里没有时默认开（P1 已立项，用户 2026-11-13 定 P0 打包同时做 P1）。
+    #[serde(default = "default_true")]
+    pub compression_enabled: bool,
+    /// P1-1：压缩档位：auto（按服务商自动选，默认）| cache-preserving
+    /// | balanced | aggressive。写错的按 auto。
+    #[serde(default = "default_compression_tier")]
+    pub compression_tier: String,
     /// 沙箱档位（P0-8）：read-only 只读 | workspace-write 读写工作区（默认）
     /// | danger-full-access 无边界（文件工具可读写工作区外的绝对路径）。
     /// 只管“技术上能碰什么”，不管“何时问你”——那是审批的活。
@@ -96,6 +113,8 @@ impl Default for Settings {
             approval: "on-demand".to_string(),
             delete_confirm: "always".to_string(),
             compression_model: crate::models::default_compression_model(),
+            compression_enabled: true,
+            compression_tier: "auto".to_string(),
             sandbox: "workspace-write".to_string(),
             theme: "light".to_string(),
             streaming: true,
@@ -222,11 +241,17 @@ pub fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 pub fn load_settings(app: &AppHandle) -> Settings {
-    let mut settings = match settings_path(app) {
-        Ok(path) => match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str::<Settings>(&text).unwrap_or_default(),
-            Err(_) => Settings::default(),
-        },
+    match settings_path(app) {
+        Ok(path) => load_settings_from_file(&path),
+        Err(_) => Settings::default(),
+    }
+}
+
+/// 按路径读设置文件（与 load_settings 同一套解析 + 归一；P1 的泛型命令
+/// 用它——命令只认目录、不认具体 Runtime，才能在 MockRuntime 下测）。
+pub fn load_settings_from_file(path: &Path) -> Settings {
+    let mut settings = match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str::<Settings>(&text).unwrap_or_default(),
         Err(_) => Settings::default(),
     };
     // Older builds silently initialized the workspace from the process CWD.
@@ -287,6 +312,13 @@ pub fn load_settings(app: &AppHandle) -> Settings {
     }
     if settings.compression_model.trim().is_empty() {
         settings.compression_model = crate::models::default_compression_model();
+    }
+    // P1-1：压缩档位归一（只有四个合法值，写错的按 auto）。
+    if !matches!(
+        settings.compression_tier.as_str(),
+        "auto" | "cache-preserving" | "balanced" | "aggressive"
+    ) {
+        settings.compression_tier = "auto".to_string();
     }
     settings
 }

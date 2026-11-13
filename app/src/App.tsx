@@ -6,6 +6,8 @@ import type {
   ChatMsg,
   CheckpointInfo,
   CodexInfo,
+  CompactConversationResult,
+  ContextStatus,
   GoalState,
   GoalSummary,
   InspectorView,
@@ -46,6 +48,7 @@ import RightPanel, { type MergeSummary } from "./components/RightPanel";
 import {
   ArchiveDrawer,
   CommandPalette,
+  ContextDrawer,
   HelpDrawer,
   SettingsModal,
   UsageDrawer,
@@ -1266,6 +1269,49 @@ function ErrorCard({ msg, onRetry, eva, fast, ritual, gaze }: {
   );
 }
 
+/* P1-13 压缩卡片：XiaoSi Compress2.0 摘要。原文已归档，点“查看原文”
+ * 打开上下文仪表盘、定位到这次归档。卡片本身进后端历史（assistant 内容
+ * = 摘要正文），压缩后的对话接着聊没问题。 */
+function CompactCard({
+  msg,
+  onViewArchive,
+}: {
+  msg: ChatMsg;
+  onViewArchive: () => void;
+}) {
+  const c = msg.compact;
+  return (
+    <div className="msg compact-card">
+      <div className="compact-card-head">
+        <span className="compact-card-title">XiaoSi Compress2.0 · 已压缩并归档</span>
+        {c && (
+          <span className="compact-card-meta">
+            {c.messagesBefore} 条 → {c.messagesAfter} 条
+          </span>
+        )}
+      </div>
+      <div className="compact-card-body">{msg.text}</div>
+      {c && (
+        <button type="button" className="compact-card-link" onClick={onViewArchive}>
+          查看原文（{c.pages} 页归档）→
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* P1-17 摘要卡片：/recap 的结果，只看不压。历史不动、这张卡不进后端。 */
+function RecapCard({ msg }: { msg: ChatMsg }) {
+  return (
+    <div className="msg recap-card">
+      <div className="compact-card-head">
+        <span className="compact-card-title">摘要（未压缩，历史没动）</span>
+      </div>
+      <div className="compact-card-body">{msg.text}</div>
+    </div>
+  );
+}
+
 /* ---- 全站平滑过渡铁律（2026-11-13 用户定：不允许任何功能点一下就蹦出来） ----
  * 所有浮层原来只有进场动画、没有退场动画：关闭时 React 立刻卸载，视觉上就是
  * “蹦”一下消失。这个 hook 把“关闭”拆成两步：先把值置空并给组件挂 closing
@@ -1350,7 +1396,7 @@ export default function App() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [merge, setMerge] = useState<MergeSummary | null>(null);
   const [drawer, setDrawer] = useState<
-    "settings" | "archive" | "help" | "usage" | null
+    "settings" | "archive" | "help" | "usage" | "context" | null
   >(null);
   const [codexInfo, setCodexInfo] = useState<CodexInfo | null>(null);
   const [testing, setTesting] = useState(false);
@@ -1433,6 +1479,136 @@ export default function App() {
       setUsageOverview(null);
     } finally {
       setUsageLoading(false);
+    }
+  }, []);
+  /** P1-17：上下文状态（上轮实报用量 + 顾问决策 + 归档），仪表盘与
+      Composer 仪表条共用。切任务 / 每轮跑完后刷新；没跑过就是空状态。 */
+  const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null);
+  const [contextLoading, setContextLoading] = useState(false);
+  const loadContextStatus = useCallback(async (taskId?: string | null) => {
+    const id = taskId ?? activeTaskIdRef.current;
+    if (!id) {
+      setContextStatus(null);
+      return;
+    }
+    setContextLoading(true);
+    try {
+      const st = await invoke<ContextStatus>("get_context_status", { taskId: id });
+      setContextStatus(st);
+    } catch {
+      setContextStatus(null);
+    } finally {
+      setContextLoading(false);
+    }
+  }, []);
+  /** P1-17：打开上下文仪表盘抽屉（同时刷新一次状态）。 */
+  const handleShowContext = useCallback(() => {
+    setDrawer("context");
+    void loadContextStatus();
+  }, [loadContextStatus]);
+  /** P1-13/P1-17：手动压缩当前对话（/compact 与仪表盘按钮共用）。
+      先过顾问：顾问说先不压就只提示原因、不动历史；force 只有仪表条
+      “现在压缩”才传 true（近上限时用户明确要压）。 */
+  const handleCompact = useCallback(
+    async (force = false) => {
+      const taskId = activeTaskIdRef.current;
+      if (!taskId || runningRef.current) return;
+      const task = tasksRef.current.find((t) => t.id === taskId);
+      const history = (task?.messages ?? [])
+        .filter(
+          (m) =>
+            !m.streaming &&
+            m.text.trim() &&
+            (m.role === "user" ||
+              (m.role === "assistant" && (!m.kind || m.kind === "compact"))),
+        )
+        .map((m) => ({ role: m.role, content: m.text }));
+      try {
+        const res = await invoke<CompactConversationResult>("compact_conversation", {
+          taskId,
+          history,
+          force,
+        });
+        const card: ChatMsg = {
+          id: uid(),
+          role: "assistant",
+          text: res.summary,
+          kind: "compact",
+          compact: {
+            archiveId: res.archive_id,
+            pages: res.pages,
+            messagesBefore: res.messages_before,
+            messagesAfter: res.messages_after,
+          },
+        };
+        setTasks((prev) =>
+          prev.map((t) => {
+            if (t.id !== taskId) return t;
+            // 删掉开头的 compressed_count 条文本消息（和发给后端的是同一批），
+            // 在第一条保留下来的文本消息之前插压缩卡片。
+            let dropped = 0;
+            let inserted = false;
+            const messages: ChatMsg[] = [];
+            for (const m of t.messages) {
+              const isText =
+                !m.streaming &&
+                m.text.trim() &&
+                (m.role === "user" ||
+                  (m.role === "assistant" && (!m.kind || m.kind === "compact")));
+              if (isText && dropped < res.compressed_count) {
+                dropped += 1;
+                continue;
+              }
+              if (!inserted) {
+                messages.push(card);
+                inserted = true;
+              }
+              messages.push(m);
+            }
+            if (!inserted) messages.push(card);
+            return { ...t, messages };
+          }),
+        );
+        showNotice(
+          `已压缩：${res.messages_before} 条 → ${res.messages_after} 条，原文已归档（${res.pages} 页）。`,
+        );
+        void loadContextStatus(taskId);
+      } catch (e) {
+        showNotice(`压缩没做成：${String(e)}`);
+      }
+    },
+    [loadContextStatus],
+  );
+  /** P1-17：生成摘要，不压缩（/recap）。历史不动，只在对话里插一张摘要卡。 */
+  const handleRecap = useCallback(async () => {
+    const taskId = activeTaskIdRef.current;
+    if (!taskId || runningRef.current) return;
+    const task = tasksRef.current.find((t) => t.id === taskId);
+    const history = (task?.messages ?? [])
+      .filter(
+        (m) =>
+          !m.streaming &&
+          m.text.trim() &&
+          (m.role === "user" ||
+            (m.role === "assistant" && (!m.kind || m.kind === "compact"))),
+      )
+      .map((m) => ({ role: m.role, content: m.text }));
+    try {
+      const summary = await invoke<string>("recap_conversation", { history });
+      const card: ChatMsg = {
+        id: uid(),
+        role: "assistant",
+        text: summary,
+        kind: "recap",
+        recap: true,
+      };
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId ? { ...t, messages: [...t.messages, card] } : t,
+        ),
+      );
+    } catch (e) {
+      showNotice(`摘要没做成：${String(e)}`);
     }
   }, []);
   /** 审计 P2-19：回到底部按钮（离开底部超过一屏时出现）。 */
@@ -1648,6 +1824,11 @@ export default function App() {
       // Storage full or unavailable — tasks still work in memory.
     }
   }, [tasks]);
+
+  // P1-17：切任务时刷新该任务的上下文状态（仪表条跟着任务走）。
+  useEffect(() => {
+    void loadContextStatus(activeTaskId);
+  }, [activeTaskId, loadContextStatus]);
 
   // ---- Persist projects locally（与任务同一套机制） ----
   useEffect(() => {
@@ -2304,12 +2485,15 @@ export default function App() {
         );
       }
       // 历史只取本轮之前的回合（刚发的这条不重复进历史，prompt 已是最后一条）。
+      // P1-13：压缩卡片（kind === "compact"）要进历史——它的 text 就是摘要正文，
+      // 是压缩后对话的上下文；摘要卡（kind === "recap"）只是展示，不进。
       const task = tasksRef.current.find((t) => t.id === taskId);
       const prior = (task?.messages ?? []).filter(
         (m) =>
           !m.streaming &&
           m.text.trim() &&
-          (m.role === "user" || (m.role === "assistant" && !m.kind)),
+          (m.role === "user" ||
+            (m.role === "assistant" && (!m.kind || m.kind === "compact"))),
       );
       const history = prior
         .slice(-10)
@@ -2448,6 +2632,51 @@ export default function App() {
               : t,
           ),
         );
+        // P1-13：本轮开始时自动压缩过（目标模式）→ 在本轮回复之前插一张
+        // 压缩卡片（摘要正文 + 归档信息）；问到被压掉的内容时，本轮回复
+        // 下方挂一行幽灵召回说明。
+        if (result.compaction || result.ghost_recalled) {
+          setTasks((prev) =>
+            prev.map((t) => {
+              if (t.id !== taskId) return t;
+              let messages = t.messages;
+              if (result.ghost_recalled) {
+                messages = messages.map((m) =>
+                  m.id === assistantMsgId
+                    ? {
+                        ...m,
+                        ghostNote: `你问到的内容之前被压缩过，已从归档找回原文（“${result.ghost_recalled}”）。`,
+                      }
+                    : m,
+                );
+              }
+              if (result.compaction) {
+                const card: ChatMsg = {
+                  id: uid(),
+                  role: "assistant",
+                  text:
+                    result.compaction.summary ||
+                    `此前 ${result.compaction.messages_before} 条消息已压缩，原文归档在 ${result.compaction.archive_id}（${result.compaction.pages} 页）。`,
+                  kind: "compact",
+                  compact: {
+                    archiveId: result.compaction.archive_id,
+                    pages: result.compaction.pages,
+                    messagesBefore: result.compaction.messages_before,
+                    messagesAfter: result.compaction.messages_after,
+                  },
+                };
+                const idx = messages.findIndex((m) => m.id === assistantMsgId);
+                messages =
+                  idx >= 0
+                    ? [...messages.slice(0, idx), card, ...messages.slice(idx)]
+                    : [...messages, card];
+              }
+              return { ...t, messages };
+            }),
+          );
+        }
+        // P1-17：每轮跑完刷新上下文状态（仪表条 + 仪表盘）。
+        void loadContextStatus(taskId);
         // 球：成功 → done；取消 → stopped；>60 秒才成功 → long-task-done。
         const elapsed = Date.now() - (runStartRef.current || Date.now());
         if (result.cancelled) {
@@ -3280,6 +3509,9 @@ export default function App() {
         archiveCurrentTask: handleArchiveCurrentTask,
         clearChat: handleClearChat,
         showUsage: handleShowUsage,
+        openContextDrawer: handleShowContext,
+        runCompact: () => void handleCompact(false),
+        runRecap: () => void handleRecap(),
         acceptAllReview: handleAcceptAllReview,
         jumpToTask: (id: string) => setActiveTaskId(id),
       },
@@ -3615,6 +3847,14 @@ export default function App() {
                   ritual={ritual}
                   gaze={gaze}
                 />
+              ) : m.kind === "compact" ? (
+                <CompactCard
+                  key={m.id}
+                  msg={m}
+                  onViewArchive={handleShowContext}
+                />
+              ) : m.kind === "recap" ? (
+                <RecapCard key={m.id} msg={m} />
               ) : (
                 <div
                   key={m.id}
@@ -3701,6 +3941,12 @@ export default function App() {
                     {m.limitNotice && !m.streaming && (
                       <div className="run-limit-notice">
                         <span>{m.limitNotice.text}</span>
+                      </div>
+                    )}
+                    {/* P1-13：幽灵召回——本轮问题问到被压掉的内容，已从归档找回原文。 */}
+                    {m.ghostNote && !m.streaming && (
+                      <div className="run-limit-notice">
+                        <span>{m.ghostNote}</span>
                       </div>
                     )}
                   </div>
@@ -3817,6 +4063,9 @@ export default function App() {
                 activeTask.goal.status === "paused")
             }
             focusNonce={focusNonce}
+            contextStatus={contextStatus}
+            onCompactRequest={() => void handleCompact(true)}
+            onOpenContext={handleShowContext}
           />
         </div>
       </main>
@@ -3907,6 +4156,18 @@ export default function App() {
       )}
       {renderDrawer === "help" && (
         <HelpDrawer onClose={() => setDrawer(null)} closing={drawerClosing} />
+      )}
+      {renderDrawer === "context" && (
+        <ContextDrawer
+          taskId={activeTaskId ?? "default"}
+          status={contextStatus}
+          loading={contextLoading}
+          onRefresh={() => void loadContextStatus()}
+          onCompact={() => void handleCompact(false)}
+          onRecap={() => void handleRecap()}
+          onClose={() => setDrawer(null)}
+          closing={drawerClosing}
+        />
       )}
       {renderDrawer === "usage" && (
         <UsageDrawer

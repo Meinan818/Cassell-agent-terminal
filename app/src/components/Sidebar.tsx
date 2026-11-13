@@ -29,7 +29,7 @@ interface SidebarProps {
   running: boolean;
   /** P2-6：名册与输入框芯片的球接同一份 markState，不要永远 idle。 */
   markState: MarkState;
-  drawer: "settings" | "archive" | "help" | "usage" | null;
+  drawer: "settings" | "archive" | "help" | "usage" | "context" | null;
   /**
    * 切换仪式（第 3 步第四波）：App 的 handleModeChange 统一派发；
    * 名册行与段位牌在仪式里点亮/褪去，球与顶栏共用同一份仪式。

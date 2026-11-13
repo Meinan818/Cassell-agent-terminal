@@ -13,9 +13,10 @@ use crate::settings::{load_settings, Settings};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::oneshot;
 
 /// 审批请求自增序号（生成唯一请求 id，不引入新依赖）。
@@ -81,7 +82,7 @@ pub struct ChatMsg {
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentResult {
     pub success: bool,
     /// 用户点了停止（不是失败）。前端据此只收尾，不报“任务失败”。
@@ -111,6 +112,14 @@ pub struct AgentResult {
     /// 没验证的改动。前端据此刷新目标卡片。
     #[serde(default)]
     pub goal: Option<Value>,
+    /// P1-1/P1-13：本轮开始时自动压缩过（目标模式才有）：归档 id、
+    /// 压掉几条、密封检查点。前端据此在对话里插一张压缩卡片。
+    #[serde(default)]
+    pub compaction: Option<crate::compact::CompactionReport>,
+    /// P1-13：本轮问题问到了之前被压掉的内容，已从归档把原文找回来
+    /// 塞进上下文（幽灵召回）。值是那条被召回消息的摘要，前端可提示用户。
+    #[serde(default)]
+    pub ghost_recalled: Option<String>,
 }
 
 /// 显示名取首字 + “专员”（如“路明非”→“路专员”）；没填就用默认“路专员”。
@@ -1252,6 +1261,9 @@ async fn run_agent_native_inner(
     // 续跑带完整上下文（含 tool_calls 与工具结果），模型不用重新读文件找进度。
     let mut session: GoalSession;
     let mut goal_mode = false;
+    // P1-1：上一轮目标是不是刚完成（Done 后续跑）——阶段按 Deliver 算，
+    // 保护值乘 0.5，压缩最积极。
+    let mut resumed_after_done = false;
     if let Some(gid) = req.goal_id.clone() {
         let existing = { state.goals.lock().await.remove(&gid) };
         match existing {
@@ -1283,6 +1295,7 @@ async fn run_agent_native_inner(
                 } else {
                     // 续跑已有目标：新消息追加进会话；resume 时只追加一句运行时提示。
                     goal_mode = true;
+                    resumed_after_done = matches!(s.status, GoalStatus::Done);
                     if req.resume_goal {
                         s.messages.push(json!({"role": "user", "content": "（继续完成目标：按目标清单接着做，不要从头开始，也不要重复已经做完的步骤。）"}));
                     } else {
@@ -1381,6 +1394,111 @@ async fn run_agent_native_inner(
             provider.kind, req.model, wire_model
         );
     }
+    // P1-1/P1-13：目标模式自动压缩 + 幽灵召回（CacheAdvisor 决定时机）。
+    // 只在目标模式做：后端拥有完整 session.messages；普通对话后端每轮
+    // 只看到前端发来的最近 10 条，没有完整历史可压，走手动 /compact。
+    // 任何一步失败（模型没回、历史太短、指纹对不上）都不拦本轮：原样跑。
+    let mut compaction_report: Option<crate::compact::CompactionReport> = None;
+    let mut ghost_recalled: Option<String> = None;
+    let mut ghost_recall_text = String::new();
+    let mut advisor_decision: Option<crate::advisor::AdvisorDecision> = None;
+    if goal_mode && settings.compression_enabled {
+        let task_key = req
+            .task_id
+            .clone()
+            .or(req.goal_id.clone())
+            .unwrap_or_else(|| session.id.clone());
+        let data_dir = context_data_dir(&app);
+        let mut ctx = crate::compact::load_context_state(&data_dir, &task_key);
+        // 幽灵召回：本轮问题问到被压掉的内容，先把原文找回来塞进附录。
+        if !ctx.ghosts.is_empty()
+            && let Some(hit) = crate::advisor::ghost_check(&mut ctx.ghosts, &req.prompt)
+        {
+            let ghost = ctx.ghosts[hit].clone();
+            match crate::compact::load_archive_message(
+                &data_dir,
+                &task_key,
+                &ghost.archive_id,
+                ghost.index,
+            ) {
+                Ok((role, content, fingerprint)) if fingerprint == ghost.fingerprint => {
+                    let excerpt: String = content.chars().take(2000).collect();
+                    ghost_recall_text = format!(
+                        "\n[归档召回]\n用户现在问到的内容，在之前一次压缩中被归档了，原文如下（以原文为准，不要凭摘要编造）：\n{role}：{excerpt}\n"
+                    );
+                    ghost_recalled = Some(ghost.excerpt.clone());
+                    ctx.ghost_hits += 1;
+                    eprintln!(
+                        "[compact] 幽灵召回：问到被压掉的内容，已从归档 {} 找回",
+                        ghost.archive_id
+                    );
+                }
+                Ok(_) => {
+                    eprintln!("[compact] 幽灵召回：归档原文指纹对不上，放弃召回");
+                }
+                Err(e) => eprintln!("[compact] 幽灵召回失败：{e}"),
+            }
+            let _ = crate::compact::save_context_state(&data_dir, &ctx);
+        }
+        // 顾问决策：按保护值决定这次压不压。
+        let tier = crate::advisor::tier_for(&settings.compression_tier, &provider.id);
+        let phase = crate::advisor::compression_phase(
+            &req.run_mode,
+            session.verification_nudged,
+            !session.unverified_writes.is_empty(),
+            resumed_after_done,
+        );
+        // 预计回收量：可压段估算 − 摘要成本（纯函数，见 advisor::reclaim_estimate）。
+        let tail_keep = tier.tail_keep_messages();
+        let reclaim_estimate = crate::advisor::reclaim_estimate(&session.messages, tail_keep);
+        let decision = crate::advisor::decide(&crate::advisor::AdvisorInput {
+            hit_rate: ctx.hit_rate_ema,
+            prompt_tokens: ctx.last_prompt_tokens,
+            window: crate::advisor::context_window(&wire_model),
+            phase,
+            tier,
+            reclaim_estimate,
+        });
+        eprintln!(
+            "[advisor] 决策：{}（保护值 {:.2}，命中率 {:.0}%，压力 {:.0}%）",
+            decision.reason,
+            decision.protection,
+            decision.hit_rate * 100.0,
+            decision.pressure * 100.0
+        );
+        if decision.compress {
+            let wire_compression =
+                crate::models::resolve_model(&provider.kind, &settings.compression_model);
+            match crate::compact::compact_messages(crate::compact::CompactParams {
+                data_dir: &data_dir,
+                task_id: &task_key,
+                messages: &session.messages,
+                tail_keep,
+                prompt_tokens_before: ctx.last_prompt_tokens,
+                client: &client,
+                base_url: &provider.base_url,
+                key: &key,
+                wire_compression_model: &wire_compression,
+            })
+            .await
+            {
+                Ok((new_messages, report)) => {
+                    eprintln!(
+                        "[compact] 自动压缩：{} 条 → {} 条，归档 {}（{} 页）",
+                        report.messages_before, report.messages_after, report.archive_id,
+                        report.pages
+                    );
+                    crate::compact::record_compaction(&data_dir, &task_key, &report);
+                    session.messages = new_messages;
+                    compaction_report = Some(report);
+                }
+                Err(e) => {
+                    eprintln!("[compact] 自动压缩跳过：{e}");
+                }
+            }
+        }
+        advisor_decision = Some(decision);
+    }
     // P0-8：turn_ctx 用上面已定好的生效档位（NORMA 收紧过的），不再重算。
     let turn_ctx = TurnCtx {
         model: wire_model,
@@ -1406,7 +1524,9 @@ async fn run_agent_native_inner(
             .or(req.goal_id.clone())
             .unwrap_or_else(|| "default".to_string()),
         tools: frozen.tools.clone(),
-        system_with_appendix: frozen.with_appendix(&appendix),
+        // P1-13：幽灵召回的原文挂在附录末尾（动态内容，不进冻结前缀，
+        // 不影响前缀缓存；没有召回时就是空串）。
+        system_with_appendix: format!("{}{}", frozen.with_appendix(&appendix), ghost_recall_text),
     };
 
     let mut final_text = String::new();
@@ -1581,6 +1701,26 @@ async fn run_agent_native_inner(
         session_usage.add_record(&record);
     }
 
+    // P1-1/P1-17：本轮用量 + 顾问决策记进上下文状态（仪表盘与下次决策共用）。
+    // best-effort，写盘失败只记日志，不拦结果返回。
+    if advisor_decision.is_some() || prompt_total > 0 || completion_total > 0 {
+        let task_key = req
+            .task_id
+            .clone()
+            .or(req.goal_id.clone())
+            .unwrap_or_else(|| "default".to_string());
+        let data_dir = context_data_dir(&app);
+        crate::compact::update_run_usage(
+            &data_dir,
+            &task_key,
+            &provider.id,
+            &turn_ctx.model,
+            prompt_total,
+            cached_total,
+            advisor_decision,
+        );
+    }
+
     Ok(AgentResult {
         success: !cancelled,
         cancelled,
@@ -1611,6 +1751,8 @@ async fn run_agent_native_inner(
         stop_reason,
         stop_detail,
         goal: goal_summary,
+        compaction: compaction_report,
+        ghost_recalled,
     })
 }
 
@@ -1628,6 +1770,243 @@ pub async fn get_usage_stats(
     let (today, last7d, last30d) = crate::usage::overview_from_ledger(&records, now_unix);
     let session = state.session_usage.lock().await.clone();
     Ok(crate::usage::UsageOverview { today, last7d, last30d, session })
+}
+
+/// P1：上下文数据目录（应用数据目录；拿不到就退回系统临时目录，
+/// 与旧 context_dir 的兜底一致）。compact.rs 只认目录、不认 AppHandle，
+/// 这样纯函数可直接测、命令也可泛型过 MockRuntime。
+fn context_data_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("cassell-agent"))
+}
+
+/// P1 泛型命令共用：从任意 Runtime 的 handle 上读设置（只认目录，
+/// 与 load_settings 同一套解析 + 归一，见 settings::load_settings_from_file）。
+fn settings_from_app<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<Settings, String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("拿不到配置目录：{e}"))?;
+    Ok(crate::settings::load_settings_from_file(
+        &dir.join("settings.json"),
+    ))
+}
+
+/// P1-17：取某对话的上下文状态（仪表盘用）。
+/// 泛型过 R：真应用是 Wry，测试是 MockRuntime，都能调。
+#[tauri::command]
+pub async fn get_context_status<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    task_id: String,
+) -> Result<crate::compact::ContextStatus, String> {
+    let settings = settings_from_app(&app)?;
+    let data_dir = context_data_dir(&app);
+    Ok(crate::compact::build_context_status(
+        &data_dir, &task_id, &settings,
+    ))
+}
+
+/// 手动压缩 / 摘要共用的三件套：当前服务商 + Key + 压缩模型 wire ID。
+/// 压缩模型只按接入方式翻 wire ID，绝不走退役迁移（P0-3 的解耦规矩）。
+fn compression_setup(
+    settings: &Settings,
+) -> Result<(crate::settings::ProviderConfig, String, String), String> {
+    let provider = settings
+        .providers
+        .iter()
+        .find(|p| p.id == settings.provider_id)
+        .ok_or_else(|| format!("未找到服务商：{}", settings.provider_id))?
+        .clone();
+    let key = settings
+        .api_keys
+        .get(&provider.id)
+        .filter(|k| !k.trim().is_empty())
+        .cloned()
+        .ok_or_else(|| format!("还没有配置 {} 的 API Key", provider.name))?;
+    let wire_compression =
+        crate::models::resolve_model(&provider.kind, &settings.compression_model);
+    Ok((provider, key, wire_compression))
+}
+
+/// P1-13：手动压缩一段临时会话历史（普通对话用，前端发完整消息列表）。
+/// force=false 时先过 CacheAdvisor：顾问说先不压就返回原因，不动历史；
+/// force=true 时跳过顾问、直接压。成功返回摘要 + 归档信息 + 尾部原文，
+/// 前端据此替换本地消息列表（删掉被压掉的条数、插一张压缩卡片）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactConversationResult {
+    /// 摘要正文（不含密封标签，展示用）。
+    pub summary: String,
+    /// 密封检查点（摘要末尾那段，可校验）。
+    pub checkpoint: String,
+    pub archive_id: String,
+    pub pages: usize,
+    pub messages_before: usize,
+    pub messages_after: usize,
+    /// 被压掉的条数：前端从列表开头删掉这么多条文本消息。
+    pub compressed_count: usize,
+    /// 保留的尾部原文（role/content），前端只留这些 + 一张压缩卡片。
+    pub tail: Vec<ChatMsg>,
+}
+
+#[tauri::command]
+pub async fn compact_conversation<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    task_id: String,
+    history: Vec<ChatMsg>,
+    force: bool,
+) -> Result<CompactConversationResult, String> {
+    let settings = settings_from_app(&app)?;
+    let data_dir = context_data_dir(&app);
+    let (provider, key, wire_compression) = compression_setup(&settings)?;
+    let tier = crate::advisor::tier_for(&settings.compression_tier, &provider.id);
+    let state = crate::compact::load_context_state(&data_dir, &task_id);
+    if !force {
+        let decision = crate::advisor::decide(&crate::advisor::AdvisorInput {
+            hit_rate: state.hit_rate_ema,
+            prompt_tokens: state.last_prompt_tokens,
+            window: crate::advisor::context_window(
+                &crate::models::resolve_model(&provider.kind, &settings.model),
+            ),
+            phase: crate::advisor::Phase::Execute,
+            tier,
+            reclaim_estimate: 0,
+        });
+        if !decision.compress {
+            return Err(format!("顾问说先不压：{}", decision.reason));
+        }
+    }
+    let messages: Vec<Value> = history
+        .iter()
+        .map(|m| json!({"role": m.role, "content": m.content}))
+        .collect();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("创建连接失败：{e}"))?;
+    let (new_history, report) = crate::compact::compact_ephemeral_messages(
+        crate::compact::CompactParams {
+            data_dir: &data_dir,
+            task_id: &task_id,
+            messages: &messages,
+            tail_keep: tier.tail_keep_messages(),
+            prompt_tokens_before: state.last_prompt_tokens,
+            client: &client,
+            base_url: &provider.base_url,
+            key: &key,
+            wire_compression_model: &wire_compression,
+        },
+    )
+    .await?;
+    crate::compact::record_compaction(&data_dir, &task_id, &report);
+    // 摘要正文：新历史 [0] 是摘要 system 消息，去掉末尾的密封标签再展示。
+    let summary_full = new_history[0]
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    let summary = summary_full
+        .split("<xiaosi-checkpoint>")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let tail: Vec<ChatMsg> = new_history[1..]
+        .iter()
+        .map(|m| ChatMsg {
+            role: m
+                .get("role")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string(),
+            content: m
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect();
+    let compressed_count = report.messages_before - (report.messages_after - 1);
+    Ok(CompactConversationResult {
+        summary,
+        checkpoint: report.checkpoint.clone(),
+        archive_id: report.archive_id.clone(),
+        pages: report.pages,
+        messages_before: report.messages_before,
+        messages_after: report.messages_after,
+        compressed_count,
+        tail,
+    })
+}
+
+/// P1-17：只生成摘要、不压缩（/recap）。历史不动，只返回摘要文本，
+/// 前端展示成一张摘要卡片，不进后端历史、不归档。
+#[tauri::command]
+pub async fn recap_conversation<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    history: Vec<ChatMsg>,
+) -> Result<String, String> {
+    if history.len() < 4 {
+        return Err("消息太少，没什么可摘要".to_string());
+    }
+    let settings = settings_from_app(&app)?;
+    let (provider, key, wire_compression) = compression_setup(&settings)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("创建连接失败：{e}"))?;
+    let messages: Vec<Value> = history
+        .iter()
+        .map(|m| json!({"role": m.role, "content": m.content}))
+        .collect();
+    crate::compact::summarize_history(
+        &client,
+        &provider.base_url,
+        &key,
+        &wire_compression,
+        &messages,
+    )
+    .await
+}
+
+/// P1-13：按页召回某归档的原文。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecallPageResult {
+    pub messages: Vec<ChatMsg>,
+    pub total_pages: usize,
+    pub page: usize,
+}
+
+#[tauri::command]
+pub async fn recall_archive_page<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    task_id: String,
+    archive_id: String,
+    page: usize,
+) -> Result<RecallPageResult, String> {
+    let data_dir = context_data_dir(&app);
+    let (values, total_pages) =
+        crate::compact::recall_page(&data_dir, &task_id, &archive_id, page)?;
+    let messages = values
+        .iter()
+        .map(|m| ChatMsg {
+            role: m
+                .get("role")
+                .and_then(|r| r.as_str())
+                .unwrap_or("")
+                .to_string(),
+            content: m
+                .get("content")
+                .and_then(|c| c.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect();
+    Ok(RecallPageResult {
+        messages,
+        total_pages,
+        page,
+    })
 }
 
 /// 测试连通性：真发一条最小请求，返回真实结果，不编造。
@@ -1880,5 +2259,127 @@ mod tests {
             &json!({"id": "call_2", "function": {"name": "list_dir", "arguments": "{}"}}),
         );
         assert_eq!(slot2.get("type").and_then(|t| t.as_str()), Some("function"));
+    }
+
+    // ---- P1 真模型集成测试（默认忽略）----
+    // 直接调四个新命令（mock app 的 handle 当 AppHandle 用，泛型过 R）：
+    // recap/compact/status/recall。模型走 relay 转发的真 DeepSeek flash。
+    // 先起 relay：`python3 ~/workspace/p1-test/relay-p1.py`，
+    // 再跑 `cargo test --lib -- --ignored real_model`。
+    // 花的是用户 DeepSeek 官方账号的 flash 档 tokens（全套约 2–3 次小调用）。
+    use tauri::Manager;
+
+    /// 测试用 mock app：只用来拿一个能用的 AppHandle<MockRuntime>（路径解析
+    /// 走临时目录，不碰真实配置）。命令直接当 Rust 函数调，不走 IPC——
+    /// IPC 的 ACL 在 mock 下会把自定义命令挡掉（"Plugin not found"），
+    /// 那是测试脚手架的限制，不是命令本身的问题；命令的序列化层由
+    /// 真机/Xvfb 应用级验证覆盖（与其它已在用的命令同一套机制）。
+    fn test_app() -> tauri::App<tauri::test::MockRuntime> {
+        if std::net::TcpStream::connect("127.0.0.1:8792").is_err() {
+            panic!("relay 没起：先跑 python3 ~/workspace/p1-test/relay-p1.py");
+        }
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app 构建失败");
+        // 测试专用配置：DeepSeek 走本地 relay，压缩档位 aggressive，
+        // 压缩模型 deepseek-flash（relay 上游是真 API）。
+        let mut settings = crate::settings::Settings::default();
+        settings.providers.iter_mut().for_each(|p| {
+            if p.id == "deepseek" {
+                p.base_url = std::env::var("CASSELL_TEST_RELAY_URL")
+                    .unwrap_or_else(|_| "http://127.0.0.1:8792/v1".to_string());
+            }
+        });
+        settings
+            .api_keys
+            .insert("deepseek".to_string(), "test-placeholder".to_string());
+        settings.compression_tier = "aggressive".to_string();
+        let cfg = app.path().app_config_dir().expect("拿不到 config dir");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(
+            cfg.join("settings.json"),
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+        app
+    }
+
+    /// 15 条长消息（每条约 2000 字）：第 3 条开头埋幽灵召回标记。
+    fn long_history() -> Vec<ChatMsg> {
+        let mut out = Vec::new();
+        for i in 0..15 {
+            let body = if i == 2 {
+                format!(
+                    "紫金大厦的部署方案：服务器放在三楼机房，入口走正门保安登记，\
+                    备份每天凌晨两点做一次，保留三十天。{}",
+                    "部署细节补充。".repeat(90)
+                )
+            } else {
+                format!("第 {i} 轮讨论：上下文仪表盘的细节。{}", "仪表盘细节补充。".repeat(120))
+            };
+            out.push(ChatMsg {
+                role: if i % 2 == 0 { "user".to_string() } else { "assistant".to_string() },
+                content: body,
+            });
+        }
+        out
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn real_model_commands_recap_compact_status_recall() {
+        let app = test_app();
+        let handle = app.handle().clone();
+        let history = long_history();
+        // /recap：只摘要，不动历史、不归档。
+        let summary = recap_conversation(handle.clone(), history.clone())
+            .await
+            .expect("recap 失败");
+        assert!(
+            summary.chars().count() > 50,
+            "摘要太短，不像真摘要：{summary}"
+        );
+        assert!(
+            summary.contains("仪表盘") || summary.contains("目标"),
+            "摘要没抓住主题：{summary}"
+        );
+        // /compact（force）：15 条 → 摘要 + 4 条尾巴。
+        let compacted = compact_conversation(handle.clone(), "test-ephemeral".to_string(), history, true)
+            .await
+            .expect("compact 失败");
+        assert_eq!(compacted.messages_before, 15);
+        assert_eq!(compacted.messages_after, 5);
+        assert_eq!(compacted.tail.len(), 4);
+        assert_eq!(compacted.pages, 2, "11 条归档应分 2 页");
+        assert!(compacted.checkpoint.contains("<xiaosi-checkpoint>"));
+        // 仪表盘：没跑过对话所以 has_data=false，但归档和幽灵都在。
+        let status =
+            get_context_status(handle.clone(), "test-ephemeral".to_string())
+                .await
+                .expect("status 失败");
+        assert!(!status.has_data);
+        assert_eq!(status.archives.len(), 1);
+        assert_eq!(status.ghost_count, 11);
+        // 按页召回：第 0 页 10 条，第 1 页 1 条（被压掉的那条紫金大厦在第 0 页）。
+        let page0 = recall_archive_page(
+            handle.clone(),
+            "test-ephemeral".to_string(),
+            compacted.archive_id.clone(),
+            0,
+        )
+        .await
+        .expect("召回第 0 页失败");
+        assert_eq!(page0.messages.len(), 10);
+        assert_eq!(page0.total_pages, 2);
+        assert!(page0.messages.iter().any(|m| m.content.contains("紫金大厦")));
+        let page1 = recall_archive_page(
+            handle,
+            "test-ephemeral".to_string(),
+            compacted.archive_id,
+            1,
+        )
+        .await
+        .expect("召回第 1 页失败");
+        assert_eq!(page1.messages.len(), 1);
     }
 }

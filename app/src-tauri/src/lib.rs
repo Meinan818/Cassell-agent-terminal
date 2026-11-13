@@ -1,6 +1,8 @@
+mod advisor;
 mod agent;
 mod browser;
 mod codex;
+mod compact;
 mod dsml;
 mod frozen;
 mod fsutil;
@@ -68,6 +70,10 @@ pub fn run() {
             agent::list_models,
             agent::pick_folder,
             agent::get_usage_stats,
+            agent::get_context_status,
+            agent::compact_conversation,
+            agent::recap_conversation,
+            agent::recall_archive_page,
             goal::list_checkpoints_cmd,
             goal::rewind_checkpoint_cmd,
             goal::clear_goal_cmd,

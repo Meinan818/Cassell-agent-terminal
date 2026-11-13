@@ -736,6 +736,12 @@ fn sanitize_id(id: &str) -> String {
         .collect()
 }
 
+/// 给 compact.rs 用的公开版（上下文归档目录也要按 task id 安全分目录，
+/// 与检查点用同一套清洗规则，别各写一套漂移了）。
+pub fn sanitize_id_pub(id: &str) -> String {
+    sanitize_id(id)
+}
+
 fn sanitize_path(rel: &str) -> String {
     rel.replace(['/', '\\'], "__")
         .chars()

@@ -47,6 +47,12 @@ export interface CommandContext {
   showUsage: () => void;
   acceptAllReview: () => void;
   jumpToTask: (id: string) => void;
+  /** P1-17：打开上下文仪表盘抽屉。 */
+  openContextDrawer: () => void;
+  /** P1-13：立即压缩并归档（普通对话手动压）。 */
+  runCompact: () => void;
+  /** P1-17：生成摘要，不压缩。 */
+  runRecap: () => void;
 }
 
 export interface CommandItem {
@@ -82,8 +88,9 @@ const THEME_LABELS: Record<Theme, string> = {
  * - 模式组里“对方模式”排在前面：面板打开时，你最可能点的就是切过去。
  * - 项目组里“新建项目…”排在最前（最高频的项目操作），再是逐个切换；
  *   当前项目带“当前”标记，不重复列在切换里。
- * - 下架的命令：“压缩上下文”（P1-7：上下文配置要动 Rust，不在第 3 步
- *   scope 内；命令已下架，不要留占位，等接上引擎再上架）。
+ * - 下架的命令：无。“压缩上下文”曾在 P1-7 下架（等引擎支持）；P1-1/13/17
+ *   已接上引擎，重新上架为“立即压缩并归档”（/compact）、“生成摘要”
+ *   （/recap）、“查看上下文状态”（/status）。
  */
 function staticCommands(ctx: CommandContext): CommandItem[] {
   // 模式组：对方模式在前（最可能点的切换），当前模式在后（带“当前”标记）。
@@ -151,6 +158,31 @@ function staticCommands(ctx: CommandContext): CommandItem[] {
       hint: ctx.hasActiveTask ? "清空当前对话的消息" : "当前没有对话",
       keywords: ["clear", "清空", "清除", "删除对话"],
       run: ctx.clearChat,
+    },
+    // ---- 任务维护：压缩（P1-13/17，引擎已接上才上架）。 ----
+    {
+      id: "compact-now",
+      group: "任务",
+      title: "立即压缩并归档",
+      hint: "先归档原文，再压成摘要",
+      keywords: ["compact", "压缩", "压缩上下文", "归档", "上下文"],
+      run: ctx.runCompact,
+    },
+    {
+      id: "recap",
+      group: "任务",
+      title: "生成摘要（不压缩）",
+      hint: "只看摘要，历史不动",
+      keywords: ["recap", "摘要", "总结", "回顾"],
+      run: ctx.runRecap,
+    },
+    {
+      id: "context-status",
+      group: "任务",
+      title: "查看上下文状态",
+      hint: "剩余上下文 / 缓存命中 / 归档",
+      keywords: ["status", "上下文", "context", "状态", "仪表盘", "剩余"],
+      run: ctx.openContextDrawer,
     },
     // ---- 项目：先定“在哪干活”。新建在前（最高频的项目操作），再逐个切换。 ----
     {

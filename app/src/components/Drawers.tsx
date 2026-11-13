@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   Approval,
+  ArchiveEntry,
   CodexInfo,
+  ContextStatus,
   DeleteConfirm,
   Effort,
   Mode,
   ProviderConfig,
+  RecallPageResult,
   Sandbox,
   Settings,
   Task,
@@ -64,6 +68,23 @@ export const APPROVAL_DESCS: Record<Approval, string> = {
 export const DELETE_CONFIRM_DESCS: Record<DeleteConfirm, string> = {
   always: "每次删文件/执行删除命令前都单独弹确认，批了才删。",
   never: "删除不再单独问，直接执行。删根目录（rm -rf / 这类）永远拒绝，不受这档影响。",
+};
+
+/** P1-1 压缩档位人话（界面上绝不出现 cache-preserving 这类原始枚举名）。 */
+export const TIER_LABELS: Record<string, string> = {
+  auto: "自动",
+  "cache-preserving": "保缓存",
+  balanced: "均衡",
+  aggressive: "强力",
+};
+
+/** P1-1 会话阶段人话。 */
+export const PHASE_LABELS: Record<string, string> = {
+  explore: "探索",
+  plan: "计划",
+  execute: "执行",
+  verify: "校验",
+  deliver: "交付后",
 };
 
 function DrawerShell({
@@ -637,6 +658,46 @@ export function SettingsModal({
                   />
                   <p className="drawer-note">
                     压缩历史时用的模型，和上面选的主模型分开改；改主模型不会动它。
+                  </p>
+                  <label className="field-label" htmlFor="settings-compression-tier">
+                    压缩档位
+                  </label>
+                  <div className="effort-row" role="group" aria-label="压缩档位">
+                    {(
+                      ["auto", "cache-preserving", "balanced", "aggressive"] as const
+                    ).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`effort ${(settings.compression_tier ?? "auto") === t ? "selected" : ""}`}
+                        onClick={() => onPatch({ compression_tier: t })}
+                      >
+                        {TIER_LABELS[t]}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="drawer-note">
+                    自动：DeepSeek 走“保缓存”档（尾部多留、少压），其他服务商走“均衡”。档位越强压得越狠、尾部留得越少。
+                  </p>
+                  <div className="drawer-row">
+                    <span>目标模式自动压缩</span>
+                    <button
+                      type="button"
+                      className={`switch ${(settings.compression_enabled ?? true) ? "on" : ""}`}
+                      role="switch"
+                      aria-checked={settings.compression_enabled ?? true}
+                      aria-label="自动压缩开关"
+                      onClick={() =>
+                        onPatch({
+                          compression_enabled: !(settings.compression_enabled ?? true),
+                        })
+                      }
+                    >
+                      <span className="knob" />
+                    </button>
+                  </div>
+                  <p className="drawer-note">
+                    开着时目标模式由 CacheAdvisor 按公式决定什么时候压；关了就只手动压（/compact 与仪表盘按钮）。
                   </p>
                 </div>
                 {/* P2-16：高级折叠已删。Codex CLI 路径收进模型组底部一行小字。 */}
@@ -1428,6 +1489,250 @@ export function UsageDrawer({
         <p className="drawer-note">
           花费按 DeepSeek 官方价目估算（峰时 / 闲时按请求时间划分；中国法定节假日按峰时算，略有高估；中转站实际价格可能不同）。token
           数与缓存命中率全部来自服务商真实回报的用量，不是估算。
+        </p>
+      </div>
+    </DrawerShell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* P1-17 上下文仪表盘：当前上下文、CacheAdvisor 决策、归档按页召回。   */
+/* 数字全部来自后端实报（服务商 usage + 顾问决策）；没跑过就是空状态，  */
+/* 绝不编默认值。                                                      */
+/* ------------------------------------------------------------------ */
+
+function fmtTime(ts: number): string {
+  if (!ts) return "";
+  return new Date(ts * 1000).toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function ContextDrawer({
+  taskId,
+  status,
+  loading,
+  onRefresh,
+  onCompact,
+  onRecap,
+  onClose,
+  closing = false,
+}: {
+  taskId: string;
+  status: ContextStatus | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onCompact: () => void;
+  onRecap: () => void;
+  onClose: () => void;
+  closing?: boolean;
+}) {
+  const [recall, setRecall] = useState<{
+    archiveId: string;
+    page: number;
+    messages: { role: string; content: string }[];
+    totalPages: number;
+  } | null>(null);
+  const [recallLoading, setRecallLoading] = useState(false);
+  const [recallError, setRecallError] = useState<string | null>(null);
+
+  const openArchivePage = async (archiveId: string, page: number) => {
+    setRecallLoading(true);
+    setRecallError(null);
+    try {
+      const res = await invoke<RecallPageResult>("recall_archive_page", {
+        taskId,
+        archiveId,
+        page,
+      });
+      setRecall({ archiveId, page, messages: res.messages, totalPages: res.total_pages });
+    } catch (e) {
+      setRecallError(`召回失败：${String(e)}`);
+    } finally {
+      setRecallLoading(false);
+    }
+  };
+
+  const ratio =
+    status?.has_data && status.window_tokens
+      ? Math.min(1, status.prompt_tokens / status.window_tokens)
+      : null;
+  const pct = ratio == null ? null : Math.round(ratio * 100);
+
+  return (
+    <DrawerShell title="上下文" onClose={onClose} closing={closing}>
+      <div className="s7-group">
+        <div className="drawer-row">
+          <span className="drawer-section">当前上下文</span>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onRefresh}
+            disabled={loading}
+            aria-label="刷新上下文状态"
+          >
+            {loading ? "刷新中…" : "↻ 刷新"}
+          </button>
+        </div>
+        {!status || !status.has_data ? (
+          <p className="drawer-note">
+            {loading
+              ? "正在读取上下文状态…"
+              : "还没有用量数据——跑一轮对话后，这里会显示上下文剩余、缓存命中和顾问的建议。"}
+          </p>
+        ) : (
+          <>
+            {status.window_tokens == null ? (
+              <p className="drawer-note">
+                该模型（{status.model || "未选模型"}）的上下文上限未知，不编数字；上轮用了{" "}
+                {fmtTokens(status.prompt_tokens)} tokens。
+              </p>
+            ) : (
+              <>
+                <div className="ctx-drawer-bar" role="img" aria-label={`上下文已用 ${pct}%`}>
+                  <span
+                    className={`ctx-drawer-fill ${pct != null && pct >= 85 ? "critical" : pct != null && pct >= 70 ? "warn" : ""}`}
+                    style={{ width: `${Math.max(2, pct ?? 0)}%` }}
+                  />
+                </div>
+                <p className="drawer-note">
+                  已用 {fmtTokens(status.prompt_tokens)} / {fmtTokens(status.window_tokens)}（
+                  {pct}%），还剩 {fmtTokens(status.window_tokens - status.prompt_tokens)}。
+                  {pct != null && pct >= 85
+                    ? "快满了，建议现在压缩。"
+                    : pct != null && pct >= 70
+                      ? "快满了，可以考虑压缩。"
+                      : ""}
+                </p>
+              </>
+            )}
+            <p className="drawer-note">
+              上轮缓存命中{" "}
+              {status.hit_rate == null
+                ? "—"
+                : `${Math.round(status.hit_rate * 100)}%`}
+              （命中 {fmtTokens(status.cached_tokens)} / {fmtTokens(status.prompt_tokens)}
+              ）· 模型 {status.model || "—"}
+              {status.window_estimated ? " · 窗口为估算值" : ""}· 档位{" "}
+              {TIER_LABELS[status.tier] ?? status.tier}
+              {status.compression_enabled ? "" : " · 自动压缩已关"}
+            </p>
+          </>
+        )}
+      </div>
+
+      <div className="s7-group">
+        <div className="drawer-section">CacheAdvisor</div>
+        {!status?.last_decision ? (
+          <p className="drawer-note">
+            顾问还没做过决策——跑一轮目标对话后，这里会显示它为什么压、为什么不压。
+          </p>
+        ) : (
+          <>
+            <p className="drawer-note">
+              保护值 {status.last_decision.protection.toFixed(2)}（命中率{" "}
+              {Math.round(status.last_decision.hit_rate * 100)}% · 压力{" "}
+              {Math.round(status.last_decision.pressure * 100)}% · 阶段{" "}
+              {PHASE_LABELS[status.last_decision.phase] ?? status.last_decision.phase} · 档位{" "}
+              {TIER_LABELS[status.last_decision.tier] ?? status.last_decision.tier}）
+              {status.last_decision.window_estimated ? " · 窗口为估算值" : ""}
+            </p>
+            <p className="drawer-note">{status.last_decision.reason}</p>
+          </>
+        )}
+        {status != null && status.ghost_hits > 0 && (
+          <p className="drawer-note">
+            压缩逐错过 {status.ghost_hits} 次：你问到的内容被压掉过，已从归档找回。
+          </p>
+        )}
+      </div>
+
+      <div className="s7-group">
+        <div className="drawer-section">归档（先归档再压缩，原文都在）</div>
+        {!status || status.archives.length === 0 ? (
+          <p className="drawer-note">
+            还没有归档——压缩一次后，原文会出现在这里，点“查看原文”按页召回。
+          </p>
+        ) : (
+          <div className="ctx-archive-list">
+            {status.archives.map((a: ArchiveEntry) => {
+              const open = recall?.archiveId === a.id;
+              return (
+                <div key={a.id} className="ctx-archive-item">
+                  <div className="ctx-archive-head">
+                    <span>
+                      {fmtTime(a.created_at)} · {a.message_count} 条 · {a.pages} 页
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() =>
+                        open ? setRecall(null) : openArchivePage(a.id, 0)
+                      }
+                      disabled={recallLoading}
+                    >
+                      {open ? "收起" : "查看原文"}
+                    </button>
+                  </div>
+                  {open && (
+                    <div className="ctx-recall">
+                      {recallLoading && <p className="drawer-note">正在召回…</p>}
+                      {recallError && <p className="drawer-note">{recallError}</p>}
+                      {!recallLoading &&
+                        recall?.messages.map((m, i) => (
+                          <div key={i} className="ctx-recall-msg">
+                            <span className="ctx-recall-role">
+                              {m.role === "user" ? "你" : m.role === "assistant" ? "模型" : "系统"}
+                            </span>
+                            <span>{m.content}</span>
+                          </div>
+                        ))}
+                      {!recallLoading && recall && recall.totalPages > 1 && (
+                        <div className="ctx-recall-pager">
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={recall.page <= 0}
+                            onClick={() => openArchivePage(a.id, recall.page - 1)}
+                          >
+                            ← 上一页
+                          </button>
+                          <span>
+                            第 {recall.page + 1} / {recall.totalPages} 页
+                          </span>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            disabled={recall.page + 1 >= recall.totalPages}
+                            onClick={() => openArchivePage(a.id, recall.page + 1)}
+                          >
+                            下一页 →
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="s7-group">
+        <div className="ctx-actions">
+          <button type="button" className="ctx-action-btn" onClick={onCompact}>
+            立即压缩
+          </button>
+          <button type="button" className="ctx-action-btn" onClick={onRecap}>
+            生成摘要
+          </button>
+        </div>
+        <p className="drawer-note">
+          立即压缩：先把原文归档，再压成一张摘要卡片；生成摘要：只看摘要，历史不动。
         </p>
       </div>
     </DrawerShell>

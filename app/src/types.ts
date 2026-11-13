@@ -47,6 +47,12 @@ export interface Settings {
   delete_confirm: DeleteConfirm;
   /** 压缩模型：压缩历史时用的模型，和主模型分开配（P0-3）。 */
   compression_model?: string;
+  /** P1-1：自动压缩开关。开着时目标模式由 CacheAdvisor 按公式决定
+      什么时候压；关了就只手动压（/compact 与仪表盘按钮）。 */
+  compression_enabled?: boolean;
+  /** P1-1：压缩档位：auto（按服务商自动选，默认）| cache-preserving
+      | balanced | aggressive。 */
+  compression_tier?: string;
   sandbox: Sandbox;
   theme: Theme;
   streaming: boolean;
@@ -60,7 +66,7 @@ export interface Settings {
   extensions: ExtensionItem[];
 }
 
-export type MsgKind = "text" | "tool" | "error" | "eva" | "perm" | "ask" | "think";
+export type MsgKind = "text" | "tool" | "error" | "eva" | "perm" | "ask" | "think" | "compact" | "recap";
 
 /** Inspector（S6）：按需出现的右侧工作视图，一次只看一个。 */
 export type InspectorView =
@@ -91,6 +97,9 @@ export interface ChatMsg {
   /** 本轮撞到总预算上限或卡住：下方挂一句说明（没有“继续”按钮——
       8 轮只是内部单回合单位，普通对话也会自动续跑到预算；想继续直接发消息）。 */
   limitNotice?: { reason: "budget" | "stalled"; text: string };
+  /** P1-13：本轮问题问到了之前被压掉的内容，已从归档找回原文塞进上下文。
+      挂在该轮回复下方一行小字，告诉用户“不是凭空说的”。 */
+  ghostNote?: string;
   /** Permission card payload (kind === "perm"). */
   perm?: {
     command: string;
@@ -111,6 +120,80 @@ export interface ChatMsg {
   /** Thinking-indicator phase for this assistant turn. */
   thinkPhase?: "thinking" | "exploring" | "drafting" | "done";
   thinkSecs?: number;
+  /** P1-13 压缩卡片（kind === "compact"）：XiaoSi Compress2.0 摘要。
+      text 是摘要正文；这条消息进后端历史（当作 assistant 内容），
+      这样压缩后的对话还能接着聊，摘要就是新的上下文。 */
+  compact?: {
+    archiveId: string;
+    pages: number;
+    messagesBefore: number;
+    messagesAfter: number;
+  };
+  /** P1-17 摘要卡片（kind === "recap"）：只看不压的摘要。
+      不进后端历史（只是展示），下次发消息时不发给模型。 */
+  recap?: boolean;
+}
+
+/** P1-1 CacheAdvisor 的一次决策（后端原样返回，仪表盘展示）。 */
+export interface AdvisorDecision {
+  compress: boolean;
+  protection: number;
+  pressure: number;
+  hit_rate: number;
+  window_estimated: boolean;
+  phase: string;
+  tier: string;
+  reason: string;
+}
+
+/** P1-13 一次归档的条目（仪表盘归档列表用）。 */
+export interface ArchiveEntry {
+  id: string;
+  created_at: number;
+  message_count: number;
+  pages: number;
+  source_hash: string;
+  prompt_tokens_before: number;
+  summary_chars: number;
+}
+
+/** P1-17 上下文仪表盘一次要的数据（全部来自服务商实报与顾问决策；
+    没跑过就是空状态，has_data=false，界面只显示“还没有用量数据”）。 */
+export interface ContextStatus {
+  task_id: string;
+  has_data: boolean;
+  model: string;
+  window_tokens: number | null;
+  window_estimated: boolean;
+  prompt_tokens: number;
+  cached_tokens: number;
+  hit_rate: number | null;
+  pressure: number | null;
+  last_decision: AdvisorDecision | null;
+  tier: string;
+  compression_enabled: boolean;
+  ghost_hits: number;
+  ghost_count: number;
+  archives: ArchiveEntry[];
+}
+
+/** P1-13 手动压缩的返回（compact_conversation）。 */
+export interface CompactConversationResult {
+  summary: string;
+  checkpoint: string;
+  archive_id: string;
+  pages: number;
+  messages_before: number;
+  messages_after: number;
+  compressed_count: number;
+  tail: { role: string; content: string }[];
+}
+
+/** P1-13 按页召回的返回（recall_archive_page）。 */
+export interface RecallPageResult {
+  messages: { role: string; content: string }[];
+  total_pages: number;
+  page: number;
 }
 
 /** P0-6 目标清单的一项（模型首轮列出，之后更新；没有就不显示，不编假的）。 */
@@ -220,6 +303,19 @@ export interface RunResult {
 }
 
 /** 原生引擎一轮的返回（run_agent_native）。token 数是服务商真实回报，不估算。 */
+/** P1-13 一次自动压缩的结果（run_agent_native 返回）。 */
+export interface CompactionReport {
+  archive_id: string;
+  messages_before: number;
+  messages_after: number;
+  prompt_tokens_before: number;
+  summary_chars: number;
+  pages: number;
+  checkpoint: string;
+  /** 摘要正文（不含密封标签，压缩卡片直接显示它）。 */
+  summary?: string;
+}
+
 export interface AgentResult {
   success: boolean;
   cancelled: boolean;
@@ -241,6 +337,11 @@ export interface AgentResult {
   stop_detail: string;
   /** P0-6 目标摘要（目标模式才有）。 */
   goal?: GoalSummary | null;
+  /** P1-1/P1-13：本轮开始时自动压缩过（目标模式才有）。 */
+  compaction?: CompactionReport | null;
+  /** P1-13：本轮问题问到了之前被压掉的内容，已从归档找回原文。
+      值是那条被召回消息的摘要。 */
+  ghost_recalled?: string | null;
 }
 
 export const EFFORT_LABELS: Record<Effort, string> = {
