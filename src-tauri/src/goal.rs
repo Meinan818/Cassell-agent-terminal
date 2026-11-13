@@ -301,6 +301,27 @@ pub fn parse_checklist(text: &str) -> Vec<CheckItem> {
     items
 }
 
+/// 从一组消息里重算目标清单：取助手消息里最后一次出现的“## 目标清单”块。
+/// 倒带时用：清单要跟着对话一起回到快照点当时的样子，不能留着未来回合的打勾状态。
+/// 恢复后的对话里找不到清单块就返回空——没有清单就不显示，绝不编一个假的。
+pub fn checklist_of(messages: &[Value]) -> Vec<CheckItem> {
+    for m in messages.iter().rev() {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if role != "assistant" {
+            continue;
+        }
+        let text = match m.get("content") {
+            Some(Value::String(s)) => s,
+            _ => continue,
+        };
+        let items = parse_checklist(text);
+        if !items.is_empty() {
+            return items;
+        }
+    }
+    Vec::new()
+}
+
 // ---------------------------------------------------------------------------
 // 检查点：磁盘布局（应用数据目录，不进工作区，不污染项目与 git 状态）
 //   <app_data>/checkpoints/<goal_id>/turn-000.json   每回合的消息快照
@@ -941,6 +962,9 @@ pub async fn rewind_checkpoint_cmd(
         }
         if let Some(session) = map.get_mut(&goal_id) {
             session.messages = messages;
+            // 清单跟着对话一起回到快照点：从恢复后的消息里重算，
+            // 找不到清单块就清空——不留未来回合的打勾状态，也不编假数据。
+            session.checklist = checklist_of(&session.messages);
             session.turns_used = turn;
             session.status = GoalStatus::Paused;
             // 轮数与文件记录回到快照点对应的值。
@@ -1002,6 +1026,24 @@ mod tests {
     #[test]
     fn checklist_missing_is_empty_not_fake() {
         assert!(parse_checklist("没有清单，就是普通回复。").is_empty());
+    }
+
+    #[test]
+    fn checklist_of_uses_latest_block() {
+        let msgs = vec![
+            json!({"role": "assistant", "content": "先说计划：\n## 目标清单\n- [ ] 做 A\n- [ ] 做 B\n"}),
+            json!({"role": "assistant", "content": "做完一半：\n## 目标清单\n- [x] 做 A\n- [ ] 做 B\n"}),
+        ];
+        let items = checklist_of(&msgs);
+        assert_eq!(items.len(), 2);
+        assert!(items[0].done);
+        assert!(!items[1].done);
+    }
+
+    #[test]
+    fn checklist_of_empty_when_no_block() {
+        let msgs = vec![json!({"role": "assistant", "content": "普通回复，没有清单。"})];
+        assert!(checklist_of(&msgs).is_empty());
     }
 
     #[test]
