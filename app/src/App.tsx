@@ -1681,6 +1681,18 @@ export default function App() {
     });
   }, []);
 
+  // 0.1.9：任务绑定模式——点回一个旧任务时，顶栏模式跟任务走（只跟模式，
+  // 不碰思考强度/审批，那两个是用户偏好，只在点顶栏切模式时才按新模式
+  // 的默认值重置）。新任务的模式创建时已是当前值，这里不会误触发。
+  useEffect(() => {
+    if (!activeTaskId) return;
+    const t = tasks.find((x) => x.id === activeTaskId);
+    const m = t?.mode ?? "norma";
+    if (settings?.mode && settings.mode !== m) {
+      patchSettings({ mode: m });
+    }
+  }, [activeTaskId, tasks, settings, patchSettings]);
+
   // ---- P0-1：项目首次落地（只跑一次，等设置加载完才跑） ----
   // 旧版本没有项目概念：任务的 project 是写死的"默认项目"，工作区是全局
   // settings.workdir。第一次升级时把旧东西收进一个真项目里，不丢任务：
@@ -1793,24 +1805,10 @@ export default function App() {
         effort: defaults.effort,
         approval: defaults.approval,
       });
-      // P0-9 切换后第一条消息说清"我现在是谁、能做什么、不能做什么"，
-      // 不要静默切换（有任务时写进当前任务；没任务时空态问候已是新模式口吻）。
-      const taskId = activeTaskIdRef.current;
-      if (taskId) {
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === taskId
-              ? {
-                  ...t,
-                  messages: [
-                    ...t.messages,
-                    { id: uid(), role: "assistant", text: modeIntro(mode, settingsRef.current?.display_name?.trim() || "路明非") },
-                  ],
-                }
-              : t,
-          ),
-        );
-      }
+      // 0.1.9：切模式 = 开新任务，不往当前任务里塞自我介绍、也不改它的模式。
+      // Cowork/Code 不能在一个任务里随便切换——旧任务留在侧栏、保持原模式；
+      // 新任务建起来时首条就是新模式的自我介绍（handleSend 里）。
+      setActiveTaskId(null);
       // 诚实文案（F 落地）：EVA 运行时也只说“工程开发”，不说“并行中”。
       setModeLine(
         mode === "eva" ? "已切换到 EVA · 工程开发" : "已切回诺玛",
@@ -2325,8 +2323,10 @@ export default function App() {
             // 模式、思考强度、Ultracode 三个独立字段各自传给引擎；
             // P0-9：切模式时默认思考强度/审批已由 handleModeChange 一并带过去，
             // 这里只传当前值，不再二次改。
+            // 0.1.9：模式按任务绑定的来（一个任务一个模式），不按顶栏当前值——
+            // 点回旧任务时顶栏会跟任务走，但请求这里以任务为准最保险。
             effort: s.effort,
-            mode: s.mode,
+            mode: task0?.mode ?? s.mode,
             ultracode: s.ultracode,
             approval: s.approval,
             sandbox: s.sandbox,
@@ -2540,6 +2540,8 @@ export default function App() {
           id: taskId,
           title: text.length > 24 ? `${text.slice(0, 24)}…` : text,
           project: projectId,
+          // 0.1.9：任务绑定创建时的模式，一个任务只用一个模式，不中途切换。
+          mode: s.mode,
           // 0.1.9：新会话首条就是自我介绍（和切模式时同一条），不是等模型现编。
           // 一是用户一眼看到龙族身份；二是这条进了对话历史，反代即使吞掉
           // 系统提示词，模型也能从历史里知道自己是谁、该叫用户什么。
@@ -2566,9 +2568,13 @@ export default function App() {
         streaming: true,
       };
       // EVA turns open with one quiet line (click it for details).
-      const evaNote: ChatMsg | null = s.mode === "eva"
-        ? { id: uid(), role: "assistant", text: "", kind: "eva" }
-        : null;
+      // 0.1.9：按任务绑定的模式来（新任务就是 s.mode，旧任务读它自己的）。
+      const taskMode =
+        tasksRef.current.find((t) => t.id === taskId)?.mode ?? s.mode;
+      const evaNote: ChatMsg | null =
+        taskMode === "eva"
+          ? { id: uid(), role: "assistant", text: "", kind: "eva" }
+          : null;
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
