@@ -15,7 +15,7 @@ import random
 from PIL import Image
 
 SEED = 1337
-N = 6500
+N = 10000
 SRC = "public/cassell-seal.jpg"
 OUT = "src/components/sealTargets.ts"
 
