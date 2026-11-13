@@ -17,6 +17,7 @@ import {
   SANDBOX_LABELS,
 } from "../types";
 import { APP_VERSION } from "../version";
+import { modKey } from "../platform";
 import type { CommandItem, SettingsNav } from "./commands";
 import CrestLine from "./CrestLine";
 import { humanizeTestError } from "./ConnectWizard";
@@ -786,7 +787,8 @@ export function SettingsModal({
                     </button>
                   </div>
                   <p className="drawer-note">
-                    跟随系统时，系统一切、应用跟着切。主题也可以在命令面板（⌘K）里切。
+                    跟随系统时，系统一切、应用跟着切。主题也可以在命令面板（
+                    {modKey("K")}）里切。
                   </p>
                 </div>
                 <div className="s7-group">
@@ -870,7 +872,7 @@ export function CommandPalette({
       >
         <div className="s7-palette-input">
           <span className="s7-palette-prompt" aria-hidden="true">
-            ⌘K
+            {modKey("K")}
           </span>
           <input
             value={query}
@@ -1063,7 +1065,8 @@ export function HelpDrawer({
         <li>也可以添加自定义服务商（填自己的反代地址），再点“自动读取模型列表”。</li>
         <li>在输入框里给诺玛下指令，回车发送；Shift + Enter 换行。</li>
         <li>输入框下方的模型按钮里换服务商、模型与思考强度；思考强度点选只打勾、不关闭菜单，选到模型才收起。</li>
-        <li>输入框下方的诺玛/EVA 芯片、左栏名册、命令面板（⌘K）里都能切换模式；切换有一段短暂仪式。</li>
+        <li>输入框下方的诺玛/EVA 芯片、左栏名册、命令面板（{modKey("K")}
+        ）里都能切换模式；切换有一段短暂仪式。</li>
         <li>诺玛改动文件后，点顶部“审查”入口（带待审查数量）在浮层 Inspector 里逐项通过或拒绝；拒绝会把文件还原到 HEAD。</li>
         <li>浮层 Inspector 里还有终端、文件、工作流与插件；点浮层外或按 Esc 关闭。</li>
         <li>每条消息悬停会出现复制 / 重试 / 编辑 / 删除；对话顶部的用量行会一直显示累计 token。</li>

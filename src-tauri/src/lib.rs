@@ -54,6 +54,7 @@ pub fn run() {
             agent::pick_folder,
             fsutil::list_files,
             fsutil::read_file,
+            fsutil::read_file_base64,
             fsutil::get_review,
             fsutil::revert_file,
             shell::run_shell,

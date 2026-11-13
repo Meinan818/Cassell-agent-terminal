@@ -449,7 +449,6 @@ async fn run_agent_native_inner(
         let mut stream = resp.bytes_stream();
         let mut buf = String::new();
         let mut round_text = String::new();
-        let mut round_think = String::new();
         let mut tool_calls: Vec<Value> = Vec::new();
 
         'stream: loop {
@@ -503,10 +502,11 @@ async fn run_agent_native_inner(
 
                 let Some(delta) = ev.pointer("/choices/0/delta") else { continue; };
 
-                // 思考增量（推理模型走这个字段）→ 推成 thinking 事件
+                // 思考增量（推理模型走这个字段）→ 只推 thinking 事件，绝不进正文。
+                // 多轮工具调用的中间轮次本来就只有思考 + 工具调用、没有正文，这是正常的；
+                // 最终轮若也只有思考没有正文，正文留空走兜底，绝不把原始推理全文倒进正文。
                 if let Some(piece) = delta.get("reasoning_content").and_then(|c| c.as_str()) {
                     if !piece.is_empty() {
-                        round_think.push_str(piece);
                         let _ = app.emit("agent-thinking", json!({"text": piece}));
                     }
                 }
@@ -548,13 +548,10 @@ async fn run_agent_native_inner(
         });
 
         /* 本轮的文字已经在流式阶段累积好，汇总进最终结果。
-           有些推理模型只给 reasoning_content、不给 content：
-           这种情况把思考内容作为答复交付，绝不留空白。 */
+           注意：思考内容（reasoning_content）只走 agent-thinking，绝不进正文；
+           中间轮次只有思考 + 工具调用时正文本来就是空的，这是正常的。 */
         if !round_text.trim().is_empty() {
             final_text.push_str(&round_text);
-        } else if !round_think.trim().is_empty() {
-            final_text.push_str(&round_think);
-            let _ = app.emit("agent-delta", json!({"text": round_think}));
         }
 
         match if tool_calls.is_empty() { None } else { Some(tool_calls.clone()) } {

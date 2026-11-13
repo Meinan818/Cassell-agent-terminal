@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -135,13 +135,58 @@ const WAVE2_CSS = `
 .w2-card-sum { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; color: var(--text-3); font-size: 12px; }
 .w2-card-body { padding: 0 12px 12px; font-size: 13px; line-height: 1.65; color: var(--text-2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; animation: w2-fade 150ms var(--ease) both; }
 .w2-card-body .w2-card-link { font-size: 12px; color: var(--accent); padding: 4px 0 0; }
-.w2-quiet { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); background: none; border: none; padding: 2px 0; transition: color 150ms var(--ease); }
+.w2-quiet { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); background: none; border: none; padding: 2px 0; transition: color 150ms var(--ease); animation: w2-fade 200ms var(--ease) both; }
 .w2-quiet:hover { color: var(--text-2); }
 .msg.eva-note-row { flex-direction: column; align-items: flex-start; gap: 8px; }
-/* ---- 新消息：150ms 淡入 + 4px 上移，一次性；无 stagger 入场 ---- */
-@keyframes w2-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-.w2-live { animation: w2-msg-in 150ms var(--ease) both; }
+/* ---- 对话区灵动性：快且活的入场（~170ms + 弹簧缓动），不是 0ms 硬蹦、也不是 320ms 慢拖 ----
+ * 新消息 / 思考块 / 工具分组挂载即入场（只跑一次，不随重渲染重复）；
+ * 工具卡在分组展开时按下标错峰 70ms 依次进来（ToolGroup 的 staggering）。 */
+@keyframes w2-rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.w2-live { animation: w2-rise-in 170ms var(--spring) both; }
+.msg.think, .msg.tool-group { animation: w2-rise-in 170ms var(--spring) both; }
+.msg.tool { animation: w2-rise-in 160ms var(--spring) both; }
 @keyframes w2-fade { from { opacity: 0; } to { opacity: 1; } }
+/* ---- 思考动画：细弧旋转 + 省略号呼吸；完成时弧线淡出、对勾淡入（不生硬变绿药丸） ---- */
+.think-ico { position: relative; width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); transition: color 300ms var(--ease); }
+.think-ico.done { color: var(--text-2); }
+.think-ico svg { position: absolute; inset: 0; display: block; }
+.think-ico .think-arc { animation: think-spin 1.1s linear infinite; transition: opacity 300ms var(--ease); }
+.think-ico .think-check { opacity: 0; transform: scale(0.7); transition: opacity 300ms var(--ease), transform 300ms var(--spring); }
+.think-ico.done .think-arc { opacity: 0; animation-play-state: paused; }
+.think-ico.done .think-check { opacity: 1; transform: scale(1); }
+@keyframes think-spin { to { transform: rotate(360deg); } }
+.think-status { color: var(--accent); transition: color 300ms var(--ease); }
+.think-status.done { color: var(--text-2); }
+.think-dots span { animation: think-dot 1.2s ease-in-out infinite; }
+.think-dots span:nth-child(2) { animation-delay: 0.2s; }
+.think-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes think-dot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+/* ---- 工具图标芯片 + 执行态：执行中图标呼吸、状态弧旋转；完成时平滑过渡 ---- */
+.tool-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--bg-soft); color: var(--text-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.tool-ico.run { animation: tool-breathe 1.6s ease-in-out infinite; }
+@keyframes tool-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: 0.85; } }
+.tool-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; flex-shrink: 0; color: var(--accent); transition: color 300ms var(--ease); }
+.tool-status.done { color: var(--text-2); }
+.tool-status-ico { position: relative; width: 14px; height: 14px; flex-shrink: 0; }
+.tool-status-ico svg { position: absolute; inset: 0; display: block; }
+.tool-status-ico .tool-spin { animation: think-spin 1s linear infinite; transition: opacity 300ms var(--ease); }
+.tool-status-ico .tool-check { opacity: 0; transform: scale(0.7); transition: opacity 300ms var(--ease), transform 300ms var(--spring); }
+.tool-status-ico.done .tool-spin { opacity: 0; animation-play-state: paused; }
+.tool-status-ico.done .tool-check { opacity: 1; transform: scale(1); }
+.tool-code { font-family: var(--mono); font-size: 12px; line-height: 1.6; background: var(--bg-soft); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; color: var(--text-2); max-height: 180px; overflow-y: auto; }
+.tool-code .tok-cmd { color: var(--accent); font-weight: 600; }
+.tool-label { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin: 2px 0 6px; }
+.tool-img { margin: 2px 0 8px; }
+.tool-img img { max-width: 100%; max-height: 220px; border-radius: 8px; object-fit: contain; display: block; }
+.tool-img-loading, .tool-img-err { font-size: 12px; color: var(--text-3); padding: 6px 2px; }
+/* ---- 空态“醒过来”：球 → 问候 → 身份 → CTA 依次淡入上浮，各 60ms 错峰，全程约 400ms。
+ * 只在空态挂载时播一次（切到空任务会重新醒一次）；球自己的呼吸/注视动画在内部，不冲突。 */
+.empty-state > * { animation: w2-rise-in 240ms var(--spring) both; }
+.empty-state > *:nth-child(1) { animation-delay: 0ms; }
+.empty-state > *:nth-child(2) { animation-delay: 60ms; }
+.empty-state > *:nth-child(3) { animation-delay: 120ms; }
+.empty-state > *:nth-child(4) { animation-delay: 180ms; }
+.empty-state > *:nth-child(5) { animation-delay: 240ms; }
 /* ---- Inspector（L2 浮层，不挤压对话区） ---- */
 .w2-inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 60; display: flex; flex-direction: column; background: var(--bg-panel); box-shadow: var(--shadow); animation: w2-insp-in 240ms var(--ease-exp) both; }
 .w2-inspector.w2-wide { width: 480px; }
@@ -516,9 +561,11 @@ function EvaNote({
   );
 }
 
-/** 思考块（B 档卡片）：标题行 + 状态标签，默认只露标题行；跑完默认收起。 */
+/** 思考块（B 档卡片）：标题行 + 思考动画，默认只露标题行；跑完默认收起。
+ * 思考指示不是一行静止的字：细弧旋转 + 省略号呼吸；完成时弧线淡出、
+ * 对勾淡入、颜色由 accent 平滑过渡到弱色——不生硬变绿药丸。 */
 function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!streaming) setOpen(false);
   }, [streaming]);
@@ -531,12 +578,21 @@ function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }) {
           onClick={() => setOpen(!open)}
           aria-expanded={open}
         >
-          <span className="w2-card-title">思考过程</span>
-          <span className="w2-card-sum">
-            {streaming ? "正在思考…" : "已完成"}
+          <span className={`think-ico ${streaming ? "" : "done"}`} aria-hidden="true">
+            <svg className="think-arc" width="18" height="18" viewBox="0 0 18 18">
+              <circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="32 12" />
+            </svg>
+            <svg className="think-check" width="18" height="18" viewBox="0 0 18 18">
+              <path d="M4.5 9.5 L7.5 12.5 L13.5 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </span>
-          <span className={`w2-pill ${streaming ? "run" : "done"}`}>
-            {streaming ? "思考中" : "已思考"}
+          <span className="w2-card-title" style={{ fontFamily: "var(--font)", fontWeight: 600 }}>思考过程</span>
+          <span className={`w2-card-sum think-status ${streaming ? "" : "done"}`}>
+            {streaming ? (
+              <>正在思考<span className="think-dots"><span>.</span><span>.</span><span>.</span></span></>
+            ) : (
+              "已思考"
+            )}
           </span>
           <span>{open ? "▾" : "▸"}</span>
         </button>
@@ -546,12 +602,176 @@ function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }) {
   );
 }
 
-/** 工具调用卡（B 档）：标题行 = 工具名（等宽）+ 一句话摘要 + 状态标签。 */
+/** 工具调用的人话描述（Codex 式）：卡片上写模型在干什么，不甩原始 JSON。 */
+type ToolIconKind = "terminal" | "folder" | "file" | "edit" | "tool";
+
+/** 从工具消息正文里抠出参数 JSON（正文格式：调用工具：name（{...}）\n→ 结果）。 */
+function parseToolArgs(text: string): Record<string, unknown> {
+  const start = text.indexOf("（");
+  const end = text.lastIndexOf("）");
+  if (start < 0 || end <= start) return {};
+  try {
+    const v = JSON.parse(text.slice(start + 1, end));
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function argStr(args: Record<string, unknown>, key: string): string {
+  const v = args[key];
+  return typeof v === "string" ? v : "";
+}
+
+/** 工具名 + 参数 → 人话（读取文件 x / 列出目录 x / 写入文件 x / 执行命令 y）。 */
+function humanToolSummary(
+  name: string,
+  args: Record<string, unknown>,
+): { icon: ToolIconKind; text: string } {
+  switch (name) {
+    case "read_file": {
+      const p = argStr(args, "path");
+      return { icon: "file", text: p ? `读取文件 ${p}` : "读取文件" };
+    }
+    case "list_dir": {
+      const p = argStr(args, "path");
+      return { icon: "folder", text: p ? `列出目录 ${p}` : "列出目录" };
+    }
+    case "write_file": {
+      const p = argStr(args, "path");
+      return { icon: "edit", text: p ? `写入文件 ${p}` : "写入文件" };
+    }
+    case "run_shell": {
+      const c = argStr(args, "command");
+      return { icon: "terminal", text: c ? `执行命令 ${c}` : "执行命令" };
+    }
+    default:
+      return { icon: "tool", text: name ? `调用工具 ${name}` : "工具调用" };
+  }
+}
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif"]);
+
+/** read_file 读的是图片时返回路径（给缩略图用），否则 null。 */
+function imagePath(args: Record<string, unknown>): string | null {
+  const p = argStr(args, "path");
+  if (!p) return null;
+  const ext = p.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_EXTS.has(ext) ? p : null;
+}
+
+/** 工作区相对路径拼成绝对路径（Tauri asset 协议加载图片用）。 */
+function joinWorkdir(workdir: string, rel: string): string {
+  if (!workdir) return rel;
+  return `${workdir.replace(/[/\\]+$/, "")}/${rel.replace(/^[/\\]+/, "")}`;
+}
+
+/** 工具图标：16px 线性图标，stroke 1.5，currentColor；形状按工具区分，颜色保持克制中性。 */
+function ToolIcon({ kind }: { kind: ToolIconKind }) {
+  const common = {
+    width: 16,
+    height: 16,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.5,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  switch (kind) {
+    case "terminal":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M7 9 L10 12 L7 15" />
+          <line x1="12.5" y1="15" x2="16.5" y2="15" />
+        </svg>
+      );
+    case "folder":
+      return (
+        <svg {...common}>
+          <path d="M3.5 6.5 a1.5 1.5 0 0 1 1.5-1.5 h4 l2 2 h8 a1.5 1.5 0 0 1 1.5 1.5 v9 a1.5 1.5 0 0 1-1.5 1.5 H5 a1.5 1.5 0 0 1-1.5-1.5 z" />
+        </svg>
+      );
+    case "file":
+      return (
+        <svg {...common}>
+          <path d="M6 3.5 h7 l4 4 v12.5 a1 1 0 0 1-1 1 H6 a1 1 0 0 1-1-1 v-15.5 a1 1 0 0 1 1-1 z" />
+          <path d="M13 3.5 v4 h4" />
+          <line x1="9" y1="12.5" x2="15" y2="12.5" />
+          <line x1="9" y1="16" x2="15" y2="16" />
+        </svg>
+      );
+    case "edit":
+      return (
+        <svg {...common}>
+          <path d="M14.5 5.5 l4 4 L8 20 H4 v-4 z" />
+          <path d="M12.5 7.5 l4 4" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <path d="M12 3.5 L13.4 10.1 L20 12 L13.4 13.9 L12 20.5 L10.6 13.9 L4 12 L10.6 10.1 z" />
+        </svg>
+      );
+  }
+}
+
+/** 执行态小标记：旋转细弧（执行中）与对勾（完成）交叉淡入淡出。 */
+function StatusMark({ running }: { running: boolean }) {
+  return (
+    <span className={`tool-status-ico ${running ? "run" : "done"}`} aria-hidden="true">
+      <svg className="tool-spin" width="14" height="14" viewBox="0 0 14 14">
+        <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="25 9.5" />
+      </svg>
+      <svg className="tool-check" width="14" height="14" viewBox="0 0 14 14">
+        <path d="M3.5 7.5 L6 10 L10.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+/** 参数区的人话呈现：命令首词着色（轻量高亮）、路径原样、写入内容截断预览。 */
+function renderToolArgs(name: string, args: Record<string, unknown>): ReactNode {
+  if (name === "run_shell") {
+    const cmd = argStr(args, "command");
+    if (!cmd) return "—";
+    const i = cmd.search(/\s/);
+    if (i < 0) return <span className="tok-cmd">{cmd}</span>;
+    return (
+      <>
+        <span className="tok-cmd">{cmd.slice(0, i)}</span>
+        {cmd.slice(i)}
+      </>
+    );
+  }
+  if (name === "write_file") {
+    const p = argStr(args, "path");
+    const c = argStr(args, "content");
+    return (
+      <>
+        {p || "—"}
+        {c ? `\n${c.length > 200 ? `${c.slice(0, 200)}…` : c}` : ""}
+      </>
+    );
+  }
+  return argStr(args, "path") || "—";
+}
+
+/** 工具调用卡（B 档，Codex 式）：人话描述 + 图标 + 执行/完成态，不甩原始 JSON。
+ * 标题行 = 图标芯片 + 人话（读取文件 x / 执行命令 y）+ 状态（执行中弧线旋转 / 完成对勾）；
+ * 展开后看参数（命令/路径，命令首词着色）与结果（等宽块内联显示）；读图片时给缩略图。 */
 function ToolCard({
   msg,
+  workdir,
+  enterDelay = 0,
   onInspect,
 }: {
   msg: ChatMsg;
+  workdir: string;
+  enterDelay?: number;
   onInspect: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -559,14 +779,31 @@ function ToolCard({
   const arrowIdx = text.indexOf("\n→ ");
   const head = arrowIdx >= 0 ? text.slice(0, arrowIdx) : text;
   const result = arrowIdx >= 0 ? text.slice(arrowIdx + 3) : "";
+  const running = result === "";
   const name =
     msg.toolLabel ?? head.replace(/^调用工具：/, "").split("（")[0];
-  const argSummary = head.includes("（")
-    ? head.slice(head.indexOf("（") + 1, head.lastIndexOf("）"))
-    : "";
-  const summary = (argSummary || result || "已调用").slice(0, 80);
+  const args = parseToolArgs(head);
+  const summary = humanToolSummary(name, args);
+  const img = name === "read_file" ? imagePath(args) : null;
+  // 图片预览：展开时才向后端要 data URL（不走 asset 协议，见 fsutil::read_file_base64）。
+  // 失败只显示一行克制的提示，绝不挂一个破图图标。
+  const [imgSrc, setImgSrc] = useState<string | null>(null);
+  const [imgErr, setImgErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !img || !workdir) return;
+    let alive = true;
+    setImgSrc(null);
+    setImgErr(null);
+    invoke<string>("read_file_base64", { path: joinWorkdir(workdir, img) })
+      .then((url) => { if (alive) setImgSrc(url); })
+      .catch((e) => { if (alive) setImgErr(String(e)); });
+    return () => { alive = false; };
+  }, [open, img, workdir]);
   return (
-    <div className="msg tool">
+    <div
+      className="msg tool"
+      style={enterDelay ? { animationDelay: `${enterDelay}ms` } : undefined}
+    >
       <div className="w2-card" style={{ width: "100%" }}>
         <button
           type="button"
@@ -574,15 +811,34 @@ function ToolCard({
           onClick={() => setOpen(!open)}
           aria-expanded={open}
         >
-          <span className="w2-card-title">{name}</span>
-          <span className="w2-card-sum">{summary}</span>
-          <span className="w2-pill">工具</span>
+          <span className={`tool-ico ${running ? "run" : ""}`} aria-hidden="true">
+            <ToolIcon kind={summary.icon} />
+          </span>
+          <span className="w2-card-sum">{summary.text}</span>
+          <span className={`tool-status ${running ? "run" : "done"}`}>
+            <StatusMark running={running} />
+            {running ? "执行中" : "完成"}
+          </span>
           <span>{open ? "▾" : "▸"}</span>
         </button>
         {open && (
           <div className="w2-card-body">
-            {argSummary ? `参数：${argSummary}\n` : ""}
-            {result ? `结果：${result}` : "正在执行…"}
+            <div className="tool-label">{name}</div>
+            {img && workdir && (
+              <div className="tool-img">
+                {imgSrc ? (
+                  <img src={imgSrc} alt={img} />
+                ) : imgErr ? (
+                  <div className="tool-img-err">图片无法预览：{imgErr}</div>
+                ) : (
+                  <div className="tool-img-loading">图片加载中…</div>
+                )}
+              </div>
+            )}
+            <div className="tool-label">参数</div>
+            <div className="tool-code">{renderToolArgs(name, args)}</div>
+            <div className="tool-label" style={{ marginTop: 8 }}>结果</div>
+            <div className="tool-code">{result ? result : "正在执行…"}</div>
             <div>
               <button type="button" className="w2-card-link" onClick={onInspect}>
                 在 Inspector 中查看 →
@@ -593,6 +849,83 @@ function ToolCard({
       </div>
     </div>
   );
+}
+
+/** 工具调用分组（B 档）：一轮任务常有 9 条工具调用，各占一行会把对话区挤满。
+ * 连续的 kind:"tool" 消息收成一个分组，默认只露一行摘要（N 个 · 工具名），
+ * 点开再看里面每一条；每条 ToolCard 本身仍默认折叠。
+ * 灵动性：分组展开的瞬间，各卡按下标错峰 70ms 依次进来（瀑布）；展开 1.4s 后
+ * 新到的卡片不再延迟、直接入场。分组头有执行态（执行中弧线旋转 / 完成对勾）。 */
+function ToolGroup({
+  msgs,
+  workdir,
+  onInspect,
+}: {
+  msgs: ChatMsg[];
+  workdir: string;
+  onInspect: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [staggering, setStaggering] = useState(false);
+  useEffect(() => {
+    if (!staggering) return;
+    const t = setTimeout(() => setStaggering(false), 1400);
+    return () => clearTimeout(t);
+  }, [staggering]);
+  const toggle = () => {
+    if (!open) setStaggering(true);
+    setOpen(!open);
+  };
+  const names = Array.from(new Set(msgs.map((m) => m.toolLabel ?? "工具")));
+  const last = msgs[msgs.length - 1];
+  const running = !!last && !last.text.includes("\n→ ");
+  return (
+    <div
+      className="msg tool-group"
+      style={{ flexDirection: "column", gap: 8 }}
+    >
+      <div className="w2-card" style={{ width: "100%" }}>
+        <button
+          type="button"
+          className="w2-card-head"
+          onClick={toggle}
+          aria-expanded={open}
+        >
+          <span className="w2-card-title" style={{ fontFamily: "var(--font)", fontWeight: 600 }}>工具调用</span>
+          <span className="w2-card-sum">
+            {msgs.length} 个 · {names.join("、")}
+          </span>
+          <span className={`tool-status ${running ? "run" : "done"}`}>
+            <StatusMark running={running} />
+            {running ? "执行中" : "完成"}
+          </span>
+          <span>{open ? "▾" : "▸"}</span>
+        </button>
+      </div>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {msgs.map((m, i) => (
+            <ToolCard
+              key={m.id}
+              msg={m}
+              workdir={workdir}
+              enterDelay={staggering ? i * 70 : 0}
+              onInspect={onInspect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 从下标 i 起连续的 kind:"tool" 消息（渲染分组时用）。 */
+function collectToolRun(messages: ChatMsg[], i: number): ChatMsg[] {
+  const run: ChatMsg[] = [];
+  for (let j = i; j < messages.length && messages[j].kind === "tool"; j++) {
+    run.push(messages[j]);
+  }
+  return run;
 }
 
 /** 权限 / 询问卡（B 档）：改了什么 + 风险 + 批准/拒绝/稍后处理，批准后留记录行可撤销。 */
@@ -2509,7 +2842,7 @@ export default function App() {
               if (dist < 160) setHasNewMsg(false);
             }}
           >
-            {messages.map((m) =>
+            {messages.map((m, i) =>
               m.role === "user" ? (
                 <div
                   key={m.id}
@@ -2608,11 +2941,15 @@ export default function App() {
               ) : m.kind === "think" ? (
                 <ThinkBlock key={m.id} text={m.text} streaming={!!m.streaming} />
               ) : m.kind === "tool" ? (
-                <ToolCard
-                  key={m.id}
-                  msg={m}
-                  onInspect={() => setInspector("terminal")}
-                />
+                // 连续工具调用只在第一条渲染一个分组，其余条由分组内部渲染
+                i > 0 && messages[i - 1].kind === "tool" ? null : (
+                  <ToolGroup
+                    key={m.id}
+                    msgs={collectToolRun(messages, i)}
+                    workdir={settings.workdir}
+                    onInspect={() => setInspector("terminal")}
+                  />
+                )
               ) : m.kind === "perm" || m.kind === "ask" ? (
                 <PermCard key={m.id} msg={m} />
               ) : m.kind === "error" ? (

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Mode, Project, Task } from "../types";
+import { modKey } from "../platform";
 import Mark, { type MarkState } from "./Mark";
 import CrestLine from "./CrestLine";
 
@@ -198,17 +199,17 @@ export default function Sidebar({
       <div className="side-section">
         <button className="w2-side-action" onClick={onNewTask} type="button">
           ＋ 新任务
-          <span className="w2-kbd">⌘N</span>
+          <span className="w2-kbd">{modKey("N")}</span>
         </button>
         <button
           className="w2-side-action"
           onClick={onOpenPalette}
           type="button"
           aria-label="打开命令面板"
-          title="命令面板：搜命令、搜任务（⌘K）"
+          title={`命令面板：搜命令、搜任务（${modKey("K")}）`}
         >
           搜索任务…
-          <span className="w2-kbd">⌘K</span>
+          <span className="w2-kbd">{modKey("K")}</span>
         </button>
       </div>
 

@@ -63,6 +63,61 @@ pub async fn read_file(path: String) -> Result<String, String> {
     }
 }
 
+const B64_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn to_base64(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(B64_ALPHABET[(n >> 18) as usize & 63] as char);
+        out.push(B64_ALPHABET[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            B64_ALPHABET[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            B64_ALPHABET[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// 图片预览：把文件读成 data URL 交给前端 <img>。
+/// 不走 asset 协议——工作区可能在 /tmp 这类应用沙箱外的路径，asset 协议
+/// 够不着会 403，前端只能看到一个破图图标。5MB 上限，预览够用了。
+#[tauri::command]
+pub async fn read_file_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| format!("无法读取 {path}：{e}"))?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err("图片超过 5MB，暂不支持预览".to_string());
+    }
+    let mime = match Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        Some("svg") => "image/svg+xml",
+        Some("avif") => "image/avif",
+        _ => "application/octet-stream",
+    };
+    Ok(format!("data:{mime};base64,{}", to_base64(&bytes)))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewFile {
     pub path: String,
