@@ -117,7 +117,58 @@ fn in_literal(ranges: &[(usize, usize)], pos: usize) -> bool {
     ranges.iter().any(|(s, e)| pos >= *s && pos < *e)
 }
 
-/// 从正文里恢复工具调用。`known_tools` 是本会话工具表里的名字。
+/// 恢复成功后，把正文里的工具调用标记剥掉。
+///
+/// 标记已经变成结构化调用进历史了，正文再留着它只会：
+/// ① 用户看到一堆原始标记，难看；
+/// ② 模型在下一轮看到自己"写过"的标记，容易误判调用已经发过、
+///    不再发结构化调用，任务就卡在"现在改。"这种空话上。
+/// 只剥恢复网认的那几种标记块（且不在 Markdown 字面量区里的），
+/// 模型自己的文字原样留着；剥完多余的空行压一压。
+/// JSON 兜底恢复出来的裸 JSON 不在这里剥（没有明确的标记边界，
+/// 剥错会吃掉正文）。
+pub fn strip_tool_call_markup(content: &str) -> String {
+    let ranges = markdown_literal_ranges(content);
+    let mut cut: Vec<(usize, usize)> = Vec::new();
+    for re in [&DSML_BLOCK, &TOOL_CALL_TAG, &FUNCTION_CALLS_TAG, &INVOKE_TAG, &FUNCTION_TAG] {
+        for m in re.find_iter(content) {
+            if !in_literal(&ranges, m.start()) {
+                cut.push((m.start(), m.end()));
+            }
+        }
+    }
+    if cut.is_empty() {
+        return content.to_string();
+    }
+    cut.sort_unstable();
+    cut.dedup();
+    let mut out = String::with_capacity(content.len());
+    let mut pos = 0;
+    for (s, e) in cut {
+        if s < pos {
+            continue;
+        }
+        out.push_str(&content[pos..s]);
+        pos = e;
+    }
+    out.push_str(&content[pos..]);
+    // 剥完剩下的连续空行压成最多一个空行，首尾空白去掉。
+    let mut cleaned = String::with_capacity(out.len());
+    let mut blanks = 0;
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            blanks += 1;
+            if blanks <= 1 {
+                cleaned.push('\n');
+            }
+        } else {
+            blanks = 0;
+            cleaned.push_str(line);
+            cleaned.push('\n');
+        }
+    }
+    cleaned.trim().to_string()
+}
 /// 顺序：DSML 标记 → 其他标记 → JSON 兜底；同名同参只留第一次。
 pub fn recover_tool_calls(content: &str, known_tools: &[String]) -> Vec<RecoveredCall> {
     let mut out: Vec<RecoveredCall> = Vec::new();
@@ -448,5 +499,27 @@ mod tests {
             "{\"name\": \"read_file\", \"arguments\": {\"path\": \"/tmp\"}}"
         ));
         assert!(!looks_like_tool_attempt("今天天气不错，改完了。"));
+    }
+
+    #[test]
+    fn strip_removes_dsml_block_keeps_prose() {
+        let text = "路专员，我来执行这个链条任务。先检查工作区。\n<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"list_dir\">\n<｜DSML｜parameter name=\"path\" string=\"true\">/tmp</｜DSML｜parameter>\n</｜DSML｜invoke>\n</｜DSML｜tool_calls>\n\n目标清单：\n- [ ] 读 start.txt";
+        let out = strip_tool_call_markup(text);
+        assert!(!out.contains("DSML"), "标记应被剥掉：{out}");
+        assert!(out.contains("先检查工作区"), "模型自己的文字要留着：{out}");
+        assert!(out.contains("目标清单"), "标记后面的文字要留着：{out}");
+    }
+
+    #[test]
+    fn strip_leaves_code_fence_example_alone() {
+        let text = "示例：\n```xml\n<｜DSML｜tool_calls><｜DSML｜invoke name=\"read_file\"></｜DSML｜invoke></｜DSML｜tool_calls>\n```\n上面只是例子。";
+        let out = strip_tool_call_markup(text);
+        assert!(out.contains("DSML"), "围栏里的例子不是调用，不剥：{out}");
+    }
+
+    #[test]
+    fn strip_plain_text_unchanged() {
+        let text = "今天天气不错，改完了。";
+        assert_eq!(strip_tool_call_markup(text), text);
     }
 }

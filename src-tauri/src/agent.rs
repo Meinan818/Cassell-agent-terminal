@@ -730,6 +730,12 @@ async fn run_inner_turn(
         let mut stream = resp.bytes_stream();
         let mut buf = String::new();
         let mut round_text = String::new();
+        // 本轮模型发出的推理（reasoning_content）：思考模型要求下一轮
+        // 原样传回去，否则 DeepSeek 会 400（"reasoning_content must be
+        // passed back"）。只累积模型真发出来的，绝不编造；没发就不带。
+        // 这对 DSML 恢复尤其重要：恢复出的调用是合成 id，没有真实 id
+        // 兜底，全靠这段推理让回发通过校验。
+        let mut round_reasoning = String::new();
         let mut tool_calls: Vec<Value> = Vec::new();
         let mut round_prompt: u64 = 0;
         let mut round_completion: u64 = 0;
@@ -794,11 +800,11 @@ async fn run_inner_turn(
                     continue;
                 };
 
-                // 思考增量（推理模型走这个字段）→ 只推 thinking 事件，绝不进正文。
-                // 多轮工具调用的中间轮次本来就只有思考 + 工具调用、没有正文，这是正常的；
-                // 最终轮若也只有思考没有正文，正文留空走兜底，绝不把原始推理全文倒进正文。
+                // 思考增量（推理模型走这个字段）→ 推 thinking 事件并累积，
+                // 回发时原样带上（见上）。绝不进正文。
                 if let Some(piece) = delta.get("reasoning_content").and_then(|c| c.as_str()) {
                     if !piece.is_empty() {
+                        round_reasoning.push_str(piece);
                         let _ = app.emit("agent-thinking", json!({"text": piece}));
                     }
                 }
@@ -868,6 +874,11 @@ async fn run_inner_turn(
                     tool_calls.len(),
                     source
                 );
+                // 恢复成功后，把正文里的工具调用标记剥掉（见 dsml.rs）：
+                // 标记已经变成结构化调用进历史了，正文再留着它只会
+                // 污染显示、还会让模型误判调用已经发过。模型自己的
+                // 文字原样留着。
+                round_text = crate::dsml::strip_tool_call_markup(&round_text);
             } else if !dsml_nudged && crate::dsml::looks_like_tool_attempt(&round_text) {
                 dsml_nudged = true;
                 // 先把模型这轮的正文记进历史，再提醒它重发结构化调用。
@@ -878,11 +889,16 @@ async fn run_inner_turn(
             }
         }
 
-        let msg = json!({
+        let mut msg = json!({
             "role": "assistant",
             "content": if round_text.is_empty() { Value::Null } else { json!(round_text) },
             "tool_calls": if tool_calls.is_empty() { Value::Null } else { json!(tool_calls) }
         });
+        // 思考模型回发约定：本轮模型真发了推理就原样带上（见上），
+        // 否则下一轮 DeepSeek 会 400。没发就不带这个字段。
+        if !round_reasoning.is_empty() {
+            msg["reasoning_content"] = json!(round_reasoning);
+        }
 
         /* 本轮的文字已经在流式阶段累积好，汇总进最终结果。
            注意：思考内容（reasoning_content）只走 agent-thinking，绝不进正文；
