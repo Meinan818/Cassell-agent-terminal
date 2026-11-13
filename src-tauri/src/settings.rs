@@ -285,9 +285,3 @@ pub fn save_settings(app: &AppHandle, settings: &Settings) -> Result<(), String>
     std::fs::write(&path, text).map_err(|e| e.to_string())?;
     Ok(())
 }
-
-impl Settings {
-    pub fn provider(&self) -> Option<&ProviderConfig> {
-        self.providers.iter().find(|p| p.id == self.provider_id)
-    }
-}

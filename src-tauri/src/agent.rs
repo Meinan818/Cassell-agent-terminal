@@ -1347,6 +1347,27 @@ async fn run_agent_native_inner(
                     session.messages.push(json!({"role": "user", "content": format!("（系统提醒：以下文件你改过但还没验证过：{files}。先重新读取它们确认内容正确，或运行验证命令看到成功输出，再汇报完成。不要只说“做完了”。）")}));
                     continue;
                 }
+                // 交付门第二道：清单门（P0-6 补洞）——网关丢调用时模型只回一句
+                // “收到”就结束，旧门只查未验证写盘、列表为空就直接判 Done。
+                // 先查清单：有未完成项、或目标根本没开始，都不许判 Done。
+                match crate::goal::checklist_gate(&session, &tools_run) {
+                    crate::goal::ChecklistGate::Pass => {}
+                    crate::goal::ChecklistGate::Nudge(text) => {
+                        session.checklist_nudged += 1;
+                        session.messages.push(json!({"role": "user", "content": text}));
+                        eprintln!(
+                            "[goal] 清单门：第 {} 次提醒模型继续做目标",
+                            session.checklist_nudged
+                        );
+                        continue;
+                    }
+                    crate::goal::ChecklistGate::Stuck(reason) => {
+                        session.status = GoalStatus::Stuck;
+                        stop_reason = "stalled".to_string();
+                        stop_detail = reason;
+                        break;
+                    }
+                }
                 session.status = GoalStatus::Done;
             }
             stop_reason = "finished".to_string();

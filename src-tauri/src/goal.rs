@@ -31,6 +31,10 @@ pub const GOAL_ROUNDS_BUDGET: u32 = 40;
 pub const STALL_ROUNDS: u32 = 3;
 /// 同一个工具调用连续出现这么多次 → 判定在原地打转。
 pub const REPEAT_CALLS: usize = 3;
+/// 清单门提醒上限：文本轮结束时清单还没做完，最多提醒模型这么多次
+/// “继续做，别停”；超过就判卡住（Stuck），不再假装做完了。
+/// 上限外的终极兜底仍是 40 轮总预算与停滞检测。
+pub const CHECKLIST_NUDGE_MAX: u32 = 2;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -100,6 +104,10 @@ pub struct GoalSession {
     /// 已经为“没验证就宣称完成”提醒过模型一次。
     #[serde(default)]
     pub verification_nudged: bool,
+    /// 已经为“清单没做完就想结束”提醒过模型几次（到
+    /// CHECKLIST_NUDGE_MAX 就判卡住，不再无限提醒）。
+    #[serde(default)]
+    pub checklist_nudged: u32,
     /// P0-1 冻结前缀（system 正文 + 工具定义表，会话内字节稳定）。
     /// 目标会话创建时建好并写进 frozen.json；续跑、倒带、应用重启后
     /// 读回来复用（hash 对上才用），会话中途改显示名/人设不改它——
@@ -130,6 +138,7 @@ impl GoalSession {
             checklist: Vec::new(),
             unverified_writes: Vec::new(),
             verification_nudged: false,
+            checklist_nudged: 0,
             frozen: None,
             created_at: now_secs(),
         }
@@ -327,6 +336,70 @@ pub fn checklist_of(messages: &[Value]) -> Vec<CheckItem> {
         }
     }
     Vec::new()
+}
+
+/// 交付门第二道：清单门。文本轮结束、要判 Done 之前，先看清单。
+///
+/// 背景（DSML_DROP 实测）：网关直接丢掉首轮全部 tool_calls 时，模型只回
+/// 一句“收到、先看现场”就结束；旧交付门只查“改过没验证的文件”，丢调用
+/// 时什么都没写、列表为空，于是 1/40 轮、清单 0/3 就判 Done——干一半就
+/// 停，还假装做完了。清单门补的就是这一刀。
+///
+/// - 清单有未完成项 → 还没做完，不许 Done。
+/// - 清单为空、且从没改过文件、没读过文件、本次调用里也没调过工具 →
+///   目标根本没开始（只说了一声收到），不许 Done。
+/// - 其余情况（清单全打勾；或没清单但确实干过活——改过文件/读过文件）
+///   → 放行。
+///
+/// `tools_run_so_far` 是本次调用至今跑过的工具（外层循环累积的）：
+/// 只要跑过任何工具，目标就算开始了。
+///
+/// 返回 Nudge(提醒文案) 时调用方把文案以 user 角色发给模型再续跑；
+/// 提醒到上限还没动静时返回 Stuck(原因)，调用方判卡住、如实告诉用户，
+/// 绝不判 Done。
+pub enum ChecklistGate {
+    Pass,
+    Nudge(String),
+    Stuck(String),
+}
+
+pub fn checklist_gate(session: &GoalSession, tools_run_so_far: &[String]) -> ChecklistGate {
+    let undone: Vec<&CheckItem> = session.checklist.iter().filter(|i| !i.done).collect();
+    let never_started = session.checklist.is_empty()
+        && session.files_changed.is_empty()
+        && session.read_paths.is_empty()
+        && tools_run_so_far.is_empty();
+    if undone.is_empty() && !never_started {
+        return ChecklistGate::Pass;
+    }
+    if session.checklist_nudged >= CHECKLIST_NUDGE_MAX {
+        let reason = if never_started {
+            format!(
+                "目标还没开始动手（没有清单、没读过文件、没改过文件），提醒了 {CHECKLIST_NUDGE_MAX} 次还是只回文字不干活，我先停下来了。再发一次消息让我重新试，或看一眼是不是网关把工具调用弄丢了。"
+            )
+        } else {
+            let names: Vec<&str> = undone.iter().take(3).map(|i| i.text.as_str()).collect();
+            format!(
+                "目标清单还有 {} 项没做完（{}），提醒了 {CHECKLIST_NUDGE_MAX} 次还是只回文字不干活，我先停下来了。看一眼做到哪了、给点提示，我再接着做。",
+                undone.len(),
+                names.join("、")
+            )
+        };
+        return ChecklistGate::Stuck(reason);
+    }
+    if never_started {
+        ChecklistGate::Nudge(
+            "（系统提醒：你刚才只说了一声收到，还没开始动手。按目标要求先列出“目标清单”（## 目标清单，2–5 条，每条用“- [ ] ”开头），然后立刻开始读文件、改文件，不要只回文字。）"
+                .to_string(),
+        )
+    } else {
+        let names: Vec<&str> = undone.iter().take(3).map(|i| i.text.as_str()).collect();
+        ChecklistGate::Nudge(format!(
+            "（系统提醒：目标清单还有 {} 项没做完：{}。别停，继续把它们做完；做完一项就把清单里那一项改成“- [x] ”，最后附上打勾后的完整清单再汇报。）",
+            undone.len(),
+            names.join("、")
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,6 +1155,85 @@ mod tests {
     fn checklist_of_empty_when_no_block() {
         let msgs = vec![json!({"role": "assistant", "content": "普通回复，没有清单。"})];
         assert!(checklist_of(&msgs).is_empty());
+    }
+
+    // 清单门（P0-6 补洞）：DSML_DROP 场景——网关丢掉调用、模型只回一句
+    // “收到”就结束时，旧门 1/40 轮、清单 0/3 判 Done；新门必须拦住。
+    fn goal_with_checklist(items: Vec<(&str, bool)>) -> GoalSession {
+        let mut s = GoalSession::new("g".into(), "t".into(), "eva".into(), "/tmp".into(), 40);
+        s.checklist = items
+            .into_iter()
+            .map(|(t, d)| CheckItem { text: t.into(), done: d })
+            .collect();
+        s
+    }
+
+    #[test]
+    fn checklist_gate_passes_when_all_done() {
+        let s = goal_with_checklist(vec![("改 VERSION", true), ("跑 grep 检查", true)]);
+        assert!(matches!(
+            checklist_gate(&s, &["write_file".to_string()]),
+            ChecklistGate::Pass
+        ));
+    }
+
+    #[test]
+    fn checklist_gate_passes_when_no_checklist_but_work_done() {
+        // 没列清单但确实改过文件：干完活的正常收尾，放行。
+        let mut s = GoalSession::new("g".into(), "t".into(), "eva".into(), "/tmp".into(), 40);
+        s.files_changed.push("a.txt".into());
+        assert!(matches!(
+            checklist_gate(&s, &["write_file".to_string()]),
+            ChecklistGate::Pass
+        ));
+    }
+
+    #[test]
+    fn checklist_gate_passes_when_research_only() {
+        // 没清单、没改文件，但读过文件（纯调研/回答型目标）：放行，
+        // 别把“查完了、结论是……”的正常收尾当成没开始。
+        let mut s = GoalSession::new("g".into(), "t".into(), "eva".into(), "/tmp".into(), 40);
+        s.read_paths.insert("a.txt".into());
+        assert!(matches!(
+            checklist_gate(&s, &[]),
+            ChecklistGate::Pass
+        ));
+    }
+
+    #[test]
+    fn checklist_gate_nudges_when_items_undone() {
+        let s = goal_with_checklist(vec![("改 VERSION", true), ("跑 grep 检查", false)]);
+        match checklist_gate(&s, &[]) {
+            ChecklistGate::Nudge(text) => assert!(text.contains("跑 grep 检查")),
+            other => panic!("应提醒继续做，实际是 {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    #[test]
+    fn checklist_gate_nudges_when_never_started() {
+        // DSML_DROP 首轮：没清单、没读没改、本回合没调工具。
+        let s = GoalSession::new("g".into(), "t".into(), "eva".into(), "/tmp".into(), 40);
+        match checklist_gate(&s, &[]) {
+            ChecklistGate::Nudge(text) => assert!(text.contains("还没开始动手")),
+            other => panic!("应提醒开始动手，实际是 {:?}", std::mem::discriminant(&other)),
+        }
+    }
+
+    #[test]
+    fn checklist_gate_stuck_after_cap() {
+        let mut s = goal_with_checklist(vec![("改 VERSION", false)]);
+        s.checklist_nudged = CHECKLIST_NUDGE_MAX;
+        match checklist_gate(&s, &[]) {
+            ChecklistGate::Stuck(reason) => assert!(reason.contains("改 VERSION")),
+            other => panic!("到上限应判卡住，实际是 {:?}", std::mem::discriminant(&other)),
+        }
+        // 没开始的情况到上限也判卡住，不判 Done。
+        let mut s2 = GoalSession::new("g".into(), "t".into(), "eva".into(), "/tmp".into(), 40);
+        s2.checklist_nudged = CHECKLIST_NUDGE_MAX;
+        assert!(matches!(
+            checklist_gate(&s2, &[]),
+            ChecklistGate::Stuck(_)
+        ));
     }
 
     #[test]
