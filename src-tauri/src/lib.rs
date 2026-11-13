@@ -1,6 +1,7 @@
 mod agent;
 mod codex;
 mod fsutil;
+mod lore;
 mod settings;
 mod shell;
 

@@ -648,9 +648,20 @@ async fn run_agent_native_inner(
     } else {
         ""
     };
+    // 龙族知识库接线（知识库 §40 四层喂法）：
+    // 冻结前缀放最前面且固定不变——人设提示词 + §0 常驻速查 + 诚实规则，
+    // 这样 DeepSeek 前缀缓存才能命中（P0-1 会 formalize 这套，先把位置放对）。
+    // 按需注入的章节追加在 system 消息末尾；不问龙族问题时一个字都不喂。
+    // 匹配只看当前用户消息，不看历史，避免旧对话里的龙族词误触发。
+    let lore_tail = match crate::lore::build_lore_injection(&req.prompt) {
+        Some(injection) => format!("\n\n{injection}"),
+        None => String::new(),
+    };
     let mut messages: Vec<Value> = vec![json!({
         "role": "system",
-        "content": format!("{persona}\n{plan_hint}\n当前工作区：{}\n允许的操作：{}{auth_hint}",
+        "content": format!("{persona}\n\n{}\n\n[龙族知识回答规则]\n{}\n\n{plan_hint}\n当前工作区：{}\n允许的操作：{}{auth_hint}{lore_tail}",
+            crate::lore::core_quick_ref(),
+            crate::lore::HONESTY_RULES,
             if req.authorized { workdir.as_str() } else { "未授权（请先选择文件夹）" },
             if req.sandbox == "read-only" { "只能读取，不能修改" } else { "可以读写文件并执行命令" })
     })];

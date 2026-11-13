@@ -59,6 +59,11 @@ class Handler(BaseHTTPRequestHandler):
             f"msgs={[(m.get('role')) for m in body.get('messages', [])]} "
             f"tools_in_history={any(m.get('role') == 'tool' for m in body.get('messages', []))} "
             f"offered_tools={[t.get('function', {}).get('name') for t in body.get('tools', [])]}")
+        # 接线验证用：system 消息摘要（长度、是否含知识库注入标记、含哪些 §N 章节、首尾各 120 字）。
+        sys_msg = next((m.get("content", "") for m in body.get("messages", []) if m.get("role") == "system"), "")
+        import re as _re
+        sys_secs = sorted({int(n) for n in _re.findall(r"## §(\d+)", sys_msg)})
+        log(f"SYS len={len(sys_msg)} lore_marker={'以下为龙族知识库相关章节' in sys_msg} sections={sys_secs} head={sys_msg[:120]!r} tail={sys_msg[-120:]!r}")
         if not self.path.rstrip("/").endswith("/chat/completions"):
             self._send_json(404, {"error": "not found"})
             return
