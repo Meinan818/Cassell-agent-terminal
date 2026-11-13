@@ -46,7 +46,7 @@ export const EFFORT_DESCS: Record<Effort, string> = {
  * 读写工作区外的绝对路径。删根目录（rm -rf / 这类）任何档位都拒绝。 */
 export const SANDBOX_DESCS: Record<Sandbox, string> = {
   "read-only": "只能读文件、列目录，不能改任何东西、不能跑命令。",
-  "workspace-write": "可以改工作区里的文件、跑工作区里的命令；工作区以外的地方碰不了。",
+  "workspace-write": "可以改工作区里的文件、跑命令；文件工具碰不了工作区以外的地方，终端命令本身不受沙箱限制。",
   "danger-full-access": "文件工具可以读写工作区以外的绝对路径；删根目录仍然永远拒绝。只在你明确知道后果时用。",
 };
 
@@ -1329,7 +1329,7 @@ function UsageRangeRow({
       <span className="usage-range-nums">
         {requests === 0
           ? "还没有用量数据"
-          : `↑ ${fmtTokens(prompt)} · ↓ ${fmtTokens(completion)} · 缓存 ${fmtHitRate(prompt, cached)} · ${fmtUsd(costUsd)}（${requests} 次请求）`}
+          : `↑ ${fmtTokens(prompt)} · ↓ ${fmtTokens(completion)} · 缓存 ${fmtHitRate(prompt, cached)} · ${fmtUsd(costUsd)}（${requests} 次运行）`}
       </span>
     </div>
   );

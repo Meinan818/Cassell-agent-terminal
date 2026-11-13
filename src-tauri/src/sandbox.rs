@@ -127,10 +127,21 @@ pub fn join_path(workdir: &str, rel: &str, sandbox: SandboxLevel) -> Result<Path
 }
 
 /// 旧 safe_join：相对路径必须落在工作区内，`..` 一律拒绝。
+/// 绝对路径：落在工作区内就直接用（词法归一），落在工作区外就拒绝——
+/// 旧实现是把绝对路径当相对路径拼进工作区，读不到时只报“No such file”，
+/// 模型还得分辨“文件不存在”还是“路径越界”，实测已证实会误导。
 pub fn safe_join(workdir: &str, rel: &str) -> Result<PathBuf, String> {
     let base = Path::new(workdir);
     if !base.is_dir() {
         return Err(format!("工作区不存在：{workdir}"));
+    }
+    let p = Path::new(rel);
+    if p.is_absolute() {
+        let norm = normalize_lexical(p);
+        if norm.starts_with(base) {
+            return Ok(norm);
+        }
+        return Err("路径超出工作区范围".to_string());
     }
     let mut out = base.to_path_buf();
     for seg in rel.replace('\\', "/").split('/') {
@@ -253,6 +264,16 @@ mod tests {
         // 读写工作区：相对路径放行，`..` 拒绝。
         assert!(join_path(&base, "a/b.txt", SandboxLevel::WorkspaceWrite).is_ok());
         assert!(join_path(&base, "../escape.txt", SandboxLevel::WorkspaceWrite).is_err());
+        // 读写工作区：工作区外的绝对路径明确拒绝（不是拼进工作区再报文件不存在）。
+        let outside = join_path(&base, "/tmp/cassell-longtask/outside.txt", SandboxLevel::WorkspaceWrite);
+        assert!(outside.is_err());
+        assert_eq!(outside.unwrap_err(), "路径超出工作区范围");
+        // 读写工作区：工作区内的绝对路径直接用。
+        let inside_abs = format!("{}/a.txt", base);
+        assert_eq!(
+            join_path(&base, &inside_abs, SandboxLevel::WorkspaceWrite).unwrap(),
+            PathBuf::from(&inside_abs)
+        );
         // 无边界：绝对路径放行，`..` 词法归一。
         let out = join_path(&base, "/tmp/x/../y.txt", SandboxLevel::FullAccess).unwrap();
         assert_eq!(out, PathBuf::from("/tmp/y.txt"));
