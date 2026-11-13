@@ -144,21 +144,26 @@ export default function Mark({
     transform: `translate(-50%, -50%) translate(${proj.x}px, ${dy}px) rotate(${tilt}deg) scale(${Math.max(0, proj.scaleX) * pose.eyeScale}, ${fy * pose.eyeScaleY * open * pose.eyeScale})`,
   });
 
-  const arcStyle = (proj: { x: number; scaleX: number; hidden: boolean }): React.CSSProperties => ({
+  const arcStyle = (
+    proj: { x: number; scaleX: number; hidden: boolean },
+    tilt: number,
+  ): React.CSSProperties => ({
     position: "absolute",
     left: R,
-    // 笑弧：弧顶在眼顶 + (0.83 − smileArc) 眼高处，弧高 = smileArc × 眼高
-    //（smileArc 0.55 时与旧版固定值完全一致；弧度由 expressions.ts 的参数表定）
+    // 笑弧：弧顶在眼顶 + (0.83 − smileArc) 眼高处，弧高 = smileArc × 眼高。
+    // 弧度由 expressions.ts 的参数表定（done 0.26，柔和浅弧）；线细
+    // （0.026D，84px 时约 2.2px）+ 跟药丸眼一样的 "/" 平行倾斜，
+    // 是放松的微笑，不是强行咧嘴的粗彩虹。
     top: eyeTop + eyeH * (0.83 - pose.smileArc),
     width: eyeW,
     height: eyeH * pose.smileArc,
-    borderTop: `${Math.max(2, size * 0.045)}px solid ${palette.eyeColor}`,
+    borderTop: `${Math.max(1.5, size * 0.026)}px solid ${palette.eyeColor}`,
     borderLeft: "none",
     borderRight: "none",
     borderBottom: "none",
     borderRadius: `${eyeW / 2}px ${eyeW / 2}px 0 0`,
     display: proj.hidden ? "none" : undefined,
-    transform: `translate(-50%, 0) translateX(${proj.x}px)`,
+    transform: `translate(-50%, 0) translateX(${proj.x}px) rotate(${tilt}deg)`,
   });
 
   const ringSize = size * 0.07;
@@ -278,8 +283,8 @@ export default function Mark({
       >
         {pose.smile ? (
           <>
-            <div style={arcStyle(leftProj)} />
-            <div style={arcStyle(rightProj)} />
+            <div style={arcStyle(leftProj, pose.tiltL)} />
+            <div style={arcStyle(rightProj, pose.tiltR)} />
           </>
         ) : (
           <>

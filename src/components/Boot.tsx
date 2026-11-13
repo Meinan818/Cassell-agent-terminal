@@ -72,6 +72,49 @@ const MOTTO_LINES = [
   "FIDEM SERVAVI",
 ];
 
+/** 指纹纹路：程序化生成的涡纹（whorl）——22 条平滑嵌套的闭合纹脊，
+ * 不是同心圆简笔画，也不是一团乱线。
+ * 关键在“平行流动”：相位只随层数缓慢漂移，不逐条随机——真指纹的
+ * 纹脊是平行流线；逐条随机相位 + 高频扰动会让纹脊互相打结、缠成毛线球。
+ * 低频扰动（2θ 主瓣 + 3θ 细流，振幅小）让环带微微起伏但不打结；
+ * 内圈密亮、外圈渐淡，中心收成一个干净的小环芯，不留空洞。 */
+function fingerprintRidges(): { d: string; o: number; delay: number }[] {
+  const cx = 90;
+  const cy = 94;
+  const N = 22;
+  const ridges: { d: string; o: number; delay: number }[] = [];
+  for (let i = 0; i < N; i++) {
+    const r0 = 5 + i * 3.7; // 5 → 约 82.7，铺满 clip 椭圆
+    const phase = i * 0.2; // 相位随层缓慢漂移：相邻纹脊平行流动
+    const steps = 140;
+    let d = "";
+    let minY = Infinity;
+    for (let k = 0; k <= steps; k++) {
+      const th = (k / steps) * Math.PI * 2;
+      const rr =
+        r0 *
+        (1 +
+          0.075 * Math.sin(2 * th + phase) +
+          0.045 * Math.sin(3 * th + phase * 1.7 + 0.9));
+      const x = cx + Math.cos(th) * rr * 0.94;
+      const y = cy + Math.sin(th) * rr * 1.06;
+      if (y < minY) minY = y;
+      d += `${k === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)} `;
+    }
+    d += "Z";
+    // 内密外疏：核心亮（0.84）、外圈渐淡（0.34），边缘柔化
+    const fall = 1 - i / (N - 1); // 1 → 0
+    const o = 0.34 + 0.5 * fall * fall;
+    // 扫光自上而下：按纹脊顶部 y 排布，0–800ms
+    const delay = Math.round(
+      Math.max(0, Math.min(1, (minY - 10) / 168)) * 800,
+    );
+    ridges.push({ d, o: +o.toFixed(2), delay });
+  }
+  return ridges;
+}
+const FP_RIDGES = fingerprintRidges();
+
 export default function Boot({ onDone }: { onDone: () => void }) {
   const [phase, setPhase] = useState<Phase>("particles");
   const [exiting, setExiting] = useState<Phase | null>(null);
@@ -236,8 +279,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
 
   // 常驻纯黑夜空背景（独立于粒子校徽段）：开机七步全程都有的底。
   // 粒子段的画布只在 particles 阶段挂载，校徽一走背景就空了——这块
-  // 画布从开机挂到结束，画纯黑底 + 细小 subtle 的星星散在夜空里，
-  // 和粒子段的气质接得上。约 2500 颗细星，闪烁 + 极慢漂移；
+  // 画布从开机挂到结束，画纯黑底 + 清晰可见的星野散在夜空里，
+  // 和粒子段的气质接得上。约 4500 颗星，亮度 0.30–0.95，闪烁 + 极慢漂移；
   // 只画背景，不碰校徽粒子。背景是纯黑 #000000，不要发蓝。
   useEffect(() => {
     const canvas = bgCanvasRef.current;
@@ -272,15 +315,20 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       h = (canvas.height = Math.round(canvas.clientHeight * S));
       cssW = canvas.clientWidth;
       cssH = canvas.clientHeight;
-      stars = Array.from({ length: 2500 }, () => ({
-        x: Math.random() * cssW,
-        y: Math.random() * cssH,
-        // 小而 subtle：0.5–1.4px，夜空里的细星，密密麻麻但每颗都暗。
-        size: (0.5 + Math.random() * 0.9) * S,
-        base: 0.08 + Math.random() * 0.28,
-        tw: Math.random() * Math.PI * 2,
-        drift: (Math.random() * 2 - 1) * 1.2,
-      }));
+      // 约 4500 颗星，夜空要一眼看清密密麻麻的星野，不能黑漆漆一片——
+      // 之前 2500 颗、0.08–0.36 太暗太小，截图上几乎看不见。普通星
+      // 0.8–2.0px、亮度 0.30–0.80，约 12% 是亮星（2.0–3.0px、0.75–0.95）。
+      stars = Array.from({ length: 4500 }, () => {
+        const hero = Math.random() < 0.12;
+        return {
+          x: Math.random() * cssW,
+          y: Math.random() * cssH,
+          size: (hero ? 2.0 + Math.random() * 1.0 : 0.8 + Math.random() * 1.2) * S,
+          base: hero ? 0.75 + Math.random() * 0.2 : 0.3 + Math.random() * 0.5,
+          tw: Math.random() * Math.PI * 2,
+          drift: (Math.random() * 2 - 1) * 1.2,
+        };
+      });
     };
     seed();
     const onResize = () => seed();
@@ -321,9 +369,10 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   // 粒子模型（不是平面拼图）；成型后 6.5–8.0s 再沿流入路径散回星野。
   // 校徽按真校徽照片采样布点；每个粒子带 z 轴深度：前脸 / 后脸 /
   // 侧壁三层构成 0.65R 厚的立体校徽；成型后绕 Y 轴缓慢摆动（±22°）
-  // + 透视投影，厚度与视差一眼可见。背景是纯黑夜空 #000000 + 3000 颗
-  // 细星野（远近星点带视差漂移），不要发蓝。粒子尺寸很细（0.6–3.2）、
-  // 边缘柔和衰减、亮度克制——细腻，不要粗大糊团、不要中心过曝成白团。
+  // + 透视投影，厚度与视差一眼可见。背景是纯黑夜空 #000000 + 4500 颗
+  // 清晰可见的星野（远近星点带视差漂移），不要发蓝。粒子要亮、要
+  // 看得清（尺寸 0.8–3.6、base 0.5–0.95），边缘柔和衰减——细腻但
+  // 不暗，不要粗大糊团、不要中心过曝成白团。
   // 全程只用白色粒子，照片校徽 <img> 已彻底去掉。
   useEffect(() => {
     if (phase !== "particles") return;
@@ -365,18 +414,21 @@ export default function Boot({ onDone }: { onDone: () => void }) {
 
     // ---- 背景：纯黑夜空 #000000，不要发蓝（用户明确要纯黑夜空 + 星空）。
 
-    // ---- 背景星野：3000 颗细星，布在三维大空间里（z -1400..+250），
-    // 远星小而暗、近星大而亮，随镜头缓慢视差漂移。密密麻麻但每颗
-    // 都细、都暗——像视频里散开后的满屏星野。----
+    // ---- 背景星野：4500 颗细星，布在三维大空间里（z -1400..+250），
+    // 远星小而暗、近星大而亮，随镜头缓慢视差漂移。夜空要一眼看清
+    // 密密麻麻的星野——之前 3000 颗、0.08–0.38 太暗，截图上看不见。
     type Star = { x: number; y: number; z: number; size: number; base: number; tw: number };
-    const stars: Star[] = Array.from({ length: 3000 }, () => ({
-      x: (Math.random() * 2 - 1) * cssW * 0.55 * S,
-      y: (Math.random() * 2 - 1) * cssH * 0.55 * S,
-      z: -1400 * S + Math.random() * 1650 * S,
-      size: (0.5 + Math.random() * 1.0) * S,
-      base: 0.08 + Math.random() * 0.3,
-      tw: Math.random() * Math.PI * 2,
-    }));
+    const stars: Star[] = Array.from({ length: 4500 }, () => {
+      const hero = Math.random() < 0.12;
+      return {
+        x: (Math.random() * 2 - 1) * cssW * 0.55 * S,
+        y: (Math.random() * 2 - 1) * cssH * 0.55 * S,
+        z: -1400 * S + Math.random() * 1650 * S,
+        size: (hero ? 2.0 + Math.random() * 1.0 : 0.8 + Math.random() * 1.2) * S,
+        base: hero ? 0.75 + Math.random() * 0.2 : 0.3 + Math.random() * 0.5,
+        tw: Math.random() * Math.PI * 2,
+      };
+    });
 
     // ---- 校徽布点：构建期由真校徽照片采样得到（sealTargets.ts），
     // x/y 已归一化到 [-1, 1]，直接按 R 缩放。运行时不再加载图片，
@@ -443,11 +495,11 @@ export default function Boot({ onDone }: { onDone: () => void }) {
           delay: (1 - farK) * 1.1 + Math.random() * 0.6,
           // 更长的飞行时间 + ease-out 落位：越近越慢，轻柔落位不砸进去。
           dur: 2.2 + Math.random() * 1.0,
-          // 细腻星尘：再细一档（小 0.6–1.1、中 1.1–1.9、hero 2.0–3.2），
-          // 但要亮：base 0.35–0.65、hero 0.85——视频里的心形是亮的，
-          // 形状靠亮点堆叠发光才读得清；暗了就只剩一团灰尘。
-          size: (hero ? 2.0 + Math.random() * 1.2 : sizeRoll > 0.8 ? 1.1 + Math.random() * 0.8 : 0.6 + Math.random() * 0.5) * S,
-          base: hero ? 0.85 : 0.35 + Math.random() * 0.3,
+          // 星尘要亮、要看得清（用户：截图上都看不清粒子）：小 0.8–1.4、
+          // 中 1.4–2.3、hero 2.3–3.6；base 0.5–0.8、hero 0.95。中心
+          // 光晕仍克制，不会过曝成白团——亮度靠粒子本身，不靠糊光晕。
+          size: (hero ? 2.3 + Math.random() * 1.3 : sizeRoll > 0.8 ? 1.4 + Math.random() * 0.9 : 0.8 + Math.random() * 0.6) * S,
+          base: hero ? 0.95 : 0.5 + Math.random() * 0.3,
           tw: Math.random() * Math.PI * 2,
           hero,
         };
@@ -667,20 +719,74 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       case "finger":
         return (
           <>
-            <div className="finger-wrap">
-              <svg width="180" height="180" viewBox="0 0 180 180" fill="none">
-                {/* 同心断弧：全部 1px 发丝线，断弧错开排布 */}
-                <circle cx="90" cy="90" r="86" stroke="rgba(255,255,255,0.5)" strokeWidth="1" />
-                <circle cx="90" cy="90" r="72" stroke="rgba(255,255,255,0.7)" strokeWidth="1" strokeDasharray="300 60" strokeLinecap="round" transform="rotate(24 90 90)" />
-                <circle cx="90" cy="90" r="56" stroke="rgba(255,255,255,0.85)" strokeWidth="1" strokeDasharray="200 70" strokeLinecap="round" transform="rotate(-48 90 90)" />
-                <circle cx="90" cy="90" r="40" stroke="rgba(255,255,255,0.9)" strokeWidth="1" strokeDasharray="120 60" strokeLinecap="round" transform="rotate(96 90 90)" />
-                <circle cx="90" cy="90" r="24" stroke="rgba(255,255,255,0.9)" strokeWidth="1" strokeDasharray="70 40" strokeLinecap="round" transform="rotate(-132 90 90)" />
-                <path d="M90 66 C 84 78, 84 102, 90 114 M90 66 C 96 78, 96 102, 90 114" stroke="rgba(255,255,255,0.8)" strokeWidth="1" strokeLinecap="round" />
-              </svg>
-              {/* 扫光：从上到下 1.2s 匀速（linear，来回各 1.2s） */}
+            {/* 指纹：程序化生成的涡纹（22 条平滑纹脊，见 FP_RIDGES），
+             * 不是同心圆简笔画，也不是一团乱线。扫光带自上而下扫过，
+             * 纹脊随扫光逐亮；柔光晕 + 圆边收光，给高端生物识别仪的质感。 */}
+            <div
+              className="finger-wrap"
+              style={{
+                borderColor:
+                  "color-mix(in srgb, var(--boot-white) 22%, transparent)",
+                boxShadow:
+                  "0 0 60px rgba(255,255,255,0.06), inset 0 0 40px rgba(255,255,255,0.04)",
+              }}
+            >
               <div
-                className="scanline"
-                style={{ animation: "boot-scan-linear 1.2s linear infinite alternate" }}
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  width: 220,
+                  height: 220,
+                  borderRadius: "50%",
+                  background:
+                    "radial-gradient(circle, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.02) 55%, transparent 70%)",
+                }}
+              />
+              <svg
+                width="180"
+                height="180"
+                viewBox="0 0 180 180"
+                fill="none"
+                style={{ position: "relative" }}
+              >
+                <defs>
+                  <clipPath id="fp-clip">
+                    <ellipse cx="90" cy="94" rx="80" ry="82" />
+                  </clipPath>
+                </defs>
+                <g clipPath="url(#fp-clip)">
+                  {FP_RIDGES.map((r, i) => (
+                    <g key={i} opacity={r.o}>
+                      <path
+                        d={r.d}
+                        stroke="rgba(255,255,255,0.9)"
+                        strokeWidth="1.1"
+                        fill="none"
+                        strokeLinecap="round"
+                        style={{
+                          animation: "boot-fp-in 500ms var(--ease) both",
+                          animationDelay: `${r.delay}ms`,
+                        }}
+                      />
+                    </g>
+                  ))}
+                </g>
+              </svg>
+              {/* 扫光带：26px 柔光带 + 淡光晕，自上而下 1.2s 匀速来回
+               *（峰值 0.55，不是一道硬白尺子） */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: "6%",
+                  right: "6%",
+                  height: 26,
+                  background:
+                    "linear-gradient(to bottom, transparent, rgba(255,255,255,0.06) 40%, rgba(255,255,255,0.55) 50%, rgba(255,255,255,0.06) 60%, transparent)",
+                  filter: "drop-shadow(0 0 10px rgba(255,255,255,0.22))",
+                  animation: "boot-fp-scan 1.2s linear infinite alternate",
+                  pointerEvents: "none",
+                }}
               />
             </div>
             <div className="boot-caption">身份验证</div>
@@ -750,30 +856,122 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       case "verify": {
         const R = 84;
         const C = 2 * Math.PI * R;
+        const headA = (-90 + progress * 3.6) * (Math.PI / 180);
+        const hx = 110 + R * Math.cos(headA);
+        const hy = 110 + R * Math.sin(headA);
+        const TICKS = 72;
         return (
           <>
-            <div style={{ position: "relative", width: 200, height: 200 }}>
-              <svg width="200" height="200" viewBox="0 0 200 200" fill="none">
+            {/* 权限核验环：仪表式——外框细环 + 72 刻度随进度逐亮 + 渐变主弧 +
+             * 辉光底层 + 弧头彗星 + 完成脉冲 + 中央 S 优雅点亮。不是一根细线转圈。 */}
+            <div style={{ position: "relative", width: 220, height: 220 }}>
+              <svg width="220" height="220" viewBox="0 0 220 220" fill="none">
+                <defs>
+                  <radialGradient id="boot-verify-halo">
+                    <stop offset="0%" stopColor="#ffffff" stopOpacity="0.10" />
+                    <stop offset="55%" stopColor="#ffffff" stopOpacity="0.03" />
+                    <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                  </radialGradient>
+                  <linearGradient
+                    id="boot-verify-arc"
+                    x1="110"
+                    y1="14"
+                    x2="110"
+                    y2="206"
+                    gradientUnits="userSpaceOnUse"
+                  >
+                    <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+                    <stop offset="100%" stopColor="#ffffff" stopOpacity="0.7" />
+                  </linearGradient>
+                </defs>
+                <circle cx="110" cy="110" r="108" fill="url(#boot-verify-halo)" />
                 <circle
-                  cx="100"
-                  cy="100"
-                  r={R}
-                  stroke="color-mix(in srgb, var(--boot-white) 14%, transparent)"
-                  strokeWidth="1.5"
+                  cx="110"
+                  cy="110"
+                  r="104"
+                  stroke="rgba(255,255,255,0.10)"
+                  strokeWidth="1"
+                />
+                {Array.from({ length: TICKS }, (_, i) => {
+                  const a = (i / TICKS) * Math.PI * 2 - Math.PI / 2;
+                  const on = (i / TICKS) * 100 <= progress;
+                  const x1 = 110 + 96 * Math.cos(a);
+                  const y1 = 110 + 96 * Math.sin(a);
+                  const x2 = 110 + 101.5 * Math.cos(a);
+                  const y2 = 110 + 101.5 * Math.sin(a);
+                  return (
+                    <line
+                      key={i}
+                      x1={x1.toFixed(1)}
+                      y1={y1.toFixed(1)}
+                      x2={x2.toFixed(1)}
+                      y2={y2.toFixed(1)}
+                      stroke="#ffffff"
+                      strokeOpacity={on ? 0.85 : 0.13}
+                      strokeWidth={i % 6 === 0 ? 1.6 : 1}
+                      strokeLinecap="round"
+                    />
+                  );
+                })}
+                <circle
+                  cx="110"
+                  cy="110"
+                  r="70"
+                  stroke="rgba(255,255,255,0.10)"
+                  strokeWidth="1"
                 />
                 <circle
-                  cx="100"
-                  cy="100"
+                  cx="110"
+                  cy="110"
                   r={R}
-                  stroke="var(--boot-white)"
-                  strokeWidth="1.5"
+                  stroke="rgba(255,255,255,0.12)"
+                  strokeWidth="2.5"
+                />
+                <circle
+                  cx="110"
+                  cy="110"
+                  r={R}
+                  stroke="#ffffff"
+                  strokeOpacity={0.07}
+                  strokeWidth="9"
                   strokeLinecap="round"
                   strokeDasharray={C}
                   strokeDashoffset={C * (1 - progress / 100)}
-                  transform="rotate(-90 100 100)"
+                  transform="rotate(-90 110 110)"
+                  fill="none"
                 />
+                <circle
+                  cx="110"
+                  cy="110"
+                  r={R}
+                  stroke="url(#boot-verify-arc)"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeDasharray={C}
+                  strokeDashoffset={C * (1 - progress / 100)}
+                  transform="rotate(-90 110 110)"
+                  fill="none"
+                />
+                {progress > 0 && progress < 100 && (
+                  <g>
+                    <circle cx={hx} cy={hy} r="10" fill="#ffffff" opacity="0.08" />
+                    <circle cx={hx} cy={hy} r="4.5" fill="#ffffff" opacity="0.25" />
+                    <circle cx={hx} cy={hy} r="2.2" fill="#ffffff" />
+                  </g>
+                )}
+                {lit && (
+                  <circle
+                    cx="110"
+                    cy="110"
+                    r={R}
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    fill="none"
+                    style={{ animation: "boot-ring-done 900ms var(--ease) both" }}
+                  />
+                )}
               </svg>
-              {/* S 印章：大号优雅衬线 S + 1px 发丝圆环，不加体积感、不描边加粗 */}
+              {/* S 印章：大号优雅衬线 S，点亮时缩放浮现 + 微光晕 */}
               <div
                 style={{
                   position: "absolute",
@@ -786,9 +984,11 @@ export default function Boot({ onDone }: { onDone: () => void }) {
                 <span
                   className="grade-s"
                   style={{
-                    opacity: lit ? 1 : 0.35,
-                    transition: "opacity 300ms var(--ease)",
-                    animation: lit ? "boot-s-lit 300ms var(--ease) both" : undefined,
+                    opacity: lit ? 1 : 0.3,
+                    transition: "opacity 400ms var(--ease)",
+                    animation: lit
+                      ? "boot-s-lit 400ms var(--ease) both, boot-s-in 500ms var(--ease-exp) both"
+                      : undefined,
                   }}
                 >
                   S
@@ -857,9 +1057,15 @@ export default function Boot({ onDone }: { onDone: () => void }) {
                   borderRadius: "50%",
                   background:
                     "radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 55%, transparent 70%)",
+                  animation: "boot-welcome-halo 3.4s ease-in-out infinite",
                 }}
               />
-              <Mark size={84} eva={false} state="done" />
+              {/* 欢迎浮动：球轻轻上下浮 + 微微呼吸缩放，和光晕同周期，
+               * 像刚醒来在跟路专员打招呼，不是静止贴纸。只动这个 wrapper，
+               * Mark 本体的呼吸/眨眼/表情引擎一概不动。 */}
+              <div style={{ animation: "boot-welcome-float 3.4s ease-in-out infinite" }}>
+                <Mark size={84} eva={false} state="done" />
+              </div>
             </div>
             <div
               className="boot-welcome"
@@ -965,12 +1171,21 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     >
       {/* Boot 局部关键帧（只改 Boot.tsx：不写进 App.css） */}
       <style>{`
-        @keyframes boot-scan-linear { from { top: 6%; } to { top: 90%; } }
         @keyframes boot-motto-line { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
         @keyframes boot-s-lit {
           from { text-shadow: 0 0 0 color-mix(in srgb, var(--boot-white) 0%, transparent); }
           to { text-shadow: 0 0 18px color-mix(in srgb, var(--boot-white) 45%, transparent); }
         }
+        @keyframes boot-fp-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes boot-fp-scan { from { top: 2%; } to { top: calc(98% - 26px); } }
+        @keyframes boot-welcome-float { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-3px) scale(1.012); } }
+        @keyframes boot-welcome-halo { 0%, 100% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.07); } }
+        @media (prefers-reduced-motion: reduce) {
+          @keyframes boot-welcome-float { from { transform: none; } to { transform: none; } }
+          @keyframes boot-welcome-halo { from { opacity: 0.8; transform: none; } to { opacity: 0.8; transform: none; } }
+        }
+        @keyframes boot-ring-done { 0% { opacity: 0; } 30% { opacity: 0.55; } 100% { opacity: 0; } }
+        @keyframes boot-s-in { from { transform: scale(0.88); } to { transform: scale(1); } }
       `}</style>
 
       {/* 常驻纯黑夜空（开机全程的底，z-index 0；各段内容在其上） */}

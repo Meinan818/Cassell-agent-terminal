@@ -213,7 +213,8 @@ export interface Expression {
   shake: boolean;
   /** 完成时笑弧（代替药丸眼）。 */
   smile: boolean;
-  /** 笑弧弧度（弧高占眼高的比例；done 0.55，其余 0）。 */
+  /** 笑弧弧度（弧高占眼高的比例；done 0.26，其余 0）——柔和浅弧，
+   * 不是陡峭的彩虹：0.55 时弧高近眼宽，画出来像两道粗彩虹，难看。 */
   smileArc: number;
   /** 呼吸周期（秒），待机 4.6s。 */
   breathePeriod: number;
@@ -438,7 +439,7 @@ export const EXPRESSIONS: Record<BallState, Expression> = {
     ring: false,
     shake: false,
     smile: true,
-    smileArc: 0.55,
+    smileArc: 0.26,
     breathePeriod: 4.6,
     breatheAmp: 0.005,
     entryPulse: 0.02,
