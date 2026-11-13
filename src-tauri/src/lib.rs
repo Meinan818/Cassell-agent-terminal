@@ -6,8 +6,10 @@ mod fsutil;
 mod goal;
 mod lore;
 mod models;
+mod sandbox;
 mod settings;
 mod shell;
+mod usage;
 
 use codex::RunState;
 use settings::Settings;
@@ -47,6 +49,7 @@ pub fn run() {
             native_running: std::sync::atomic::AtomicBool::new(false),
             approvals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             goals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            session_usage: tokio::sync::Mutex::new(crate::usage::UsageStats::default()),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -60,6 +63,7 @@ pub fn run() {
             agent::test_provider,
             agent::list_models,
             agent::pick_folder,
+            agent::get_usage_stats,
             goal::list_checkpoints_cmd,
             goal::rewind_checkpoint_cmd,
             goal::clear_goal_cmd,

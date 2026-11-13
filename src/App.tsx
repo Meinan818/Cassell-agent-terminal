@@ -15,6 +15,7 @@ import type {
   ReviewState,
   Settings,
   Task,
+  UsageOverview,
 } from "./types";
 import {
   THEME_KEY,
@@ -47,6 +48,9 @@ import {
   CommandPalette,
   HelpDrawer,
   SettingsModal,
+  UsageDrawer,
+  fmtHitRate,
+  fmtUsd,
 } from "./components/Drawers";
 import { getCommands, type SettingsNav } from "./components/commands";
 
@@ -494,9 +498,19 @@ const AUDIT_CSS = `
 .app .w2-msg-edit { width: 100%; }
 .app .w2-msg-edit textarea { width: 100%; min-height: 64px; resize: vertical; border-radius: 8px; background: var(--bg-soft); color: var(--text); font: inherit; padding: 8px 10px; box-shadow: 0 0 0 3px var(--accent-soft); }
 .app .w2-msg-edit-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-/* ---- P1-5：用量常驻行（输入框上方；Cmd-K“查看状态与用量”滚动到这里并高亮） ---- */
-.app .w2-usage { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 11px; color: var(--text-3); border-radius: 8px; transition: background 300ms var(--ease); }
+/* ---- P1-5：用量常驻行（输入框上方；点开用量面板） ---- */
+.app .w2-usage { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 11px; color: var(--text-3); border-radius: 8px; transition: background 300ms var(--ease); background: none; border: none; text-align: left; font: inherit; width: 100%; cursor: pointer; }
+.app .w2-usage:hover { background: var(--bg-soft); color: var(--text-2); }
 .app .w2-usage.flash { background: var(--accent-soft); color: var(--text-2); }
+.app .w2-usage .w2-usage-more { margin-left: auto; flex-shrink: 0; }
+/* ---- P0-10：用量面板（本对话四格 + 各档行；无框线，用背景色阶分层） ---- */
+.app .usage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.app .usage-stat { background: var(--bg-soft); border-radius: 12px; padding: 12px 14px; }
+.app .usage-num { font-size: 16px; font-weight: 600; color: var(--text); font-family: var(--mono); }
+.app .usage-label { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+.app .usage-range { display: flex; gap: 8px; font-size: 12px; line-height: 1.6; padding: 8px 2px; }
+.app .usage-range-label { flex-shrink: 0; color: var(--text-3); width: 64px; }
+.app .usage-range-nums { color: var(--text-2); }
 /* ---- P2-19：回到底部按钮（聊天区末尾的 sticky 元素：滚上去时贴在可视区右下角） ---- */
 .app .w2-jump { position: sticky; bottom: 16px; align-self: flex-end; z-index: 5; background: var(--bg-panel); color: var(--text-2); border-radius: 999px; padding: 6px 14px; font-size: 12px; box-shadow: var(--shadow); cursor: pointer; animation: s7-notice-in 200ms var(--ease-exp) both; }
 .app .w2-jump:hover { color: var(--text); }
@@ -1331,7 +1345,9 @@ export default function App() {
   const [review, setReview] = useState<ReviewState | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [merge, setMerge] = useState<MergeSummary | null>(null);
-  const [drawer, setDrawer] = useState<"settings" | "archive" | "help" | null>(null);
+  const [drawer, setDrawer] = useState<
+    "settings" | "archive" | "help" | "usage" | null
+  >(null);
   const [codexInfo, setCodexInfo] = useState<CodexInfo | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
@@ -1401,8 +1417,20 @@ export default function App() {
   const [pendingDelete, setPendingDelete] = useState<{ path: string } | null>(null);
   /** P0-5 修改方案：让 Composer 聚焦（每次 +1 触发）。 */
   const [focusNonce, setFocusNonce] = useState(0);
-  /** 审计 P1-5：用量行高亮（Cmd-K“查看状态与用量”滚动到这里）。 */
-  const [usageFlash, setUsageFlash] = useState(false);
+  /** P0-10：用量总览（今日 / 近 7 天 / 近 30 天 / 本次启动），打开用量面板时拉取。 */
+  const [usageOverview, setUsageOverview] = useState<UsageOverview | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const loadUsageOverview = useCallback(async () => {
+    setUsageLoading(true);
+    try {
+      const ov = await invoke<UsageOverview>("get_usage_stats");
+      setUsageOverview(ov);
+    } catch {
+      setUsageOverview(null);
+    } finally {
+      setUsageLoading(false);
+    }
+  }, []);
   /** 审计 P2-19：回到底部按钮（离开底部超过一屏时出现）。 */
   const [showJump, setShowJump] = useState(false);
   const [hasNewMsg, setHasNewMsg] = useState(false);
@@ -1421,8 +1449,6 @@ export default function App() {
   const themeOriginRef = useRef<{ x: number; y: number } | null>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
-  /** 审计 P1-5：用量行锚点（查看状态与用量时滚动到这里）。 */
-  const usageRowRef = useRef<HTMLDivElement>(null);
   const ritualRef = useRef(false);
   const ritualTimer = useRef<number | null>(null);
   const noticeTimer = useRef<number | null>(null);
@@ -2379,6 +2405,10 @@ export default function App() {
                             prompt: result.prompt_tokens ?? 0,
                             completion: result.completion_tokens ?? 0,
                             total: result.total_tokens,
+                            // P0-10：缓存命中与估算花费一起挂上用量行与面板。
+                            cached: result.cached_tokens ?? undefined,
+                            costUsd: result.cost_usd ?? undefined,
+                            savedUsd: result.saved_usd ?? undefined,
                           }
                         : undefined;
                     if (result.cancelled) {
@@ -2749,12 +2779,11 @@ export default function App() {
     showNotice("已清空当前对话。");
   };
 
-  // 状态与用量（P1-5）：不再弹 3.5 秒就消失的提示、也不打开没有用量数字的
-  // 工作流页——用量行就常驻在输入框上方，这里滚动到它并高亮一下。
+  // 状态与用量（P0-10）：打开用量面板（本对话累计 + 今日/7天/30天/本次启动），
+  // 同时拉取总览；旧的“滚动到用量行并高亮”已由面板代替。
   const handleShowUsage = () => {
-    usageRowRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    setUsageFlash(true);
-    window.setTimeout(() => setUsageFlash(false), 1800);
+    setDrawer("usage");
+    void loadUsageOverview();
   };
 
   // ---- 审计 P1-4：消息操作（复制 / 重试 / 编辑 / 删除） ----
@@ -3202,6 +3231,11 @@ export default function App() {
     0,
   );
   const usageTotal = usageMessages.reduce((a, m) => a + (m.usage?.total ?? 0), 0);
+  // P0-10：本对话的缓存命中与估算花费（各条回复求和；没收录价目的回复不计入花费）。
+  const usageCached = usageMessages.reduce((a, m) => a + (m.usage?.cached ?? 0), 0);
+  const usageCost = usageMessages.reduce((a, m) => a + (m.usage?.costUsd ?? 0), 0);
+  const usageCostKnown = usageMessages.some((m) => m.usage?.costUsd != null);
+  const usageSaved = usageMessages.reduce((a, m) => a + (m.usage?.savedUsd ?? 0), 0);
   // S9：工作流页要的本轮工具调用（从 kind:"tool" 的消息汇总；消息没有
   // 时间戳，故每步耗时仍显示“未接入”，不现凑）。
   const toolCallItems = messages
@@ -3607,6 +3641,9 @@ export default function App() {
                       <div className="msg-usage">
                         ↑ {m.usage.prompt} · ↓ {m.usage.completion} · 共{" "}
                         {m.usage.total} tokens
+                        {m.usage.cached != null && m.usage.cached > 0
+                          ? ` · 缓存 ${m.usage.cached}`
+                          : ""}
                       </div>
                     )}
                     <div className="w2-msg-actions">
@@ -3696,12 +3733,13 @@ export default function App() {
         )}
 
         <div className="composer-slot">
-          {/* P1-5：用量常驻行（输入框上方，一直可见；Cmd-K“查看状态与用量”滚动到这里并高亮）。
+          {/* P0-10：用量常驻行（输入框上方，一直可见；点开用量面板）。
               上下文占比不显示：没有上下文窗口配置，百分比算不出来，不编一个假的。 */}
-          <div
-            ref={usageRowRef}
-            className={`w2-usage ${usageFlash ? "flash" : ""}`}
-            role="status"
+          <button
+            type="button"
+            className="w2-usage"
+            onClick={handleShowUsage}
+            aria-label="查看用量"
           >
             {usageMessages.length === 0 ? (
               <span>还没有用量数据——用量会在每条 AI 回复下方显示。</span>
@@ -3709,9 +3747,14 @@ export default function App() {
               <span>
                 本对话累计 ↑ {usagePrompt} · ↓ {usageCompletion} · 共 {usageTotal}{" "}
                 tokens（{usageMessages.length} 条回复）
+                {usagePrompt > 0
+                  ? ` · 缓存 ${fmtHitRate(usagePrompt, usageCached)}`
+                  : ""}
+                {usageCostKnown ? ` · 约 ${fmtUsd(usageCost)}` : ""}
               </span>
             )}
-          </div>
+            <span className="w2-usage-more">用量详情 ›</span>
+          </button>
           {gateNotice && (
             <div className="gate-notice" role="alert">
               <span>{gateNotice}</span>
@@ -3801,6 +3844,8 @@ export default function App() {
             completion: usageCompletion,
             total: usageTotal,
             replies: usageMessages.length,
+            cached: usageCached,
+            costUsd: usageCostKnown ? usageCost : undefined,
           }}
           toolCalls={toolCallItems}
           workdir={settings.workdir}
@@ -3867,6 +3912,23 @@ export default function App() {
       )}
       {renderDrawer === "help" && (
         <HelpDrawer onClose={() => setDrawer(null)} closing={drawerClosing} />
+      )}
+      {renderDrawer === "usage" && (
+        <UsageDrawer
+          conversation={{
+            prompt: usagePrompt,
+            completion: usageCompletion,
+            cached: usageCached,
+            costUsd: usageCostKnown ? usageCost : null,
+            savedUsd: usageSaved > 0 ? usageSaved : null,
+            replies: usageMessages.length,
+          }}
+          overview={usageOverview}
+          loading={usageLoading}
+          onRefresh={loadUsageOverview}
+          onClose={() => setDrawer(null)}
+          closing={drawerClosing}
+        />
       )}
       {renderWizard && (
         <ConnectWizard

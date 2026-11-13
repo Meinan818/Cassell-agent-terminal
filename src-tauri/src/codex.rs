@@ -48,6 +48,9 @@ pub struct RunState {
     /// 与工具结果），目标循环在后端自己一轮接一轮跑到底；暂停/继续/
     /// 倒带都靠它。运行期间会话会短暂从表里取出，结束后再放回去。
     pub goals: Mutex<HashMap<String, crate::goal::GoalSession>>,
+    /// P0-10 本次启动累计用量（所有原生 run 的合计，进程内有效）。
+    /// 台账（usage-ledger.json）负责跨启动的今日/7天/30天。
+    pub session_usage: Mutex<crate::usage::UsageStats>,
 }
 
 impl RunState {

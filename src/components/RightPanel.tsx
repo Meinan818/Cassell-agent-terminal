@@ -52,6 +52,9 @@ interface RightPanelProps {
     completion: number;
     total: number;
     replies: number;
+    /** P0-10：缓存命中 tokens；costUsd 有值 = 至少一条回复有官方价目估算。 */
+    cached?: number;
+    costUsd?: number;
   } | null;
   /** 本轮工具调用（App 从 kind:"tool" 的消息汇总；无分步耗时）。 */
   toolCalls?: { label: string; detail: string }[];
@@ -1544,7 +1547,15 @@ export default function RightPanel(props: RightPanelProps) {
                     k: "累计用量",
                     v:
                       usageTotal && usageTotal.replies > 0
-                        ? `↑ ${usageTotal.prompt} · ↓ ${usageTotal.completion} · 共 ${usageTotal.total} tokens（${usageTotal.replies} 条回复）`
+                        ? `↑ ${usageTotal.prompt} · ↓ ${usageTotal.completion} · 共 ${usageTotal.total} tokens（${usageTotal.replies} 条回复）${
+                            usageTotal.prompt > 0 && (usageTotal.cached ?? 0) > 0
+                              ? ` · 缓存 ${(((usageTotal.cached ?? 0) / usageTotal.prompt) * 100).toFixed(1)}%`
+                              : ""
+                          }${
+                            usageTotal.costUsd != null
+                              ? ` · 约 $${usageTotal.costUsd.toFixed(usageTotal.costUsd < 0.01 ? 4 : 2)}`
+                              : ""
+                          }`
                         : "还没有用量数据",
                   },
                 ].map((row) => (

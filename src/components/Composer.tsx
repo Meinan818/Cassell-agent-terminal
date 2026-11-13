@@ -398,13 +398,13 @@ export default function Composer({
             <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
           </svg>
           <span
-            className={`w2-dot ${settings.approval === "auto" ? "ok" : "warn"}`}
+            className={`w2-dot ${settings.approval === "always" ? "warn" : "ok"}`}
             title={
-              settings.approval === "auto"
-                ? "全自动"
-                : settings.approval === "ask"
-                  ? "写前确认"
-                  : "只读"
+              settings.approval === "always"
+                ? "每步问"
+                : settings.approval === "never"
+                  ? "从不问"
+                  : "按需问"
             }
           />
         </button>
@@ -659,21 +659,36 @@ export default function Composer({
                 <div className="option-list">
                   <button
                     type="button"
-                    className={`option ${settings.approval === "auto" ? "selected" : ""}`}
-                    onClick={() => pickApproval("auto")}
+                    className={`option ${settings.approval === "always" ? "selected" : ""}`}
+                    onClick={() => pickApproval("always")}
                   >
-                    <span>Auto 全自动</span>
-                    <span className="option-note">自动审批，可撤销</span>
-                    {settings.approval === "auto" && <span className="check">✓</span>}
+                    <span>每步问</span>
+                    <span className="option-note">写文件、跑命令都先问你</span>
+                    {settings.approval === "always" && <span className="check">✓</span>}
                   </button>
                   <button
                     type="button"
-                    className={`option ${settings.approval === "read-only" ? "selected" : ""}`}
-                    onClick={() => pickApproval("read-only")}
+                    className={`option ${settings.approval === "on-demand" ? "selected" : ""}`}
+                    onClick={() => pickApproval("on-demand")}
                   >
-                    <span>只读确认</span>
-                    <span className="option-note">每次操作都要确认</span>
-                    {settings.approval === "read-only" && <span className="check">✓</span>}
+                    <span>按需问</span>
+                    <span className="option-note">只在危险操作时问你</span>
+                    {settings.approval === "on-demand" && <span className="check">✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className={`option ${settings.approval === "never" ? "selected" : ""}`}
+                    disabled={settings.mode === "norma"}
+                    title={
+                      settings.mode === "norma"
+                        ? "诺玛没有从不问档，切到 EVA 再用"
+                        : undefined
+                    }
+                    onClick={() => pickApproval("never")}
+                  >
+                    <span>从不问</span>
+                    <span className="option-note">什么都不问，删根仍拒绝</span>
+                    {settings.approval === "never" && <span className="check">✓</span>}
                   </button>
                 </div>
                 <div className="popover-section">沙箱模式</div>
@@ -683,6 +698,12 @@ export default function Composer({
                       key={s}
                       type="button"
                       className={`option ${settings.sandbox === s ? "selected" : ""}`}
+                      disabled={settings.mode === "norma" && s === "danger-full-access"}
+                      title={
+                        settings.mode === "norma" && s === "danger-full-access"
+                          ? "诺玛没有无边界档，切到 EVA 再用"
+                          : undefined
+                      }
                       onClick={() => pickSandbox(s)}
                     >
                       <span>{SANDBOX_LABELS[s]}</span>
@@ -693,7 +714,7 @@ export default function Composer({
                   ))}
                 </div>
                 <div className="popover-hint">
-                  审批与沙箱是两个独立开关；危险操作始终需要确认。
+                  审批与沙箱是两个独立开关；删根目录任何档位都拒绝。
                 </div>
               </>
             )}

@@ -13,7 +13,6 @@ use crate::settings::{load_settings, Settings};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -88,6 +87,11 @@ pub struct AgentResult {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+    /// P0-10：缓存命中 tokens（整轮累计求和；服务商没报时为 None）。
+    /// 花费与节省是按 DeepSeek 官方价目估算的（USD），模型没收录价目时为 None。
+    pub cached_tokens: Option<u64>,
+    pub cost_usd: Option<f64>,
+    pub saved_usd: Option<f64>,
     /// 本轮实际执行过的工具调用记录
     pub tools_run: Vec<String>,
     /// 本轮为什么停下："finished"（正常收尾）| "budget"（到总预算上限）
@@ -276,26 +280,6 @@ fn catastrophic_command(cmd: &str) -> bool {
     false
 }
 
-/// 路径安全检查：不允许跳出工作区
-fn safe_join(workdir: &str, rel: &str) -> Result<std::path::PathBuf, String> {
-    let base = Path::new(workdir);
-    if !base.is_dir() {
-        return Err(format!("工作区不存在：{workdir}"));
-    }
-    let mut out = base.to_path_buf();
-    for seg in rel.replace('\\', "/").split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => return Err("路径不能包含 ..".to_string()),
-            s => out.push(s),
-        }
-    }
-    if !out.starts_with(base) {
-        return Err("路径超出工作区范围".to_string());
-    }
-    Ok(out)
-}
-
 /// 向界面发一次审批请求（审批卡），等用户点"批准"或"拒绝"。
 /// 180 秒无人决定按拒绝处理（不挂住这一轮）；用户取消任务时也按拒绝处理。
 /// 返回 true = 用户批准执行，false = 拒绝/超时/取消。
@@ -374,7 +358,11 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
     match name {
         "read_file" => {
             let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            match safe_join(&ctx.workdir, rel) {
+            match crate::sandbox::join_path(
+                &ctx.workdir,
+                rel,
+                crate::sandbox::parse_sandbox(&ctx.sandbox),
+            ) {
                 Ok(p) => match tokio::fs::read_to_string(&p).await {
                     Ok(s) => {
                         tools_run.push(format!("读取 {rel}"));
@@ -392,7 +380,11 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
         }
         "list_dir" => {
             let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            match safe_join(&ctx.workdir, rel) {
+            match crate::sandbox::join_path(
+                &ctx.workdir,
+                rel,
+                crate::sandbox::parse_sandbox(&ctx.sandbox),
+            ) {
                 Ok(p) => match tokio::fs::read_dir(&p).await {
                     Ok(mut rd) => {
                         let mut items = Vec::new();
@@ -422,13 +414,21 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                     rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("")
                 );
             }
-            if ctx.sandbox == "read-only" || ctx.approval == "read-only" {
+            if crate::sandbox::parse_sandbox(&ctx.sandbox)
+                == crate::sandbox::SandboxLevel::ReadOnly
+            {
                 return "当前是只读模式，不能改文件。".to_string();
             }
             let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            // 写前确认档位：先问用户，批了才写。
-            if ctx.approval == "ask" {
+            // P0-8 审批：每步问档，写文件前先弹审批卡问你，批了才写；
+            // 按需问 / 从不问档直接写（删除类命令的确认在 run_shell 里另算）。
+            if crate::sandbox::needs_approval(
+                crate::sandbox::parse_approval(&ctx.approval),
+                "write",
+                false,
+                &ctx.delete_confirm,
+            ) {
                 let ok = request_approval(
                     &ctx.app,
                     ctx.state,
@@ -441,7 +441,11 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                     return format!("用户没有批准这次写入（{rel} 没动）。");
                 }
             }
-            match safe_join(&ctx.workdir, rel) {
+            match crate::sandbox::join_path(
+                &ctx.workdir,
+                rel,
+                crate::sandbox::parse_sandbox(&ctx.sandbox),
+            ) {
                 Ok(p) => {
                     if let Some(parent) = p.parent() {
                         let _ = tokio::fs::create_dir_all(parent).await;
@@ -471,16 +475,35 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                     "我是诺玛，办公模式不跑终端命令。`{cmd}` 需要切到 EVA（工程模式）再跑。"
                 );
             }
-            if ctx.sandbox == "read-only" || ctx.approval == "read-only" {
+            if crate::sandbox::parse_sandbox(&ctx.sandbox)
+                == crate::sandbox::SandboxLevel::ReadOnly
+            {
                 return "当前是只读模式，不能执行命令。".to_string();
             }
             // 灾难性删根：无论删除确认设置如何一律拒绝。
             if catastrophic_command(cmd) {
                 return format!("这条命令太危险了（删根目录），我拒绝执行：`{cmd}`");
             }
-            // 删文件类命令：按删除确认设置决定要不要单独问一次。
-            if let Some(hit) = destructive_command(cmd) {
-                if ctx.delete_confirm != "never" {
+            // P0-8 审批决策表（needs_approval）：
+            // - 每步问：整条命令先问一次，批了才跑；删除命令不再问第二遍。
+            // - 按需问：常规命令直接跑，删除类命令按删除确认设置单独问。
+            // - 从不问：什么卡都不弹。
+            let approval = crate::sandbox::parse_approval(&ctx.approval);
+            let destructive = destructive_command(cmd);
+            if crate::sandbox::needs_approval(approval, "shell", false, &ctx.delete_confirm) {
+                let ok = request_approval(
+                    &ctx.app,
+                    ctx.state,
+                    "shell",
+                    "执行命令",
+                    &format!("要执行这条命令：`{cmd}`"),
+                )
+                .await;
+                if !ok {
+                    return format!("用户没有批准这条命令（没执行）：`{cmd}`");
+                }
+            } else if let Some(hit) = destructive {
+                if crate::sandbox::needs_approval(approval, "shell", true, &ctx.delete_confirm) {
                     let ok = request_approval(
                         &ctx.app,
                         ctx.state,
@@ -648,6 +671,8 @@ struct TurnOutcome {
     prompt_tokens: u64,
     completion_tokens: u64,
     total_tokens: u64,
+    /// 本回合缓存命中 tokens（各轮求和；服务商没报就是 0）。
+    cached_tokens: u64,
 }
 
 /// 跑一个回合：最多 ROUNDS_PER_TURN 轮工具调用。
@@ -671,6 +696,7 @@ async fn run_inner_turn(
     let mut prompt_sum: u64 = 0;
     let mut completion_sum: u64 = 0;
     let mut total_sum: u64 = 0;
+    let mut cached_sum: u64 = 0;
     let mut finished_naturally = false;
     let mut cancelled = false;
     let mut stalled = false;
@@ -740,6 +766,10 @@ async fn run_inner_turn(
         let mut round_prompt: u64 = 0;
         let mut round_completion: u64 = 0;
         let mut round_total: u64 = 0;
+        // P0-10：缓存命中 tokens。DeepSeek 在 usage 顶层报
+        // prompt_cache_hit_tokens，OpenAI 兼容口径报
+        // prompt_tokens_details.cached_tokens，两者都认，前者优先。
+        let mut round_cached: u64 = 0;
 
         'stream: loop {
             // 200ms 一问：让“停止”按钮在流式等待时也能立刻生效。
@@ -794,6 +824,14 @@ async fn run_inner_turn(
                         .and_then(|x| x.as_u64())
                         .unwrap_or(0);
                     round_total = u.get("total_tokens").and_then(|x| x.as_u64()).unwrap_or(0);
+                    round_cached = u
+                        .get("prompt_cache_hit_tokens")
+                        .and_then(|x| x.as_u64())
+                        .or_else(|| {
+                            u.pointer("/prompt_tokens_details/cached_tokens")
+                                .and_then(|x| x.as_u64())
+                        })
+                        .unwrap_or(0);
                 }
 
                 let Some(delta) = ev.pointer("/choices/0/delta") else {
@@ -834,6 +872,7 @@ async fn run_inner_turn(
         prompt_sum += round_prompt;
         completion_sum += round_completion;
         total_sum += round_total;
+        cached_sum += round_cached;
 
         // P0-2 DSML 恢复：反代网关可能把 tool_calls 压成正文里的 DSML
         // 标记（或直接弄丢），结构化字段为空。正文非空时先试着从正文
@@ -997,6 +1036,7 @@ async fn run_inner_turn(
         prompt_tokens: prompt_sum,
         completion_tokens: completion_sum,
         total_tokens: total_sum,
+        cached_tokens: cached_sum,
     })
 }
 
@@ -1079,6 +1119,27 @@ async fn run_agent_native_inner(
     } else {
         ""
     };
+    // P0-8：两把 dial 在引擎入口定生效值——NORMA 没有 yolo 档，
+    // 无边界收紧为读写工作区、从不问收紧为按需问；收紧时记日志，界面
+    // 设置值不动（设置页会提示“诺玛模式下已收紧”）。
+    // 注意：生效值要在冻结前缀之前定下来，系统提示里的“允许的操作”
+    // 也按生效档位写，否则前缀 hash 与实际执行能力对不上。
+    let eff_sandbox = crate::sandbox::effective_sandbox(
+        &req.mode,
+        crate::sandbox::parse_sandbox(&req.sandbox),
+    );
+    let eff_approval = crate::sandbox::effective_approval(
+        &req.mode,
+        crate::sandbox::parse_approval(&req.approval),
+    );
+    if crate::sandbox::parse_sandbox(&req.sandbox) != eff_sandbox {
+        eprintln!(
+            "[sandbox] NORMA 模式：沙箱无边界已收紧为读写工作区（诺玛没有 yolo 档）"
+        );
+    }
+    if crate::sandbox::parse_approval(&req.approval) != eff_approval {
+        eprintln!("[sandbox] NORMA 模式：审批从不问已收紧为按需问（诺玛没有 yolo 档）");
+    }
     // P0-1：冻结前缀（system 正文 + 工具定义表）。本轮先按当前输入建一个；
     // 目标会话里若已有 hash 对得上的存货，下面会用存货（字节权威）。
     let fresh_frozen = crate::frozen::FrozenPrefix::build(
@@ -1086,7 +1147,11 @@ async fn run_agent_native_inner(
             crate::lore::core_quick_ref(),
             crate::lore::HONESTY_RULES,
             if req.authorized { workdir.as_str() } else { "未授权（请先选择文件夹）" },
-            if req.sandbox == "read-only" { "只能读取，不能修改" } else { "可以读写文件并执行命令" }),
+            match eff_sandbox {
+                crate::sandbox::SandboxLevel::ReadOnly => "只能读取，不能修改",
+                crate::sandbox::SandboxLevel::WorkspaceWrite => "可以读写工作区内的文件并执行命令，工作区以外的地方碰不了",
+                crate::sandbox::SandboxLevel::FullAccess => "可以读写文件并执行命令（无边界，工作区以外也能碰）",
+            }),
         tool_definitions(&req.run_mode, &req.mode),
     );
     let mut messages: Vec<Value> = vec![json!({
@@ -1241,13 +1306,22 @@ async fn run_agent_native_inner(
             provider.kind, req.model, wire_model
         );
     }
+    // P0-8：turn_ctx 用上面已定好的生效档位（NORMA 收紧过的），不再重算。
     let turn_ctx = TurnCtx {
         model: wire_model,
         effort: req.effort.clone(),
         run_mode: req.run_mode.clone(),
         mode: req.mode.clone(),
-        sandbox: req.sandbox.clone(),
-        approval: req.approval.clone(),
+        sandbox: match eff_sandbox {
+            crate::sandbox::SandboxLevel::ReadOnly => "read-only".to_string(),
+            crate::sandbox::SandboxLevel::WorkspaceWrite => "workspace-write".to_string(),
+            crate::sandbox::SandboxLevel::FullAccess => "danger-full-access".to_string(),
+        },
+        approval: match eff_approval {
+            crate::sandbox::ApprovalLevel::Always => "always".to_string(),
+            crate::sandbox::ApprovalLevel::OnDemand => "on-demand".to_string(),
+            crate::sandbox::ApprovalLevel::Never => "never".to_string(),
+        },
         workdir: workdir.clone(),
         authorized: req.authorized,
         delete_confirm: req.delete_confirm.clone(),
@@ -1260,6 +1334,7 @@ async fn run_agent_native_inner(
     let mut prompt_total: u64 = 0;
     let mut completion_total: u64 = 0;
     let mut total_total: u64 = 0;
+    let mut cached_total: u64 = 0;
     let mut stop_reason = "finished".to_string();
     let mut stop_detail = String::new();
     let mut cancelled = false;
@@ -1310,6 +1385,7 @@ async fn run_agent_native_inner(
         prompt_total += outcome.prompt_tokens;
         completion_total += outcome.completion_tokens;
         total_total += outcome.total_tokens;
+        cached_total += outcome.cached_tokens;
         // 目标清单：模型首轮列出、之后更新，解析出来给目标卡片显示。
         let items = crate::goal::parse_checklist(&outcome.text);
         if !items.is_empty() {
@@ -1395,6 +1471,36 @@ async fn run_agent_native_inner(
         map.insert(session.id.clone(), session);
     }
 
+    // P0-10：本次 run 的用量记台账（今日/7天/30天）与本次启动累计。
+    // 花费按线上真实模型的价目估算（线上模型 = 发出去的 wire_model）；
+    // 取消/失败的 run 只要发过请求、用量大于 0 也记，不丢数。
+    // 台账写盘是 best-effort，失败只记日志，绝不拦结果返回。
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (cost_usd, saved_usd) = crate::usage::estimate_cost(
+        &turn_ctx.model,
+        prompt_total,
+        cached_total,
+        completion_total,
+        now_unix,
+    );
+    if prompt_total > 0 || completion_total > 0 {
+        let record = crate::usage::UsageRecord {
+            ts: now_unix,
+            model: turn_ctx.model.clone(),
+            prompt: prompt_total,
+            completion: completion_total,
+            cached: cached_total,
+            cost_usd,
+            saved_usd,
+        };
+        crate::usage::append_ledger(&app, record.clone());
+        let mut session_usage = state.session_usage.lock().await;
+        session_usage.add_record(&record);
+    }
+
     Ok(AgentResult {
         success: !cancelled,
         cancelled,
@@ -1414,11 +1520,34 @@ async fn run_agent_native_inner(
         } else {
             None
         },
+        cached_tokens: if cached_total > 0 {
+            Some(cached_total)
+        } else {
+            None
+        },
+        cost_usd,
+        saved_usd,
         tools_run,
         stop_reason,
         stop_detail,
         goal: goal_summary,
     })
+}
+
+/// P0-10 用量总览：今日 / 近 7 天 / 近 30 天（台账）+ 本次启动（进程内累计）。
+#[tauri::command]
+pub async fn get_usage_stats(
+    app: AppHandle,
+    state: State<'_, RunState>,
+) -> Result<crate::usage::UsageOverview, String> {
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let records = crate::usage::load_ledger(&app);
+    let (today, last7d, last30d) = crate::usage::overview_from_ledger(&records, now_unix);
+    let session = state.session_usage.lock().await.clone();
+    Ok(crate::usage::UsageOverview { today, last7d, last30d, session })
 }
 
 /// 测试连通性：真发一条最小请求，返回真实结果，不编造。

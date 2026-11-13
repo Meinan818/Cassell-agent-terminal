@@ -1,7 +1,7 @@
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 /** 模式：norma（通用工作 / Cowork）| eva（工程开发 / Code）。与思考强度、Ultracode 各自独立。 */
 export type Mode = "norma" | "eva";
-export type Approval = "auto" | "ask" | "read-only";
+export type Approval = "always" | "on-demand" | "never";
 /** 删除确认： "always" 每次都问（默认）| "never" 不再询问。 */
 export type DeleteConfirm = "always" | "never";
 /** 运行模式： "execute" 执行（动手改文件/跑命令）| "plan" 计划（只调查、出方案）。 */
@@ -78,8 +78,16 @@ export interface ChatMsg {
   streaming?: boolean;
   kind?: MsgKind;
   toolLabel?: string;
-  /** 服务商回报的真实用量（本轮结束时才有）。 */
-  usage?: { prompt: number; completion: number; total: number };
+  /** 服务商回报的真实用量（本轮结束时才有）；cached/costUsd/savedUsd
+      是 P0-10：缓存命中 tokens、按官方价目估算的花费与缓存省下的钱。 */
+  usage?: {
+    prompt: number;
+    completion: number;
+    total: number;
+    cached?: number;
+    costUsd?: number;
+    savedUsd?: number;
+  };
   /** 本轮撞到总预算上限或卡住：下方挂一句说明（没有“继续”按钮——
       8 轮只是内部单回合单位，普通对话也会自动续跑到预算；想继续直接发消息）。 */
   limitNotice?: { reason: "budget" | "stalled"; text: string };
@@ -219,6 +227,11 @@ export interface AgentResult {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
+  /** P0-10：缓存命中 tokens（服务商没报时为 null）；花费与节省是按 DeepSeek
+      官方价目估算的 USD，模型没收录价目时为 null（面板显示“—”）。 */
+  cached_tokens?: number | null;
+  cost_usd?: number | null;
+  saved_usd?: number | null;
   tools_run: string[];
   /** 本轮为什么停下："finished"（正常收尾）| "budget"（到总预算上限）
       | "stalled"（连续多轮无进展，确实卡住了）| "cancelled"（用户叫停）。
@@ -253,8 +266,8 @@ export const MODE_TAG: Record<Mode, string> = {
 
 /** P0-9 切换 = 换工位：切模式时自动带过去的默认配置（用户随后可改）。 */
 export const MODE_DEFAULTS: Record<Mode, { effort: Effort; approval: Approval }> = {
-  norma: { effort: "medium", approval: "ask" },
-  eva: { effort: "high", approval: "auto" },
+  norma: { effort: "medium", approval: "always" },
+  eva: { effort: "high", approval: "on-demand" },
 };
 
 /** P0-9 问候语：NORMA 办公口吻，EVA 工程口吻（不要只换名字）。 */
@@ -276,8 +289,26 @@ export function modeIntro(mode: Mode, displayName: string): string {
 export const SANDBOX_LABELS: Record<Sandbox, string> = {
   "read-only": "只读",
   "workspace-write": "工作区可写",
-  "danger-full-access": "完全访问",
+  "danger-full-access": "无边界",
 };
+
+/** P0-10 用量总览（get_usage_stats）：台账里的今日/7天/30天 + 本次启动累计。
+    cost_usd/saved_usd 为 null = 模型没收录官方价目，花费未知，只显示 token 数。 */
+export interface UsageStats {
+  prompt: number;
+  completion: number;
+  cached: number;
+  requests: number;
+  cost_usd: number | null;
+  saved_usd: number | null;
+}
+
+export interface UsageOverview {
+  today: UsageStats;
+  last7d: UsageStats;
+  last30d: UsageStats;
+  session: UsageStats;
+}
 
 export const GREETING_TASKS = [
   "先把今天的文档列个提纲？",

@@ -10,6 +10,7 @@ import type {
   Sandbox,
   Settings,
   Task,
+  UsageOverview,
 } from "../types";
 import {
   EFFORTS,
@@ -40,20 +41,23 @@ export const EFFORT_DESCS: Record<Effort, string> = {
 };
 
 /** 沙箱每档人话说明（P2-4：界面上绝不出现 read-only / workspace-write /
- * danger-full-access 这些原始枚举名）。 */
+ * danger-full-access 这些原始枚举名）。P0-8：三档是真档位，引擎按档位执行——
+ * 只读拒写拒命令；工作区可写把文件工具锁在工作区内；无边界允许文件工具
+ * 读写工作区外的绝对路径。删根目录（rm -rf / 这类）任何档位都拒绝。 */
 export const SANDBOX_DESCS: Record<Sandbox, string> = {
-  "read-only": "只能读文件，不能改任何东西。",
-  "workspace-write": "可以改工作区里的文件，改不了工作区以外的地方。",
-  "danger-full-access": "什么都能碰，很危险——只在你明确知道后果时用。",
+  "read-only": "只能读文件、列目录，不能改任何东西、不能跑命令。",
+  "workspace-write": "可以改工作区里的文件、跑工作区里的命令；工作区以外的地方碰不了。",
+  "danger-full-access": "文件工具可以读写工作区以外的绝对路径；删根目录仍然永远拒绝。只在你明确知道后果时用。",
 };
 
-/** 审批每档人话说明（P0-9：三档是真档位，引擎按档位执行——
- * auto 直接写；ask 写前弹审批卡；read-only 不写不执行。
- * 删文件类命令另走删除确认设置（见下），不受这档管。 */
+/** 审批每档人话说明（P0-8：三档是真档位，引擎按档位执行——
+ * 每步问：写文件、跑命令都先弹审批卡；按需问：常规操作直接放行，
+ * 删除类命令仍按删除确认设置单独问；从不问：什么卡都不弹。
+ * 删根目录（rm -rf / 这类）任何档位都拒绝，不受这档管。 */
 export const APPROVAL_DESCS: Record<Approval, string> = {
-  auto: "写文件、跑命令直接进行；删文件类命令仍按删除确认设置单独问（默认每次都问）。",
-  ask: "每次写文件前都先弹审批卡问你，批了才写；删文件类命令仍按删除确认设置单独问。",
-  "read-only": "不写文件、不执行命令，只能读。",
+  always: "每次写文件、每次跑命令都先弹审批卡问你，批了才动手；删除命令不再问第二遍。",
+  "on-demand": "常规写文件、跑命令直接进行；删除类命令仍按删除确认设置单独问。",
+  never: "什么都不问，包括删除命令；删根目录仍然永远拒绝。只在你明确知道后果时用。",
 };
 
 /** 删除确认两档人话说明（P0-4：默认每次都问，用户可在设置里关掉）。 */
@@ -684,7 +688,7 @@ export function SettingsModal({
                   </div>
                   <p className="drawer-note">
                     诺玛做通用工作，EVA 做工程开发。切换模式会有一段短暂仪式；切换时会带上该模式的默认思考强度与审批（诺玛默认
-                    中等 / 写前确认，EVA 默认高 / 全自动），之后可以再改；Ultracode 开关不动。
+                    中等 / 每步问，EVA 默认高 / 按需问），之后可以再改；Ultracode 开关不动。
                   </p>
                 </div>
                 <div className="s7-group">
@@ -742,33 +746,85 @@ export function SettingsModal({
                   <p className="drawer-note">
                     危险操作先审批。审批与沙箱是两个独立的拨杆：审批管“要不要问你”，沙箱管“能碰哪些文件”。
                   </p>
+                  <div className="field-label">一键预设</div>
+                  <div className="effort-row" role="group" aria-label="权限预设">
+                    <button
+                      type="button"
+                      className={`effort ${settings.sandbox === "workspace-write" && settings.approval === "on-demand" ? "selected" : ""}`}
+                      onClick={() =>
+                        onPatch({ sandbox: "workspace-write", approval: "on-demand" })
+                      }
+                    >
+                      自动（推荐）
+                    </button>
+                    <button
+                      type="button"
+                      className={`effort ${settings.sandbox === "read-only" && settings.approval === "on-demand" ? "selected" : ""}`}
+                      onClick={() =>
+                        onPatch({ sandbox: "read-only", approval: "on-demand" })
+                      }
+                    >
+                      只读
+                    </button>
+                    <button
+                      type="button"
+                      className={`effort ${settings.sandbox === "danger-full-access" && settings.approval === "never" ? "selected" : ""}`}
+                      disabled={settings.mode === "norma"}
+                      title={
+                        settings.mode === "norma"
+                          ? "诺玛没有完全放行档，切到 EVA 再用"
+                          : undefined
+                      }
+                      onClick={() =>
+                        onPatch({ sandbox: "danger-full-access", approval: "never" })
+                      }
+                    >
+                      完全放行
+                    </button>
+                  </div>
+                  <p className="drawer-note">
+                    自动 = 工作区可写 + 按需问；只读 = 只能读；完全放行 = 无边界 +
+                    从不问，只在 EVA 模式可用。
+                  </p>
                   <div className="field-label">审批模式</div>
                   <div className="effort-row" role="group" aria-label="审批模式">
                     <button
                       type="button"
-                      className={`effort ${settings.approval === "auto" ? "selected" : ""}`}
-                      onClick={() => onPatch({ approval: "auto" as Approval })}
+                      className={`effort ${settings.approval === "always" ? "selected" : ""}`}
+                      onClick={() => onPatch({ approval: "always" as Approval })}
                     >
-                      Auto 全自动
+                      每步问
                     </button>
                     <button
                       type="button"
-                      className={`effort ${settings.approval === "ask" ? "selected" : ""}`}
-                      onClick={() => onPatch({ approval: "ask" as Approval })}
+                      className={`effort ${settings.approval === "on-demand" ? "selected" : ""}`}
+                      onClick={() => onPatch({ approval: "on-demand" as Approval })}
                     >
-                      写前确认
+                      按需问
                     </button>
                     <button
                       type="button"
-                      className={`effort ${settings.approval === "read-only" ? "selected" : ""}`}
-                      onClick={() => onPatch({ approval: "read-only" as Approval })}
+                      className={`effort ${settings.approval === "never" ? "selected" : ""}`}
+                      disabled={settings.mode === "norma"}
+                      title={
+                        settings.mode === "norma"
+                          ? "诺玛没有从不问档，切到 EVA 再用"
+                          : undefined
+                      }
+                      onClick={() => onPatch({ approval: "never" as Approval })}
                     >
-                      只读
+                      从不问
                     </button>
                   </div>
                   <p className="drawer-note">
                     {APPROVAL_DESCS[settings.approval]}
                   </p>
+                  {settings.mode === "norma" && settings.approval === "never" && (
+                    <p className="drawer-note">
+                      诺玛模式下“从不问”已收紧为“按需问”（诺玛没有完全放行档）；切到
+                      EVA 后恢复。
+                    </p>
+                  )}
                 </div>
                 <div className="s7-group">
                   <div className="drawer-section">删除确认</div>
@@ -803,6 +859,12 @@ export function SettingsModal({
                         key={sb}
                         type="button"
                         className={`effort ${settings.sandbox === sb ? "selected" : ""}`}
+                        disabled={settings.mode === "norma" && sb === "danger-full-access"}
+                        title={
+                          settings.mode === "norma" && sb === "danger-full-access"
+                            ? "诺玛没有无边界档，切到 EVA 再用"
+                            : undefined
+                        }
                         onClick={() => onPatch({ sandbox: sb })}
                       >
                         {SANDBOX_LABELS[sb]}
@@ -810,6 +872,13 @@ export function SettingsModal({
                     ))}
                   </div>
                   <p className="drawer-note">{SANDBOX_DESCS[settings.sandbox]}</p>
+                  {settings.mode === "norma" &&
+                    settings.sandbox === "danger-full-access" && (
+                      <p className="drawer-note">
+                        诺玛模式下“无边界”已收紧为“工作区可写”（诺玛没有完全放行档）；
+                        切到 EVA 后恢复。
+                      </p>
+                    )}
                 </div>
               </>
             )}
@@ -1165,6 +1234,201 @@ export function HelpDrawer({
         >
           Tauri ↗
         </button>
+      </div>
+    </DrawerShell>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* 用量面板（P0-10）：本对话累计 + 今日 / 近 7 天 / 近 30 天 / 本次启动。 */
+/* 数字全部来自服务商真实回报的 usage；花费是按 DeepSeek 官方价目估算的， */
+/* 模型没收录价目时显示“—”，绝不编一个数。没有数据的档显示 0 / “还没有  */
+/* 用量数据”，不编假数据。                                              */
+/* ------------------------------------------------------------------ */
+
+/** token 数加千分位；花费按量级取 2–4 位小数；命中率 1 位小数。 */
+export function fmtTokens(n: number): string {
+  return n.toLocaleString("zh-CN");
+}
+
+export function fmtUsd(x: number | null | undefined): string {
+  if (x == null) return "—";
+  if (x === 0) return "$0";
+  return `$${x.toFixed(x < 0.01 ? 4 : 2)}`;
+}
+
+export function fmtHitRate(prompt: number, cached: number): string {
+  if (prompt <= 0) return "—";
+  return `${((cached / prompt) * 100).toFixed(1)}%`;
+}
+
+export interface ConversationUsage {
+  prompt: number;
+  completion: number;
+  cached: number;
+  costUsd: number | null;
+  savedUsd: number | null;
+  replies: number;
+}
+
+function UsageTiles({
+  prompt,
+  completion,
+  cached,
+  costUsd,
+  savedUsd,
+}: {
+  prompt: number;
+  completion: number;
+  cached: number;
+  costUsd: number | null;
+  savedUsd: number | null;
+}) {
+  return (
+    <div className="usage-grid">
+      <div className="usage-stat">
+        <div className="usage-num">↑ {fmtTokens(prompt)}</div>
+        <div className="usage-label">输入 tokens</div>
+      </div>
+      <div className="usage-stat">
+        <div className="usage-num">↓ {fmtTokens(completion)}</div>
+        <div className="usage-label">输出 tokens</div>
+      </div>
+      <div className="usage-stat">
+        <div className="usage-num">{fmtHitRate(prompt, cached)}</div>
+        <div className="usage-label">缓存命中（{fmtTokens(cached)}）</div>
+      </div>
+      <div className="usage-stat">
+        <div className="usage-num">{fmtUsd(costUsd)}</div>
+        <div className="usage-label">
+          估算花费{savedUsd != null && savedUsd > 0 ? ` · 已省 ${fmtUsd(savedUsd)}` : ""}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UsageRangeRow({
+  label,
+  prompt,
+  completion,
+  cached,
+  requests,
+  costUsd,
+}: {
+  label: string;
+  prompt: number;
+  completion: number;
+  cached: number;
+  requests: number;
+  costUsd: number | null;
+}) {
+  return (
+    <div className="usage-range">
+      <span className="usage-range-label">{label}</span>
+      <span className="usage-range-nums">
+        {requests === 0
+          ? "还没有用量数据"
+          : `↑ ${fmtTokens(prompt)} · ↓ ${fmtTokens(completion)} · 缓存 ${fmtHitRate(prompt, cached)} · ${fmtUsd(costUsd)}（${requests} 次请求）`}
+      </span>
+    </div>
+  );
+}
+
+export function UsageDrawer({
+  conversation,
+  overview,
+  loading,
+  onRefresh,
+  onClose,
+  closing = false,
+}: {
+  conversation: ConversationUsage;
+  overview: UsageOverview | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onClose: () => void;
+  closing?: boolean;
+}) {
+  return (
+    <DrawerShell title="用量" onClose={onClose} closing={closing}>
+      <div className="s7-group">
+        <div className="drawer-section">本对话</div>
+        {conversation.replies === 0 ? (
+          <p className="drawer-note">还没有用量数据——用量会在每条 AI 回复后累计到这里。</p>
+        ) : (
+          <>
+            <UsageTiles
+              prompt={conversation.prompt}
+              completion={conversation.completion}
+              cached={conversation.cached}
+              costUsd={conversation.costUsd}
+              savedUsd={conversation.savedUsd}
+            />
+            <p className="drawer-note">
+              共 {fmtTokens(conversation.prompt + conversation.completion)} tokens
+              （{conversation.replies} 条回复）。
+            </p>
+          </>
+        )}
+      </div>
+      <div className="s7-group">
+        <div className="drawer-row">
+          <span className="drawer-section">全部对话</span>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onRefresh}
+            disabled={loading}
+            aria-label="刷新用量"
+          >
+            {loading ? "刷新中…" : "↻ 刷新"}
+          </button>
+        </div>
+        {overview == null ? (
+          <p className="drawer-note">
+            {loading ? "正在读取用量台账…" : "读不到用量台账，点刷新重试。"}
+          </p>
+        ) : (
+          <>
+            <UsageRangeRow
+              label="今日"
+              prompt={overview.today.prompt}
+              completion={overview.today.completion}
+              cached={overview.today.cached}
+              requests={overview.today.requests}
+              costUsd={overview.today.cost_usd}
+            />
+            <UsageRangeRow
+              label="近 7 天"
+              prompt={overview.last7d.prompt}
+              completion={overview.last7d.completion}
+              cached={overview.last7d.cached}
+              requests={overview.last7d.requests}
+              costUsd={overview.last7d.cost_usd}
+            />
+            <UsageRangeRow
+              label="近 30 天"
+              prompt={overview.last30d.prompt}
+              completion={overview.last30d.completion}
+              cached={overview.last30d.cached}
+              requests={overview.last30d.requests}
+              costUsd={overview.last30d.cost_usd}
+            />
+            <UsageRangeRow
+              label="本次启动"
+              prompt={overview.session.prompt}
+              completion={overview.session.completion}
+              cached={overview.session.cached}
+              requests={overview.session.requests}
+              costUsd={overview.session.cost_usd}
+            />
+          </>
+        )}
+        <p className="drawer-note">
+          花费按 DeepSeek 官方价目估算（峰时 / 闲时按请求时间划分；中国法定节假日按峰时算，略有高估；中转站实际价格可能不同）。token
+          数与缓存命中率全部来自服务商真实回报的用量，不是估算。
+        </p>
       </div>
     </DrawerShell>
   );

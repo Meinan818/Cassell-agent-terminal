@@ -19,7 +19,7 @@ interface SidebarProps {
   /** P2-1：任务行悬停重命名（双击标题也可）与删除（两步确认）。 */
   onRenameTask: (id: string, title: string) => void;
   onDeleteTask: (id: string) => void;
-  onOpenDrawer: (which: "settings" | "archive" | "help") => void;
+  onOpenDrawer: (which: "settings" | "archive" | "help" | "usage") => void;
   /** 搜索入口：点开即 Cmd-K 命令面板（S7），不再是行内过滤框。 */
   onOpenPalette: () => void;
   /** 身份卡显示名（空 = 默认“路明非”，由调用方处理回退）。 */
@@ -29,7 +29,7 @@ interface SidebarProps {
   running: boolean;
   /** P2-6：名册与输入框芯片的球接同一份 markState，不要永远 idle。 */
   markState: MarkState;
-  drawer: "settings" | "archive" | "help" | null;
+  drawer: "settings" | "archive" | "help" | "usage" | null;
   /**
    * 切换仪式（第 3 步第四波）：App 的 handleModeChange 统一派发；
    * 名册行与段位牌在仪式里点亮/褪去，球与顶栏共用同一份仪式。

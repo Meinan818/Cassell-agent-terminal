@@ -53,9 +53,9 @@ pub struct Settings {
     /// Ultracode：高级工程工作流（多智能体并行、交叉验证、迭代）的独立开关。
     /// 当前引擎还是单智能体循环：开关只透传并记录，不假装已实现并行编排。
     pub ultracode: bool,
-    /// auto | ask | read-only
-    /// auto：写文件、执行命令自动进行；ask：写文件前先问你（审批卡确认后才执行）；
-    /// read-only：不写文件、不执行命令，只能读。
+    /// 审批档位（P0-8）：always 每步问 | on-demand 按需问（默认）| never 从不问。
+    /// 只管“何时停下问你”，不管“能碰什么”——那是沙箱的活。
+    /// NORMA 模式下 never 收紧为 on-demand（诺玛没有 yolo 档）。
     pub approval: String,
     /// 删除确认： "always"（每次删文件都单独问，默认）| "never"（不再询问，直接执行）。
     /// 用户可在设置 → 权限里改；持久化在 settings.json。
@@ -63,7 +63,10 @@ pub struct Settings {
     /// 压缩模型：压缩历史时用的模型，和主模型分开配（P0-3）。
     /// 改主模型、迁移退役 ID 都不碰它。老设置文件里没有时默认 deepseek-flash。
     pub compression_model: String,
-    /// read-only | workspace-write | danger-full-access
+    /// 沙箱档位（P0-8）：read-only 只读 | workspace-write 读写工作区（默认）
+    /// | danger-full-access 无边界（文件工具可读写工作区外的绝对路径）。
+    /// 只管“技术上能碰什么”，不管“何时问你”——那是审批的活。
+    /// NORMA 模式下无边界收紧为读写工作区（诺玛没有 yolo 档）。
     pub sandbox: String,
     /// light | dark
     pub theme: String,
@@ -90,7 +93,7 @@ impl Default for Settings {
             effort: "medium".to_string(),
             mode: "norma".to_string(),
             ultracode: false,
-            approval: "auto".to_string(),
+            approval: "on-demand".to_string(),
             delete_confirm: "always".to_string(),
             compression_model: crate::models::default_compression_model(),
             sandbox: "workspace-write".to_string(),
@@ -250,12 +253,24 @@ pub fn load_settings(app: &AppHandle) -> Settings {
     if settings.mode != "norma" && settings.mode != "eva" {
         settings.mode = "norma".to_string();
     }
-    // 审批档位归一：未知值回落到 auto；删除确认归一：未知值回落到 always（安全优先）。
-    if settings.approval != "auto"
-        && settings.approval != "ask"
-        && settings.approval != "read-only"
-    {
-        settings.approval = "auto".to_string();
+    // P0-8 审批档位迁移（两把 dial 拆开）：旧 "auto"→按需问、"ask"→每步问、
+    // "read-only"→沙箱改只读 + 审批改按需问（旧值是审批字段在干沙箱的活，
+    // 拆开后行为不变）；未知值回落到按需问（安全优先）。
+    // 沙箱档位归一：只有三个合法值，未知值回落到读写工作区。
+    let (migrated, force_readonly) = crate::sandbox::migrate_approval(&settings.approval);
+    if migrated != settings.approval {
+        eprintln!("[sandbox] 审批档位已迁移：{} → {migrated}", settings.approval);
+        settings.approval = migrated.to_string();
+    }
+    if force_readonly && settings.sandbox != "read-only" {
+        eprintln!("[sandbox] 旧审批 read-only 已拆为沙箱只读");
+        settings.sandbox = "read-only".to_string();
+    }
+    if !matches!(
+        settings.sandbox.as_str(),
+        "read-only" | "workspace-write" | "danger-full-access"
+    ) {
+        settings.sandbox = "workspace-write".to_string();
     }
     if settings.delete_confirm != "always" && settings.delete_confirm != "never" {
         settings.delete_confirm = "always".to_string();
