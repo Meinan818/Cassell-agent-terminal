@@ -59,6 +59,7 @@ pub fn run() {
             fsutil::read_file_base64,
             fsutil::get_review,
             fsutil::revert_file,
+            fsutil::commit_files,
             shell::run_shell,
         ])
         .run(tauri::generate_context!())

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import hljs from "highlight.js/lib/common";
 import type {
   FileEntry,
   InspectorView,
@@ -10,6 +11,13 @@ import type {
   Settings,
 } from "../types";
 import Mark from "./Mark";
+import {
+  displayNo,
+  lineKey,
+  parseUnifiedDiff,
+  sideBySideRows,
+  type DiffLine,
+} from "./diffUtils";
 
 export interface MergeSummary {
   paths: string[];
@@ -33,9 +41,9 @@ interface RightPanelProps {
   onClose: () => void;
   /** 正在退场：先播 180ms 滑出动画再卸载（App 的 useOverlayExitValue）。 */
   closing?: boolean;
-  /** L3 决策展开：扩宽到 480px。 */
-  wide: boolean;
-  onToggleWide: () => void;
+  /** P0-11 ①③：Inspector 宽度三档 360 / 480 / 720（并排 diff 用超宽档）。 */
+  width: number;
+  onToggleWidth: () => void;
   running: boolean;
   runningTaskTitle: string | null;
   /** 本对话累计用量（App 已算出；无用量数据时 replies 为 0）。 */
@@ -63,6 +71,8 @@ interface RightPanelProps {
   settings: Settings;
   /** P0-9 当前模式：审查/交付入口与标题随模式换名。 */
   mode: Mode;
+  /** P0-11 ②：逐行评论发给 agent（App 的 handleSend 包一层，返回 false 表示没发出去）。 */
+  onSendToAgent: (text: string) => boolean;
   /** P0-9 NORMA 交付：本任务里写过的文件（App 从 agent-tool-result 汇总）。 */
   deliverables: { path: string; at: number }[];
   /**
@@ -82,8 +92,8 @@ const VIEWS: { id: InspectorView; label: string }[] = [
 ];
 
 const TERM_HISTORY_KEY = "cassell-term-history";
-const DIFF_LINE_CAP = 400;
-const PREVIEW_LINE_CAP = 2000;
+/** P0-11 ①：文件预览按需渲染，每页行数（不再一次渲染几千行 DOM）。 */
+const PREVIEW_PAGE = 300;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -97,105 +107,445 @@ function quoteForShell(p: string): string {
   return `"${p.replace(/[\r\n]/g, "").replace(/"/g, '\\"')}"`;
 }
 
-/** diff 文本按行着色：+ 绿底、− 红底、@@ 蓝、文件头灰。纯文本节点渲染，不拼 HTML。 */
-function DiffView({ text }: { text: string }) {
-  const lines = text.split("\n");
-  const shown = lines.slice(0, DIFF_LINE_CAP);
-  return (
-    <div
-      style={{
-        fontFamily: "var(--mono)",
-        fontSize: 11,
-        lineHeight: 1.7,
-        background: "var(--bg-soft)",
-        borderRadius: 8,
-        padding: "8px 10px",
-        overflowX: "hidden",
-      }}
-    >
-      {shown.map((l, i) => {
-        let style: React.CSSProperties = {
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          overflowWrap: "anywhere",
-        };
-        if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ")) {
-          style = { ...style, color: "var(--text-3)" };
-        } else if (l.startsWith("+")) {
-          style = { ...style, background: "var(--ok-soft)" };
-        } else if (l.startsWith("-")) {
-          style = { ...style, background: "var(--danger-soft)" };
-        } else if (l.startsWith("@@")) {
-          style = { ...style, color: "var(--accent)", fontWeight: 700 };
+/** P0-11 ②：逐行评论（存在 localStorage，按文件路径分桶；评论是本地的，
+ * 发给智能体后也保留，改完再看 diff 时还能对上）。 */
+interface LineComment {
+  id: string;
+  /** 行定位键：新文件行 n{行号}，删除行 o{行号}。 */
+  key: string;
+  side: "new" | "old";
+  line: number;
+  text: string;
+  at: number;
+}
+
+const COMMENTS_KEY = "cassell-diff-comments-v1";
+const DIFF_MODE_KEY = "cassell-diff-mode";
+
+function loadAllComments(): Record<string, LineComment[]> {
+  try {
+    const raw = localStorage.getItem(COMMENTS_KEY);
+    const obj = raw ? (JSON.parse(raw) as unknown) : {};
+    if (obj && typeof obj === "object") return obj as Record<string, LineComment[]>;
+  } catch {
+    // 读不到就当没有评论，不报错。
+  }
+  return {};
+}
+
+function saveAllComments(all: Record<string, LineComment[]>) {
+  try {
+    localStorage.setItem(COMMENTS_KEY, JSON.stringify(all));
+  } catch {
+    // 存不下也不报错，评论只留本会话。
+  }
+}
+
+/** P0-11 ②：diff 审查视图——统一/并排切换、逐行评论、hunk 折叠、取消 400 行截断。
+ * 超长 diff（>600 行）默认只展开第一个 hunk，其余点开再看，避免一次渲染几千行 DOM。 */
+function DiffView({
+  text,
+  filePath,
+  panelWidth,
+  onSendToAgent,
+}: {
+  text: string;
+  filePath: string;
+  panelWidth: number;
+  onSendToAgent: (text: string) => boolean;
+}) {
+  const parsed = useMemo(() => parseUnifiedDiff(text), [text]);
+  const adds = parsed.hunks.reduce(
+    (n, h) => n + h.lines.filter((l) => l.kind === "add").length,
+    0,
+  );
+  const dels = parsed.hunks.reduce(
+    (n, h) => n + h.lines.filter((l) => l.kind === "del").length,
+    0,
+  );
+  const [mode, setMode] = useState<"unified" | "side">(() => {
+    try {
+      return localStorage.getItem(DIFF_MODE_KEY) === "side" ? "side" : "unified";
+    } catch {
+      return "unified";
+    }
+  });
+  const [collapsed, setCollapsed] = useState<Record<number, boolean>>(() =>
+    parsed.totalLines > 600
+      ? Object.fromEntries(parsed.hunks.map((_, i) => [i, i !== 0]))
+      : {},
+  );
+  const [comments, setComments] = useState<LineComment[]>(
+    () => loadAllComments()[filePath] ?? [],
+  );
+  const [editing, setEditing] = useState<{
+    key: string;
+    side: "new" | "old";
+    line: number;
+  } | null>(null);
+  const [draft, setDraft] = useState("");
+  const [sendNote, setSendNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    const all = loadAllComments();
+    if (comments.length === 0) delete all[filePath];
+    else all[filePath] = comments;
+    saveAllComments(all);
+  }, [comments, filePath]);
+
+  const setModeAndSave = (m: "unified" | "side") => {
+    setMode(m);
+    try {
+      localStorage.setItem(DIFF_MODE_KEY, m);
+    } catch {
+      // 存不下就只留本次，不报错。
+    }
+  };
+
+  const commentsFor = (key: string) => comments.filter((c) => c.key === key);
+
+  const toggleEditor = (l: DiffLine) => {
+    const key = lineKey(l);
+    const no = displayNo(l);
+    if (no === null) return;
+    setEditing((prev) =>
+      prev?.key === key
+        ? null
+        : { key, side: l.newNo !== null ? "new" : "old", line: no },
+    );
+    setDraft("");
+    setSendNote(null);
+  };
+
+  const saveDraft = () => {
+    const t = draft.trim();
+    if (!editing || !t) return;
+    setComments((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        key: editing.key,
+        side: editing.side,
+        line: editing.line,
+        text: t,
+        at: Date.now(),
+      },
+    ]);
+    setDraft("");
+    setEditing(null);
+  };
+
+  const sendComments = () => {
+    if (comments.length === 0) return;
+    const lines = comments
+      .slice()
+      .sort((a, b) => a.line - b.line)
+      .map(
+        (c) =>
+          `- 第 ${c.line} 行（${c.side === "new" ? "新文件" : "旧文件，已删除"}）：${c.text}`,
+      );
+    const msg =
+      `关于 ${filePath} 的 diff，我有以下逐行意见，请只按意见改对应行，不要动其他地方：\n` +
+      lines.join("\n");
+    const ok = onSendToAgent(msg);
+    setSendNote(
+      ok
+        ? "已发给当前任务的智能体，评论保留在下面。"
+        : "没发出去：可能正在运行，或还没配 API Key。评论还留着，稍后再发。",
+    );
+  };
+
+  /** 某一行下面的评论区：已有评论 + 正在写的输入框。 */
+  const commentBlock = (key: string, line: number) => {
+    const list = commentsFor(key);
+    const isEditing = editing?.key === key;
+    if (list.length === 0 && !isEditing) return null;
+    return (
+      <div className="dv-comments">
+        {list.map((c) => (
+          <div key={c.id} className="dv-comment">
+            <span className="dv-comment-text">{c.text}</span>
+            <button
+              type="button"
+              className="dv-comment-del"
+              onClick={() =>
+                setComments((prev) => prev.filter((x) => x.id !== c.id))
+              }
+              title="删除这条评论"
+              aria-label="删除这条评论"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        {isEditing && (
+          <div className="dv-comment-editor">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveDraft();
+                if (e.key === "Escape") {
+                  setEditing(null);
+                  setDraft("");
+                }
+              }}
+              placeholder={`给第 ${line} 行写一句意见…（回车保存）`}
+              aria-label="逐行评论"
+              autoFocus
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={saveDraft}
+              disabled={!draft.trim()}
+            >
+              保存
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                setEditing(null);
+                setDraft("");
+              }}
+            >
+              取消
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /** 行号按钮：点它给这一行写评论；有评论的行号后面带一个点。 */
+  const noButton = (l: DiffLine, which: "old" | "new") => {
+    const no = which === "old" ? l.oldNo : l.newNo;
+    const key = lineKey(l);
+    const has = commentsFor(key).length > 0;
+    return (
+      <button
+        type="button"
+        className={`dv-no${has ? " has-comment" : ""}`}
+        title={
+          no !== null
+            ? `点此给第 ${no} 行写评论`
+            : which === "old"
+              ? "新增行（旧文件无此行）"
+              : "删除行（新文件无此行）"
         }
+        onClick={() => toggleEditor(l)}
+        disabled={no === null}
+      >
+        {no ?? ""}
+      </button>
+    );
+  };
+
+  const renderUnified = (hunkLines: DiffLine[]) => (
+    <>
+      {hunkLines.map((l, i) => {
+        const key = lineKey(l);
         return (
-          <div key={i} style={style}>
-            {l || " "}
+          <div key={i}>
+            <div className={`dv-row k-${l.kind}`}>
+              <span className="dv-nos">
+                {noButton(l, "old")}
+                {noButton(l, "new")}
+              </span>
+              <span className="dv-sign">
+                {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
+              </span>
+              <span className="dv-text">{l.text || " "}</span>
+            </div>
+            {commentBlock(key, displayNo(l) ?? 0)}
           </div>
         );
       })}
-      {lines.length > DIFF_LINE_CAP && (
-        <div style={{ color: "var(--text-3)", marginTop: 4 }}>
-          仅显示前 {DIFF_LINE_CAP} 行，共 {lines.length} 行
+    </>
+  );
+
+  const renderSide = (hunkLines: DiffLine[]) => {
+    const rows = sideBySideRows({ header: "", oldStart: 0, newStart: 0, lines: hunkLines });
+    return (
+      <div className="dv-side-scroll">
+        <div className="dv-side">
+          {rows.map((r, i) => {
+            const keys = [r.old ? lineKey(r.old) : null, r.next ? lineKey(r.next) : null].filter(
+              (k): k is string => k !== null,
+            );
+            const uniqKeys = [...new Set(keys)];
+            return (
+              <div key={i} className="dv-side-row">
+                <div className={`dv-cell k-${r.old?.kind ?? "blank"}`}>
+                  {r.old ? (
+                    noButton(r.old, "old")
+                  ) : (
+                    <span className="dv-no" aria-hidden="true" />
+                  )}
+                  <span className="dv-text">{r.old?.text ?? ""}</span>
+                </div>
+                <div className={`dv-cell k-${r.next?.kind ?? "blank"}`}>
+                  {r.next ? (
+                    noButton(r.next, "new")
+                  ) : (
+                    <span className="dv-no" aria-hidden="true" />
+                  )}
+                  <span className="dv-text">{r.next?.text ?? ""}</span>
+                </div>
+                {uniqKeys.map((k) => {
+                  const c = comments.find((x) => x.key === k);
+                  return (
+                    <div key={k} className="dv-side-comments">
+                      {commentBlock(k, c?.line ?? 0)}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="dv">
+      <div className="dv-toolbar">
+        <div className="dv-seg" role="tablist" aria-label="diff 视图">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "unified"}
+            className={mode === "unified" ? "on" : ""}
+            onClick={() => setModeAndSave("unified")}
+          >
+            统一
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "side"}
+            className={mode === "side" ? "on" : ""}
+            onClick={() => setModeAndSave("side")}
+          >
+            并排
+          </button>
+        </div>
+        <span className="dv-counts">
+          +{adds} −{dels} · {parsed.totalLines} 行
+        </span>
+        {comments.length > 0 && (
+          <button type="button" className="btn-ghost" onClick={sendComments}>
+            发评论给智能体（{comments.length}）
+          </button>
+        )}
+      </div>
+      {sendNote && <div className="dv-note">{sendNote}</div>}
+      {mode === "side" && panelWidth < 720 && (
+        <div className="dv-note">
+          并排视图在窄面板里要左右滑着看；点顶部宽度按钮切到超宽（720px）更舒服。
         </div>
       )}
+      {parsed.hunks.length === 0 && (
+        <div className="rp-empty-text">没有可显示的 diff 内容。</div>
+      )}
+      {parsed.hunks.map((h, hi) => (
+        <div key={hi} className="dv-hunk">
+          <button
+            type="button"
+            className="dv-hunk-head"
+            onClick={() =>
+              setCollapsed((prev) => ({ ...prev, [hi]: !prev[hi] }))
+            }
+            aria-expanded={!collapsed[hi]}
+          >
+            <span aria-hidden="true">{collapsed[hi] ? "▸" : "▾"}</span>
+            <span className="dv-hunk-title">{h.header}</span>
+          </button>
+          {!collapsed[hi] && (
+            <div className="dv-hunk-body">
+              {mode === "unified" ? renderUnified(h.lines) : renderSide(h.lines)}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
 
-const CODE_EXTS = new Set([
-  "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "py", "json",
-  "css", "scss", "toml", "yaml", "yml", "sh", "md",
+/** P0-11 ①：文件扩展名 → highlight.js 语言名（lib/common 自带的语言集）。 */
+const HL_LANG: Record<string, string> = {
+  ts: "typescript",
+  tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  rs: "rust",
+  py: "python",
+  json: "json",
+  jsonc: "json",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  toml: "toml",
+  yaml: "yaml",
+  yml: "yaml",
+  sh: "bash",
+  bash: "bash",
+  zsh: "bash",
+  md: "markdown",
+  xml: "xml",
+  html: "xml",
+  sql: "sql",
+  go: "go",
+  java: "java",
+  c: "c",
+  cpp: "cpp",
+  h: "cpp",
+  rb: "ruby",
+  php: "php",
+  kt: "kotlin",
+  swift: "swift",
+  lua: "lua",
+  r: "r",
+  diff: "diff",
+};
+
+/** P0-11 ①：图片类文件先给预览（走已有的 read_file_base64，data URL，不走 asset 协议）。 */
+const IMAGE_EXTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "avif",
 ]);
 
-const KEYWORDS = new Set(
-  ("const let var function return if else for while import from export default class extends " +
-    "interface type enum struct impl fn pub mut match use mod async await try catch throw new " +
-    "typeof in of switch case break continue do void delete this super static readonly private " +
-    "public protected def pass with as lambda None True False and or not elif bool int str float " +
-    "true false null undefined").split(" "),
-);
-
-/** 单行基础高亮：字符串 / 行注释 / 数字 / 关键字。只做行内，不跨行追踪块注释。 */
-function highlightLine(line: string, ext: string): ReactNode[] {
-  if (!CODE_EXTS.has(ext) || ext === "md") return [line];
-  const hashComment = ext === "py" || ext === "sh" || ext === "toml" || ext === "yaml" || ext === "yml";
-  const re = hashComment
-    ? /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|#[^\n]*|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/g
-    : /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\\n]|\\.)*`|\/\/[^\n]*|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b)/g;
-  const out: ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = re.exec(line)) !== null) {
-    if (m.index > last) out.push(line.slice(last, m.index));
-    const tok = m[0];
-    let style: React.CSSProperties | undefined;
-    if (
-      tok.startsWith('"') || tok.startsWith("'") || tok.startsWith("`")
-    ) {
-      style = { color: "var(--ok)" };
-    } else if (tok.startsWith("//") || tok.startsWith("#")) {
-      style = { color: "var(--text-3)", fontStyle: "italic" };
-    } else if (/^\d/.test(tok)) {
-      style = { color: "#d08770" };
-    } else if (KEYWORDS.has(tok)) {
-      style = { color: "var(--accent)", fontWeight: 600 };
-    }
-    out.push(
-      style ? (
-        <span key={k++} style={style}>
-          {tok}
-        </span>
-      ) : (
-        tok
-      ),
-    );
-    last = m.index + tok.length;
-  }
-  if (last < line.length) out.push(line.slice(last));
-  return out;
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+/** P0-11 ①：单行语法高亮（highlight.js，逐行调用；跨行块注释在续行上不着色，
+ * 和旧版手写正则同限，覆盖面远胜手写正则）。返回已转义的 HTML 片段，
+ * 交给 dangerouslySetInnerHTML（hljs 输出自带转义，不拼原始 HTML）。
+ * md 不高亮（正文着色反而难读），未知后缀直接原样显示。 */
+function highlightLineHtml(line: string, ext: string): string {
+  if (!line) return "";
+  const lang = HL_LANG[ext];
+  if (!lang || ext === "md" || !hljs.getLanguage(lang)) return escapeHtml(line);
+  try {
+    return hljs.highlight(line, { language: lang }).value;
+  } catch {
+    return escapeHtml(line);
+  }
+}
+
 
 type DiffState =
   | { state: "loading" }
@@ -216,8 +566,8 @@ export default function RightPanel(props: RightPanelProps) {
     onViewChange,
     onClose,
     closing = false,
-    wide,
-    onToggleWide,
+    width,
+    onToggleWidth,
     running,
     runningTaskTitle,
     usageTotal,
@@ -237,6 +587,7 @@ export default function RightPanel(props: RightPanelProps) {
     onRunShell,
     settings,
     mode,
+    onSendToAgent,
     deliverables,
   } = props;
 
@@ -327,12 +678,43 @@ export default function RightPanel(props: RightPanelProps) {
     paths.forEach((p) => onRejectFile(p));
   };
 
+  // ---- P0-11 ②：提交已通过的变更（git add + git commit，走后端 commit_files 命令）。
+  const approvedFiles = (review?.files ?? []).filter(
+    (f) => (f.state ?? "pending") === "approved",
+  );
+  const [commitMsg, setCommitMsg] = useState("");
+  const [commitBusy, setCommitBusy] = useState(false);
+  const [commitNote, setCommitNote] = useState<string | null>(null);
+
+  const doCommit = () => {
+    const message = commitMsg.trim();
+    if (approvedFiles.length === 0 || !message || commitBusy) return;
+    setCommitBusy(true);
+    setCommitNote(null);
+    invoke<string>("commit_files", {
+      workdir,
+      paths: approvedFiles.map((f) => f.path),
+      message,
+    })
+      .then((result) => {
+        setCommitNote(result);
+        setCommitMsg("");
+        onRefreshReview();
+      })
+      .catch((e) => setCommitNote(`提交失败：${String(e)}`))
+      .finally(() => setCommitBusy(false));
+  };
+
   // ---- Files view state ----
   const [dir, setDir] = useState(workdir);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  // 列表行文件大小：只有预览过的才知道真实字节数（list_files 不返回 size）。
-  const [sizes, setSizes] = useState<Record<string, number>>({});
+  /** P0-11 ①：图片预览的 data URL（和预览文本分开存，点别的文本文件时不串）。 */
+  const [imgData, setImgData] = useState<{ path: string; dataUrl: string } | null>(null);
+  /** P0-11 ①：改过标记——工作区内相对路径的集合（git status --porcelain 的真实结果）。 */
+  const [modified, setModified] = useState<Set<string>>(new Set());
+  /** P0-11 ①：预览按需渲染，已显示的行数（点“显示更多”再加一页）。 */
+  const [shownLines, setShownLines] = useState(PREVIEW_PAGE);
 
   useEffect(() => {
     if (view !== "files") return;
@@ -344,26 +726,71 @@ export default function RightPanel(props: RightPanelProps) {
       .catch(() => {
         if (alive) setEntries([]);
       });
+    // 改过标记：读一次 git status（不是 git 仓库 / 失败时就当没有改动，不报错）。
+    if (workdir) {
+      invoke<{ stdout: string; stderr: string; code: number | null }>("run_shell", {
+        command: "git status --porcelain",
+        workdir,
+      })
+        .then((r) => {
+          if (!alive || r.code !== 0) return;
+          const set = new Set<string>();
+          for (const line of r.stdout.split("\n")) {
+            if (line.length < 4) continue;
+            const raw = line.slice(3).trim();
+            const p = raw.split(" -> ").pop() ?? raw;
+            if (p) set.add(p.replace(/\\/g, "/"));
+          }
+          setModified(set);
+        })
+        .catch(() => {
+          // 不是 git 仓库时静默：没有改过标记而已。
+        });
+    }
     return () => {
       alive = false;
     };
-  }, [view, dir]);
+  }, [view, dir, workdir]);
 
   useEffect(() => {
     setDir(workdir);
   }, [workdir]);
 
+  /** 工作区内相对路径（改过标记用）：不在工作区内的返回 null。 */
+  const relToWorkdir = (abs: string): string | null => {
+    if (!workdir) return null;
+    const base = workdir.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+    const p = abs.replace(/\\/g, "/");
+    if (p === base) return "";
+    if (p.startsWith(`${base}/`)) return p.slice(base.length + 1);
+    return null;
+  };
+
   const openFile = (f: FileEntry) => {
     if (f.is_dir) {
       setDir(f.path);
       setPreview(null);
+      setImgData(null);
       return;
     }
+    const ext = (f.path.split(".").pop() ?? "").toLowerCase();
+    setShownLines(PREVIEW_PAGE);
+    if (IMAGE_EXTS.has(ext)) {
+      // 图片：data URL 预览（不走 read_file，那个只给文本）。
+      setPreview({ path: f.path, text: "", bytes: f.size ?? null, truncated: false });
+      invoke<string>("read_file_base64", { path: f.path })
+        .then((dataUrl) => setImgData({ path: f.path, dataUrl }))
+        .catch((e) => {
+          setImgData(null);
+          setPreview({ path: f.path, text: `无法预览图片：${e}`, bytes: null, truncated: false });
+        });
+      return;
+    }
+    setImgData(null);
     invoke<string>("read_file", { path: f.path })
       .then((text) => {
         const truncated = text.endsWith("（仅预览前 200KB）");
         const bytes = truncated ? null : new TextEncoder().encode(text).length;
-        if (bytes !== null) setSizes((prev) => ({ ...prev, [f.path]: bytes }));
         setPreview({ path: f.path, text, bytes, truncated });
       })
       .catch((e) => setPreview({ path: f.path, text: `无法预览：${e}`, bytes: null, truncated: false }));
@@ -459,7 +886,7 @@ export default function RightPanel(props: RightPanelProps) {
 
   return (
     <aside
-      className={`w2-inspector ${wide ? "w2-wide" : ""}${closing ? " closing" : ""}`}
+      className={`w2-inspector ${width === 720 ? "w2-xwide" : width === 480 ? "w2-wide" : ""}${closing ? " closing" : ""}`}
       role="dialog"
       aria-label="Inspector"
     >
@@ -470,11 +897,11 @@ export default function RightPanel(props: RightPanelProps) {
           <button
             type="button"
             className="w2-icon-btn"
-            onClick={onToggleWide}
-            aria-label={wide ? "收起 Inspector" : "展开 Inspector"}
-            title={wide ? "收起（360px）" : "展开（480px）"}
+            onClick={onToggleWidth}
+            aria-label={`切换 Inspector 宽度（当前 ${width}px）`}
+            title={`切换宽度：360 / 480 / 720（并排 diff 用超宽）；当前 ${width}px`}
           >
-            {wide ? "›" : "‹"}
+            {width}
           </button>
           <button
             type="button"
@@ -635,6 +1062,38 @@ export default function RightPanel(props: RightPanelProps) {
                       </div>
                     </div>
                   )}
+                  {/* P0-11 ②：提交已通过的变更——先逐项通过，再一次提交。 */}
+                  {approvedFiles.length > 0 && (
+                    <div className="rp-commit">
+                      <div className="rp-commit-title">
+                        已通过 {approvedFiles.length} 个文件，可以提交了
+                      </div>
+                      <div className="rp-commit-row">
+                        <input
+                          value={commitMsg}
+                          onChange={(e) => {
+                            setCommitMsg(e.target.value);
+                            setCommitNote(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") doCommit();
+                          }}
+                          placeholder="提交信息，如：修复登录接口的空指针"
+                          aria-label="提交信息"
+                          disabled={commitBusy}
+                        />
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={doCommit}
+                          disabled={!commitMsg.trim() || commitBusy}
+                        >
+                          {commitBusy ? "提交中…" : `提交（${approvedFiles.length}）`}
+                        </button>
+                      </div>
+                      {commitNote && <div className="rp-commit-note">{commitNote}</div>}
+                    </div>
+                  )}
                   <div className="review-list">
                     {review.files.map((f) => {
                       const state = f.state ?? "pending";
@@ -756,10 +1215,14 @@ export default function RightPanel(props: RightPanelProps) {
                               {diff?.state === "error" && (
                                 <div className="rp-error">{diff.error}</div>
                               )}
-                              {diff?.state === "done" && <DiffView text={diff.text} />}
-                              <div className="rp-empty-text" style={{ marginTop: 6 }}>
-                                面板太窄？点顶部 ‹ 可扩宽到 480px 看 diff。
-                              </div>
+                              {diff?.state === "done" && (
+                                <DiffView
+                                  text={diff.text}
+                                  filePath={f.path}
+                                  panelWidth={width}
+                                  onSendToAgent={onSendToAgent}
+                                />
+                              )}
                             </div>
                           )}
                         </div>
@@ -851,11 +1314,22 @@ export default function RightPanel(props: RightPanelProps) {
                       {f.is_dir ? "▸ " : "· "}
                       {f.name}
                     </span>
-                    {!f.is_dir && sizes[f.path] != null && (
-                      <span style={{ flexShrink: 0, fontSize: 11, color: "var(--text-3)" }}>
-                        {formatBytes(sizes[f.path])}
-                      </span>
-                    )}
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      {!f.is_dir &&
+                        (() => {
+                          const rel = relToWorkdir(f.path);
+                          return rel !== null && modified.has(rel) ? (
+                            <span className="file-mod" title="这个文件改过，还没提交">
+                              已修改
+                            </span>
+                          ) : null;
+                        })()}
+                      {!f.is_dir && f.size != null && (
+                        <span style={{ fontSize: 11, color: "var(--text-3)" }}>
+                          {formatBytes(f.size)}
+                        </span>
+                      )}
+                    </span>
                   </button>
                 ))}
                 {entries.length === 0 && <div className="rp-empty-text">该目录为空</div>}
@@ -867,53 +1341,48 @@ export default function RightPanel(props: RightPanelProps) {
                     {preview.truncated
                       ? " · 大于 200KB，仅预览前 200KB"
                       : preview.bytes !== null
-                        ? ` · ${formatBytes(preview.bytes)} · ${preview.text.split("\n").length} 行`
+                        ? ` · ${formatBytes(preview.bytes)}${preview.text ? ` · ${preview.text.split("\n").length} 行` : ""}`
                         : ""}
+                    {(() => {
+                      const rel = relToWorkdir(preview.path);
+                      return rel !== null && modified.has(rel) ? " · 已修改" : "";
+                    })()}
                   </div>
-                  {(() => {
-                    const lines = preview.text.split("\n");
-                    const ext = (preview.path.split(".").pop() ?? "").toLowerCase();
-                    const shown = lines.slice(0, PREVIEW_LINE_CAP);
-                    return (
-                      <div
-                        style={{
-                          maxHeight: 280,
-                          overflowY: "auto",
-                          overflowX: "hidden",
-                          padding: 12,
-                          fontFamily: "var(--mono)",
-                          fontSize: 12,
-                          lineHeight: 1.7,
-                        }}
-                      >
-                        {shown.map((line, i) => (
-                          <div
-                            key={i}
-                            style={{ display: "flex", whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere" }}
-                          >
-                            <span
-                              style={{
-                                flexShrink: 0,
-                                width: "3.5ch",
-                                marginRight: 12,
-                                textAlign: "right",
-                                color: "var(--text-3)",
-                                userSelect: "none",
-                              }}
+                  {imgData && imgData.path === preview.path ? (
+                    <div className="fp-img">
+                      <img src={imgData.dataUrl} alt={preview.path} />
+                    </div>
+                  ) : (
+                    (() => {
+                      const lines = preview.text.split("\n");
+                      const ext = (preview.path.split(".").pop() ?? "").toLowerCase();
+                      const shown = lines.slice(0, shownLines);
+                      return (
+                        <div className="fp-lines">
+                          {shown.map((line, i) => (
+                            <div key={i} className="fp-row">
+                              <span className="fp-no">{i + 1}</span>
+                              <span
+                                className="fp-code"
+                                dangerouslySetInnerHTML={{
+                                  __html: highlightLineHtml(line, ext) || "&nbsp;",
+                                }}
+                              />
+                            </div>
+                          ))}
+                          {lines.length > shownLines && (
+                            <button
+                              type="button"
+                              className="btn-ghost fp-more"
+                              onClick={() => setShownLines((n) => n + PREVIEW_PAGE)}
                             >
-                              {i + 1}
-                            </span>
-                            <span style={{ minWidth: 0 }}>{highlightLine(line, ext)}</span>
-                          </div>
-                        ))}
-                        {lines.length > PREVIEW_LINE_CAP && (
-                          <div style={{ color: "var(--text-3)", marginTop: 4 }}>
-                            仅显示前 {PREVIEW_LINE_CAP} 行，共 {lines.length} 行
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                              显示更多（已显示 {shownLines} / 共 {lines.length} 行）
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
               )}
             </div>

@@ -19,6 +19,8 @@ pub struct FileEntry {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    /// 文件字节数；目录为 None（P0-11：列表行直接显示大小，不用先预览才知道）。
+    pub size: Option<u64>,
 }
 
 #[tauri::command]
@@ -37,10 +39,17 @@ pub async fn list_files(path: String) -> Result<Vec<FileEntry>, String> {
                 return None;
             }
             let ft = e.file_type().ok()?;
+            let is_dir = ft.is_dir();
+            let size = if is_dir {
+                None
+            } else {
+                e.metadata().ok().map(|m| m.len())
+            };
             Some(FileEntry {
                 name,
                 path: e.path().to_string_lossy().to_string(),
-                is_dir: ft.is_dir(),
+                is_dir,
+                size,
             })
         })
         .collect::<Vec<_>>();
@@ -258,5 +267,73 @@ pub async fn revert_file(workdir: String, path: String) -> Result<String, String
     } else {
         git(&workdir, &["checkout", "HEAD", "--", &path]).await?;
         Ok(format!("已还原 {path} 到 HEAD"))
+    }
+}
+
+/// P0-11 diff 升级：提交已通过的变更（审查队列的提交入口）。
+/// 只接受工作区内的相对路径；用 `git add -- <paths>` + `git commit -m`
+/// 分两步走，不拼 shell 字符串，避免注入。这是用户在界面上点的显式
+/// 操作（和“拒绝→还原”一样），不是 agent 的写操作，不走审批。
+fn validate_commit_paths(paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("没有要提交的文件".to_string());
+    }
+    for p in paths {
+        let path = Path::new(p);
+        if path.is_absolute() {
+            return Err(format!("只接受工作区内的相对路径：{p}"));
+        }
+        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err(format!("路径不能越出工作区：{p}"));
+        }
+        if p.trim().is_empty() {
+            return Err("文件路径不能为空".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn commit_files(
+    workdir: String,
+    paths: Vec<String>,
+    message: String,
+) -> Result<String, String> {
+    if workdir.trim().is_empty() || !Path::new(&workdir).is_dir() {
+        return Err("工作区目录不存在".to_string());
+    }
+    let message = message.trim().to_string();
+    if message.is_empty() {
+        return Err("提交信息不能为空".to_string());
+    }
+    if message.len() > 500 {
+        return Err("提交信息太长（最多 500 字符）".to_string());
+    }
+    validate_commit_paths(&paths)?;
+    let args: Vec<&str> = paths.iter().map(|p| p.as_str()).collect();
+    let mut add_args = vec!["add", "--"];
+    add_args.extend(args.iter().copied());
+    git(&workdir, &add_args).await?;
+    let out = git(&workdir, &["commit", "-m", &message]).await?;
+    let first_line = out.lines().next().unwrap_or("").trim().to_string();
+    Ok(if first_line.is_empty() {
+        format!("已提交 {} 个文件", paths.len())
+    } else {
+        format!("已提交 {} 个文件：{}", paths.len(), first_line)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_commit_paths;
+
+    #[test]
+    fn commit_paths_reject_escapes() {
+        assert!(validate_commit_paths(&[]).is_err());
+        assert!(validate_commit_paths(&["../secret.txt".to_string()]).is_err());
+        assert!(validate_commit_paths(&["/etc/passwd".to_string()]).is_err());
+        assert!(validate_commit_paths(&["".to_string()]).is_err());
+        assert!(validate_commit_paths(&["src/App.tsx".to_string()]).is_ok());
+        assert!(validate_commit_paths(&["a/b/c.rs".to_string(), "README.md".to_string()]).is_ok());
     }
 }

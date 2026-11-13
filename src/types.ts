@@ -150,6 +150,8 @@ export interface FileEntry {
   name: string;
   path: string;
   is_dir: boolean;
+  /** 文件字节数；目录为 null（P0-11：list_files 直接返回，列表行不用先预览才知道大小）。 */
+  size?: number | null;
 }
 
 export interface CodexInfo {
@@ -205,16 +207,18 @@ export const MODE_DEFAULTS: Record<Mode, { effort: Effort; approval: Approval }>
 /** P0-9 问候语：NORMA 办公口吻，EVA 工程口吻（不要只换名字）。 */
 export function modeGreeting(mode: Mode, hour: number, displayName: string): string {
   const base = `${greetingForHour(hour)}，${displayName.charAt(0)}专员。`;
-  return mode === "eva" ? `${base}要改哪块代码？` : `${base}今天想处理什么文档/任务？`;
+  return mode === "eva"
+    ? `${base}任务简报已就位，要改哪块代码？`
+    : `${base}学院的档案室和任务板都已就绪，今天想处理什么文档/任务？`;
 }
 
-/** P0-9 切换后的自我介绍：第一条消息说清"我现在是谁、能做什么、不能做什么"。 */
-export const MODE_INTRO: Record<Mode, string> = {
-  norma:
-    "现在我是诺玛，通用工作模式。我能帮你写文档、整理资料、查信息、理思路；改文件会先问你。不能做的事：不改代码、不跑终端命令——那是 EVA 的活，需要的话一键切过去。",
-  eva:
-    "现在我是 EVA，工程开发模式。我能读代码、改代码、跑测试，改动会拿测试和 diff 作证据；写文件默认直接动手，删文件仍会单独问你。不能做的事：不写办公文档、不碰日程邮件——那是诺玛的活。",
-};
+/** P0-9 切换后的自我介绍：第一条消息说清"我现在是谁、能做什么、不能做什么"。称呼跟着显示名走（首字 + 专员），不要写死"路专员"。 */
+export function modeIntro(mode: Mode, displayName: string): string {
+  const title = `${displayName.charAt(0)}专员`;
+  return mode === "eva"
+    ? `现在我是 EVA，卡塞尔学院的并行执行体，工程开发模式，与诺玛共用同一套记忆。${title}，我能读代码、改代码、跑测试，改动会拿测试和 diff 作证据；写文件默认直接动手，删文件仍会单独问你。不能做的事：不写办公文档、不碰日程邮件——那是诺玛的活。`
+    : `现在我是诺玛，卡塞尔学院的中枢 AI，通用工作模式。学院的档案、任务与情报都经我手。${title}，我能帮你写文档、整理资料、查信息、理思路；改文件会先问你。不能做的事：不改代码、不跑终端命令——那是 EVA 的活，需要的话一键切过去。`;
+}
 
 export const SANDBOX_LABELS: Record<Sandbox, string> = {
   "read-only": "只读",

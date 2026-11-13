@@ -17,11 +17,11 @@ import {
   THEME_KEY,
   EFFORT_LABELS,
   MODE_DEFAULTS,
-  MODE_INTRO,
   MODE_LABELS,
   MODE_TAG,
   folderName,
   modeGreeting,
+  modeIntro,
   resolveTheme,
   uid,
 } from "./types";
@@ -216,6 +216,7 @@ const WAVE2_CSS = `
 /* ---- Inspector（L2 浮层，不挤压对话区） ---- */
 .w2-inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 60; display: flex; flex-direction: column; background: var(--bg-panel); box-shadow: var(--shadow); animation: w2-insp-in 240ms var(--ease-exp) both; }
 .w2-inspector.w2-wide { width: 480px; }
+.w2-inspector.w2-xwide { width: 720px; max-width: 94vw; }
 @keyframes w2-insp-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
 /* 退出：Inspector 180ms 向右滑出 + 淡出（App 的 useOverlayExitValue 先播动画再卸载）。 */
 .w2-inspector.closing { animation: w2-insp-out 180ms var(--ease) both; }
@@ -514,6 +515,88 @@ const AUDIT_CSS = `
 .app .w2-task-rename { width: 100%; font-size: 13px; padding: 6px 10px; }
 @media (prefers-reduced-motion: reduce) { .app .s7-slash, .app .w2-jump, .app .w2-msg-actions { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 /* ---- P0-1：真项目——侧栏项目行单行只显示名字（路径副标题与任务数徽章已删） ---- */
+`;
+
+const P011_CSS = `
+/* ---- P0-11：文件查看器 + diff 升级（Inspector 工作台第一批） ----
+ * 前端理念自查（FRONTEND-PHILOSOPHY.md）：无 1px 框线（只用背景色阶 + 圆角 + 阴影
+ * 分层）、无金色/暖色（数字用冷钢蓝 #7c9cc4，不用旧版暖橙）、无照片素材、
+ * 宽度/展开/评论出现一律平滑过渡、悬停有微交互、全部读真实文件与真实 git diff。 */
+/* Inspector 宽度三档切换：面板宽度与主区留白同步 240ms 缓动，不硬切。 */
+.w2-inspector { transition: width 240ms var(--ease-exp); }
+.main { transition: margin-right 240ms var(--ease-exp); }
+/* ---- highlight.js token 颜色（主题自适应，走 app 的 CSS 变量；不用 hljs 自带主题 CSS） ---- */
+.hljs { color: var(--text-2); background: transparent; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: var(--accent); font-weight: 600; }
+.hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--ok); }
+.hljs-comment, .hljs-quote { color: var(--text-3); font-style: italic; }
+.hljs-number, .hljs-literal { color: #7c9cc4; }
+.hljs-title, .hljs-title.function_, .hljs-title.class_ { color: var(--text-1); font-weight: 600; }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-property { color: var(--text-2); }
+.hljs-type, .hljs-class { color: var(--accent); }
+.hljs-tag, .hljs-name { color: var(--accent); }
+.hljs-selector-class, .hljs-selector-id, .hljs-selector-attr { color: var(--ok); }
+.hljs-symbol, .hljs-bullet { color: #7c9cc4; }
+.hljs-addition { color: var(--ok); background: var(--ok-soft); }
+.hljs-deletion { color: var(--danger); background: var(--danger-soft); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+.hljs-operator, .hljs-punctuation { color: var(--text-3); }
+.hljs-doctag, .hljs-meta { color: var(--text-3); }
+/* ---- 文件查看器 ---- */
+.fp-lines { max-height: 400px; overflow-y: auto; overflow-x: hidden; padding: 12px; font-family: var(--mono); font-size: 12px; line-height: 1.7; }
+.fp-row { display: flex; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.fp-no { flex-shrink: 0; width: 3.5ch; margin-right: 12px; text-align: right; color: var(--text-3); user-select: none; }
+.fp-code { min-width: 0; }
+.fp-more { width: 100%; margin-top: 8px; padding: 8px; }
+.fp-img { padding: 12px; }
+.fp-img img { max-width: 100%; border-radius: 8px; display: block; object-fit: contain; }
+.file-mod { font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 6px; white-space: nowrap; }
+/* ---- diff 审查视图 ---- */
+.dv { display: flex; flex-direction: column; gap: 8px; font-family: var(--mono); font-size: 11px; line-height: 1.7; }
+.dv-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dv-seg { display: flex; gap: 2px; background: var(--bg-soft); border-radius: 999px; padding: 2px; }
+.dv-seg button { font-size: 12px; font-family: var(--font); padding: 4px 12px; border-radius: 999px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), box-shadow 150ms var(--ease); }
+.dv-seg button.on { background: var(--bg-panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+.dv-counts { font-size: 11px; color: var(--text-3); }
+.dv-note { font-size: 12px; font-family: var(--font); line-height: 1.6; color: var(--text-2); background: var(--bg-soft); border-radius: 8px; padding: 8px 10px; }
+.dv-hunk { background: var(--bg-soft); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+.dv-hunk-head { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; font-family: var(--mono); font-size: 11px; color: var(--accent); font-weight: 700; padding: 2px 4px; border-radius: 6px; transition: background 150ms var(--ease); }
+.dv-hunk-head:hover { background: var(--bg-hover); }
+.dv-hunk-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dv-hunk-body { animation: w2-view-in 200ms var(--ease) both; }
+.dv-row { display: flex; gap: 2px; }
+.dv-row.k-add { background: var(--ok-soft); }
+.dv-row.k-del { background: var(--danger-soft); }
+.dv-nos { display: flex; flex-shrink: 0; gap: 2px; }
+.dv-no { flex-shrink: 0; width: 4ch; text-align: right; color: var(--text-3); font-family: var(--mono); font-size: 11px; line-height: 1.7; padding: 0 2px; border-radius: 4px; user-select: none; transition: background 150ms var(--ease), color 150ms var(--ease); }
+button.dv-no:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); cursor: pointer; }
+button.dv-no:disabled { cursor: default; }
+.dv-no.has-comment { color: var(--accent); font-weight: 700; }
+.dv-sign { flex-shrink: 0; width: 1.2ch; text-align: center; color: var(--text-3); user-select: none; }
+.dv-text { min-width: 0; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.dv-side-scroll { overflow-x: auto; }
+.dv-side { min-width: 560px; display: flex; flex-direction: column; gap: 0; }
+.dv-side-row { display: grid; grid-template-columns: 1fr 1fr; }
+.dv-side-comments { grid-column: 1 / -1; }
+.dv-cell { display: flex; gap: 2px; padding: 0 4px 0 2px; min-width: 0; }
+.dv-cell.k-add { background: var(--ok-soft); }
+.dv-cell.k-del { background: var(--danger-soft); }
+.dv-comments { animation: w2-view-in 200ms var(--ease) both; display: flex; flex-direction: column; gap: 6px; padding: 6px 0 6px 8px; font-family: var(--font); }
+.dv-comment { display: flex; align-items: flex-start; gap: 8px; background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; font-size: 12px; line-height: 1.6; color: var(--text-1); }
+.dv-comment-text { flex: 1; min-width: 0; }
+.dv-comment-del { flex-shrink: 0; color: var(--text-3); font-size: 14px; line-height: 1.4; padding: 0 2px; border-radius: 4px; transition: color 150ms var(--ease), background 150ms var(--ease); }
+.dv-comment-del:hover { color: var(--danger); background: var(--bg-hover); }
+.dv-comment-editor { display: flex; gap: 8px; }
+.dv-comment-editor input { flex: 1; min-width: 0; border-radius: 8px; background: var(--bg-panel); padding: 8px 10px; outline: none; font-size: 12px; font-family: var(--font); color: var(--text); }
+.dv-comment-editor input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
+/* ---- 提交卡片 ---- */
+.rp-commit { background: var(--bg-soft); border-radius: var(--r-md); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.rp-commit-title { font-size: 13px; font-weight: 700; }
+.rp-commit-row { display: flex; gap: 8px; }
+.rp-commit-row input { flex: 1; min-width: 0; border-radius: var(--r-sm); background: var(--bg-panel); padding: 8px 12px; outline: none; font-size: 13px; color: var(--text); }
+.rp-commit-row input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
+.rp-commit-note { font-size: 12px; line-height: 1.6; color: var(--text-2); }
 `;
 
 function loadTasks(): Task[] {
@@ -1252,7 +1335,8 @@ export default function App() {
   const [gaze, setGaze] = useState(0);
   /** Inspector（S6）：默认不常驻；null = 关闭，打开时对话画布不重排（浮层）。 */
   const [inspector, setInspector] = useState<InspectorView | null>(null);
-  const [inspectorWide, setInspectorWide] = useState(false);
+  /** P0-11 ②：Inspector 宽度三档 360 / 480 / 720（并排 diff 用超宽档）。 */
+  const [inspectorWidth, setInspectorWidth] = useState(360);
   /** EVA 切换仪式进行中的模式（1200ms 内防重入）；模式切换落行（C 档小字）。 */
   const [ritual, setRitual] = useState<{
     dir: Mode;
@@ -1678,7 +1762,7 @@ export default function App() {
                   ...t,
                   messages: [
                     ...t.messages,
-                    { id: uid(), role: "assistant", text: MODE_INTRO[mode] },
+                    { id: uid(), role: "assistant", text: modeIntro(mode, settingsRef.current?.display_name?.trim() || "路明非") },
                   ],
                 }
               : t,
@@ -2948,6 +3032,7 @@ export default function App() {
       <style>{WAVE2_CSS}</style>
       <style>{S7_CSS}</style>
       <style>{AUDIT_CSS}</style>
+      <style>{P011_CSS}</style>
       {boot && settings.boot_animation && <Boot onDone={handleBootDone} />}
       {/* W4 仪式界面层：面纱（漫开再收住），不挡输入；
           稳态光晕常驻渲染，EVA 时 800ms 淡入、切回时淡出。 */}
@@ -3007,7 +3092,7 @@ export default function App() {
         className="main"
         style={
           reviewDocked
-            ? { marginRight: inspectorWide ? 480 : 360 }
+            ? { marginRight: inspectorWidth }
             : undefined
         }
       >
@@ -3444,8 +3529,10 @@ export default function App() {
           onViewChange={setInspector}
           onClose={() => setInspector(null)}
           closing={inspectorClosing}
-          wide={inspectorWide}
-          onToggleWide={() => setInspectorWide((w) => !w)}
+          width={inspectorWidth}
+          onToggleWidth={() =>
+            setInspectorWidth((w) => (w === 360 ? 480 : w === 480 ? 720 : 360))
+          }
           running={running}
           runningTaskTitle={activeTask?.title ?? null}
           usageTotal={{
@@ -3470,6 +3557,8 @@ export default function App() {
           onRunShell={handleRunShell}
           settings={settings}
           mode={settings.mode}
+          /* P0-11 ②：逐行评论发给当前任务的智能体（handleSend 本身会拦：运行中 / 没配 Key 时返回 false）。 */
+          onSendToAgent={(text) => handleSend(text, [])}
           deliverables={
             activeTask ? deliverablesByTask[activeTask.id] ?? [] : []
           }
