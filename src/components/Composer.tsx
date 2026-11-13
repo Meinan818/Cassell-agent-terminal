@@ -49,6 +49,9 @@ export default function Composer({
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [popover, setPopover] = useState<Popover>(null);
+  /** 菜单正在退场：先播 150ms 回缩动画再卸载（全站铁律：不许“蹦”一下消失）。 */
+  const [popClosing, setPopClosing] = useState(false);
+  const popCloseTimer = useRef<number | null>(null);
   const [focused, setFocused] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [attachDir, setAttachDir] = useState(settings.workdir);
@@ -82,13 +85,21 @@ export default function Composer({
     if (!popover) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setPopover(null);
-        setModelLevel(null);
+        closePopover();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [popover]);
+
+  // 卸载时清掉未播完的退出计时器。
+  useEffect(
+    () => () => {
+      if (popCloseTimer.current !== null)
+        window.clearTimeout(popCloseTimer.current);
+    },
+    [],
+  );
 
   // Load the workdir listing when the attach popover opens.
   useEffect(() => {
@@ -135,15 +146,24 @@ export default function Composer({
       setAttachDir(settings.workdir);
       setAttachFilter("");
     }
-    setPopover((cur) => {
-      const next = cur === which ? null : which;
-      if (next !== "model") setModelLevel(null);
-      return next;
-    });
+    // 点同一个芯片 = 关闭（走退出动画）；点另一个芯片 = 直接切换内容，菜单不关。
+    if (popover === which) {
+      closePopover();
+      return;
+    }
+    if (which !== "model") setModelLevel(null);
+    setPopover(which);
   };
+  /** 菜单关闭：先播 150ms 回缩动画再卸载；退场中再点直接忽略（150ms 的窗口）。 */
   const closePopover = () => {
-    setPopover(null);
-    setModelLevel(null);
+    if (popClosing) return;
+    setPopClosing(true);
+    popCloseTimer.current = window.setTimeout(() => {
+      setPopover(null);
+      setModelLevel(null);
+      setPopClosing(false);
+      popCloseTimer.current = null;
+    }, 150);
   };
 
   const pickProvider = (id: string) => {
@@ -395,7 +415,10 @@ export default function Composer({
             onClick={onCancel}
             aria-label="停止"
           >
-            ■
+            {/* 停止方块：精致 SVG 圆角方块，不再是 Unicode ■ 字符 */}
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true">
+              <rect x="6" y="6" width="12" height="12" rx="2.5" />
+            </svg>
           </button>
         ) : (
           <button
@@ -405,7 +428,11 @@ export default function Composer({
             disabled={!canSend}
             aria-label="发送"
           >
-            ↑
+            {/* 上箭头：精致 SVG 描边箭头，不再是 Unicode ↑ 字符 */}
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 19V5" />
+              <path d="M5 12l7-7 7 7" />
+            </svg>
           </button>
         )}
       </div>
@@ -417,9 +444,10 @@ export default function Composer({
             onClick={closePopover}
             aria-hidden="true"
           />
-          <div className="popover" role="dialog">
+          <div className={popClosing ? "popover closing" : "popover"} role="dialog">
             {popover === "model" && (
-              <>
+              // 分层切换也交叉淡化（key 换层 → pop-level-in 重播），不许硬切。
+              <div key={modelLevel ?? "root"} className="w2-pop-level">
                 {levelProvider ? (
                   <>
                     <button
@@ -502,7 +530,7 @@ export default function Composer({
                     </div>
                   </>
                 )}
-              </>
+              </div>
             )}
 
             {popover === "mode" && (

@@ -30,6 +30,8 @@ interface RightPanelProps {
   view: InspectorView;
   onViewChange: (view: InspectorView) => void;
   onClose: () => void;
+  /** 正在退场：先播 180ms 滑出动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
   /** L3 决策展开：扩宽到 480px。 */
   wide: boolean;
   onToggleWide: () => void;
@@ -208,6 +210,7 @@ export default function RightPanel(props: RightPanelProps) {
     view,
     onViewChange,
     onClose,
+    closing = false,
     wide,
     onToggleWide,
     running,
@@ -449,7 +452,7 @@ export default function RightPanel(props: RightPanelProps) {
 
   return (
     <aside
-      className={`w2-inspector ${wide ? "w2-wide" : ""}`}
+      className={`w2-inspector ${wide ? "w2-wide" : ""}${closing ? " closing" : ""}`}
       role="dialog"
       aria-label="Inspector"
     >

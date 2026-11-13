@@ -48,10 +48,13 @@ export const SANDBOX_DESCS: Record<Sandbox, string> = {
 function DrawerShell({
   title,
   onClose,
+  closing = false,
   children,
 }: {
   title: string;
   onClose: () => void;
+  /** 正在退场：先播 180ms 滑出动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
   children: React.ReactNode;
 }) {
   useEffect(() => {
@@ -63,9 +66,13 @@ function DrawerShell({
   }, [onClose]);
 
   return (
-    <div className="drawer-overlay" onClick={onClose} role="presentation">
+    <div
+      className={closing ? "drawer-overlay closing" : "drawer-overlay"}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
-        className="drawer"
+        className={closing ? "drawer closing" : "drawer"}
         role="dialog"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
@@ -110,6 +117,7 @@ export function SettingsModal({
   settings,
   onPatch,
   onClose,
+  closing = false,
   codexInfo,
   onTestConnection,
   testing,
@@ -124,6 +132,8 @@ export function SettingsModal({
   settings: Settings;
   onPatch: (patch: Partial<Settings>) => void;
   onClose: () => void;
+  /** 正在退场：先播 180ms 回缩动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
   codexInfo: CodexInfo | null;
   /** 测指定服务商（只看不切换时也测得到）。 */
   onTestConnection: (providerId: string) => void;
@@ -260,9 +270,13 @@ export function SettingsModal({
   const modelInList = providerModels.includes(settings.model);
 
   return (
-    <div className="s7-overlay" onClick={onClose} role="presentation">
+    <div
+      className={closing ? "s7-overlay closing" : "s7-overlay"}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
-        className="s7-modal"
+        className={closing ? "s7-modal closing" : "s7-modal"}
         role="dialog"
         aria-label="设置"
         aria-modal="true"
@@ -452,6 +466,10 @@ export function SettingsModal({
                       </button>
                     )}
                   </div>
+                </div>
+                {/* 连接单独成卡：Key → 地址 → 测连通 → 拉列表，别和服务商列表挤在一张卡里。 */}
+                <div className="s7-group">
+                  <div className="drawer-section">连接</div>
                   <label className="field-label" htmlFor="settings-key">
                     {provider?.name ?? ""} 的 API Key
                   </label>
@@ -700,7 +718,9 @@ export function SettingsModal({
                       ? "自动审批，可撤销；危险操作始终需要确认。"
                       : "每次操作都要先问你一遍。"}
                   </p>
-                  <div className="field-label">沙箱模式</div>
+                </div>
+                <div className="s7-group">
+                  <div className="drawer-section">沙箱模式</div>
                   <div className="effort-row" role="group" aria-label="沙箱模式">
                     {(Object.keys(SANDBOX_LABELS) as Sandbox[]).map((sb) => (
                       <button
@@ -806,9 +826,12 @@ export function SettingsModal({
 
 export function CommandPalette({
   onClose,
+  closing = false,
   getItems,
 }: {
   onClose: () => void;
+  /** 正在退场：先播 180ms 上收动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
   getItems: (query: string) => CommandItem[];
 }) {
   const [query, setQuery] = useState("");
@@ -833,9 +856,13 @@ export function CommandPalette({
 
   let lastGroup = "";
   return (
-    <div className="s7-palette-overlay" onClick={onClose} role="presentation">
+    <div
+      className={closing ? "s7-palette-overlay closing" : "s7-palette-overlay"}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
-        className="s7-palette"
+        className={closing ? "s7-palette closing" : "s7-palette"}
         role="dialog"
         aria-label="命令面板"
         aria-modal="true"
@@ -921,11 +948,14 @@ export function ArchiveDrawer({
   onRestore,
   onDelete,
   onClose,
+  closing = false,
 }: {
   tasks: Task[];
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
+  /** 正在退场：先播 180ms 滑出动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -936,7 +966,7 @@ export function ArchiveDrawer({
       )
     : archived;
   return (
-    <DrawerShell title="档案库" onClose={onClose}>
+    <DrawerShell title="档案库" onClose={onClose} closing={closing}>
       {archived.length > 0 && (
         <input
           className="field-input s7-archive-search"
@@ -1009,12 +1039,19 @@ export function ArchiveDrawer({
   );
 }
 
-export function HelpDrawer({ onClose }: { onClose: () => void }) {
+export function HelpDrawer({
+  onClose,
+  closing = false,
+}: {
+  onClose: () => void;
+  /** 正在退场：先播 180ms 滑出动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
+}) {
   const openLink = (u: string) => {
     openUrl(u).catch(() => undefined);
   };
   return (
-    <DrawerShell title="帮助" onClose={onClose}>
+    <DrawerShell title="帮助" onClose={onClose} closing={closing}>
       <div className="drawer-section">卡塞尔专员终端 {APP_VERSION}</div>
       <p className="drawer-note">
         卡塞尔学院配发给专员的日常执行终端。AI 是诺玛；打开 EVA 开关后，诺玛切换为

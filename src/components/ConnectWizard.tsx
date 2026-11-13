@@ -37,6 +37,8 @@ interface ConnectWizardProps {
   /** 从指定服务商拉模型列表（不切换当前服务商）。 */
   onFetchModels: (providerId: string) => Promise<{ ok: boolean; detail: string }>;
   onClose: () => void;
+  /** 正在退场：先播 180ms 回缩动画再卸载（App 的 useOverlayExitValue）。 */
+  closing?: boolean;
   /** “稍后在设置里配”：关向导、打开设置 → 模型页。 */
   onOpenSettings: () => void;
 }
@@ -49,6 +51,7 @@ export default function ConnectWizard({
   onTestConnection,
   onFetchModels,
   onClose,
+  closing = false,
   onOpenSettings,
 }: ConnectWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -132,9 +135,13 @@ export default function ConnectWizard({
   };
 
   return (
-    <div className="s7-overlay" onClick={onClose} role="presentation">
+    <div
+      className={closing ? "s7-overlay closing" : "s7-overlay"}
+      onClick={onClose}
+      role="presentation"
+    >
       <div
-        className="s7-modal s7-wizard"
+        className={closing ? "s7-modal s7-wizard closing" : "s7-modal s7-wizard"}
         role="dialog"
         aria-label="连接模型服务商"
         aria-modal="true"
@@ -155,7 +162,8 @@ export default function ConnectWizard({
           ))}
         </div>
         <div className="s7-modal-body">
-          <div className="s7-content s7-wizard-content">
+          {/* 步骤切换也交叉淡化（key 换步 → s7-content-in 重播），不许硬切。 */}
+          <div className="s7-content s7-wizard-content" key={step}>
             {step === 1 && (
               <>
                 <p className="drawer-note">

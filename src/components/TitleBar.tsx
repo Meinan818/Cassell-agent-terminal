@@ -105,11 +105,19 @@ export default function TitleBar({
         .w6-tb-title { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; }
         .w6-tb-sub { font-size: 12px; color: var(--text-3); white-space: nowrap; }
         .w6-tb-mid { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; }
-        .w6-tb-seg { display: flex; gap: 2px; background: var(--bg-soft); border-radius: 999px; padding: 2px; }
-        .w6-tb-seg button { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), box-shadow 150ms var(--ease); white-space: nowrap; }
+        .w6-tb-seg { display: flex; gap: 2px; background: var(--bg-soft); border-radius: 999px; padding: 2px; position: relative; }
+        .w6-tb-seg button { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 999px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), box-shadow 150ms var(--ease); white-space: nowrap; flex: 1; justify-content: center; position: relative; z-index: 1; }
         .w6-tb-seg button:hover { color: var(--text); }
         .w6-tb-seg button.w6-on { background: var(--bg-panel); color: var(--text); box-shadow: var(--shadow-sm); }
         .w6-tb-seg button.w6-on-eva { background: var(--accent-soft); color: var(--accent); }
+        /* 模式切换滑动药丸：选中底衬 260ms 弹簧滑过去（:has() 定位当前选中项；
+         * 老引擎不支持 :has() 时 @supports 整体不生效，退回按钮自身底色，无回归）。 */
+        @supports selector(:has(*)) {
+          .w6-tb-seg::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 2); border-radius: 999px; background: var(--bg-panel); box-shadow: var(--shadow-sm); transform: translateX(calc(var(--i, 0) * 100%)); transition: transform 260ms var(--spring), background 200ms var(--ease); z-index: 0; pointer-events: none; }
+          .w6-tb-seg:has(button:nth-child(2).w6-on) { --i: 1; }
+          .w6-tb-seg:has(button:nth-child(2).w6-on-eva)::before { background: var(--accent-soft); }
+          .w6-tb-seg button.w6-on { background: transparent; box-shadow: none; }
+        }
         .w6-tb-seg button .w6-seg-sub { font-size: 11px; font-weight: 400; color: var(--text-3); }
         .w6-tb-seg button.w6-on-eva .w6-seg-sub { color: var(--accent); opacity: 0.8; }
         .w6-tb-wins { display: flex; align-items: stretch; align-self: stretch; }

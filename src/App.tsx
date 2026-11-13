@@ -62,11 +62,18 @@ const WAVE2_CSS = `
 .w2-l1 { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 12px; color: var(--text-3); padding: 8px 24px; background: none; border: none; transition: color 150ms var(--ease); }
 .w2-l1:hover { color: var(--text-2); }
 .w2-l1 .w2-dot { margin-left: 0; }
+/* 运行中状态点：柔和呼吸（1.6s 一轮），静止时不动。 */
+.w2-l1 .w2-dot.busy { animation: live-dot-pulse 1.6s ease-in-out infinite; }
 /* ---- 侧栏名册 ---- */
 .w2-roster { display: flex; flex-direction: column; gap: 4px; }
-.w2-roster-row { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px 8px 12px; border-radius: 8px; transition: background 150ms var(--ease); }
-.w2-roster-row:hover { background: var(--bg-hover); }
+.w2-roster-row { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px 8px 12px; border-radius: 8px; transition: background 150ms var(--ease), transform 150ms var(--ease); }
+.w2-roster-row:hover { background: var(--bg-hover); transform: translateX(2px); }
 .w2-roster-row.w2-on { background: var(--accent-soft); }
+/* 选中行的 accent 指示条：从中间纵向长出来（切入时播一次）。 */
+.w2-roster-row.w2-on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 999px; background: var(--accent); animation: live-bar-y 200ms var(--spring) backwards; }
+/* 名册行入场：两行按序轻 rise（只跑一次）。 */
+.w2-roster > .w2-roster-row:nth-child(1) { animation: live-rise 200ms var(--spring) backwards; }
+.w2-roster > .w2-roster-row:nth-child(2) { animation: live-rise 200ms var(--spring) 50ms backwards; }
 .w2-roster-name { font-size: 13px; font-weight: 600; line-height: 1.4; }
 .w2-roster-sub { font-size: 11px; color: var(--text-3); line-height: 1.4; }
 .w2-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-left: auto; }
@@ -80,8 +87,8 @@ const WAVE2_CSS = `
 .w2-pill.done { background: var(--ok-soft); color: var(--ok); }
 .w2-pill.bad { background: var(--danger-soft); color: var(--danger); }
 /* ---- 侧栏轻量行按钮（新建 / 搜索入口） ---- */
-.w2-side-action { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
-.w2-side-action:hover { background: var(--bg-hover); color: var(--text); }
+.w2-side-action { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--ease); }
+.w2-side-action:hover { background: var(--bg-hover); color: var(--text); transform: translateX(2px); }
 .w2-kbd { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); }
 .w2-search-input { width: 100%; border-radius: 8px; background: var(--bg-panel); color: var(--text); padding: 8px 12px; outline: none; font-size: 13px; animation: w2-fade 150ms var(--ease) both; }
 .w2-search-input:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -91,7 +98,11 @@ const WAVE2_CSS = `
  * S 印章）/ 身份行（名字 + 编号 + 在线并在一行）/ 图标行。S 印章回归定版：
  * 大号优雅衬线 S（Georgia 500）+ 1px 浅色发丝圆环，无实心圆底、无“血统评级”文字；
  * EVA 态 S 与环同步变 accent 色。 */
-.w2-rank { background: var(--bg-panel); border-radius: 16px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-sm); }
+.w2-rank { background: var(--bg-panel); border-radius: 16px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--shadow-sm); transition: transform 200ms var(--ease), box-shadow 200ms var(--ease); }
+/* 身份卡悬停：轻浮 1px + 阴影加深（卡面不动内容，只动卡）。 */
+.w2-rank:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
+/* 身份卡里的在线圆点：柔和呼吸光晕（2.4s 一轮），工作中变 busy 色时不动。 */
+.w2-rank .w2-dot.ok { animation: live-dot-pulse 2.4s ease-in-out infinite; }
 .w2-rank-top { display: flex; align-items: center; gap: 8px; }
 .w2-rank-school { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--text-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w2-crest { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--text); flex-shrink: 0; }
@@ -101,8 +112,8 @@ const WAVE2_CSS = `
 .w2-seal { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-size: 17px; font-weight: 500; color: var(--text); background: none; border: 1px solid var(--border-strong); margin-left: auto; flex-shrink: 0; }
 .w2-rank-id { font-family: var(--mono); font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .w2-icon-nav { display: flex; gap: 4px; }
-.w2-icon-btn { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
-.w2-icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.w2-icon-btn { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--ease); }
+.w2-icon-btn:hover { background: var(--bg-hover); color: var(--text); transform: scale(1.06); }
 .w2-icon-btn.w2-on { background: var(--accent-soft); color: var(--accent); }
 .w2-invite { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 .w2-invite button { font-size: 11px; color: var(--accent); padding: 2px 4px; border-radius: 4px; }
@@ -135,25 +146,63 @@ const WAVE2_CSS = `
 .w2-inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw; z-index: 60; display: flex; flex-direction: column; background: var(--bg-panel); box-shadow: var(--shadow); animation: w2-insp-in 240ms var(--ease-exp) both; }
 .w2-inspector.w2-wide { width: 480px; }
 @keyframes w2-insp-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+/* 退出：Inspector 180ms 向右滑出 + 淡出（App 的 useOverlayExitValue 先播动画再卸载）。 */
+.w2-inspector.closing { animation: w2-insp-out 180ms var(--ease) both; }
+@keyframes w2-insp-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(24px); } }
 .w2-insp-head { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 12px 8px; }
 .w2-insp-title-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-.w2-seg { display: flex; flex: 1; gap: 2px; background: var(--bg-soft); border-radius: 999px; padding: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.w2-seg { display: flex; flex: 1; gap: 2px; background: var(--bg-soft); border-radius: 999px; padding: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; position: relative; }
 .w2-seg::-webkit-scrollbar { display: none; }
-.w2-seg button { flex: 1; white-space: nowrap; font-size: 12px; padding: 6px 8px; border-radius: 999px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), box-shadow 150ms var(--ease); }
+.w2-seg button { flex: 1; white-space: nowrap; font-size: 12px; padding: 6px 8px; border-radius: 999px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), box-shadow 150ms var(--ease); position: relative; z-index: 1; }
 .w2-seg button.w2-on { background: var(--bg-panel); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+/* 分段控件滑动药丸：选中底衬不是跳变，而是 260ms 弹簧滑过去（:has() 定位当前选中项；
+ * 老引擎不支持 :has() 时 @supports 整体不生效，退回按钮自身底色，无回归）。 */
+@supports selector(:has(*)) {
+  .w2-seg::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 6); border-radius: 999px; background: var(--bg-panel); box-shadow: var(--shadow-sm); transform: translateX(calc(var(--i, 0) * 100%)); transition: transform 260ms var(--spring); z-index: 0; pointer-events: none; }
+  .w2-seg button.w2-on { background: transparent; box-shadow: none; }
+  .w2-seg:has(> button:nth-child(1).w2-on) { --i: 0; }
+  .w2-seg:has(> button:nth-child(2).w2-on) { --i: 1; }
+  .w2-seg:has(> button:nth-child(3).w2-on) { --i: 2; }
+  .w2-seg:has(> button:nth-child(4).w2-on) { --i: 3; }
+  .w2-seg:has(> button:nth-child(5).w2-on) { --i: 4; }
+  .w2-seg:has(> button:nth-child(6).w2-on) { --i: 5; }
+}
 .w2-insp-body { flex: 1; overflow-y: auto; padding: 16px; min-height: 0; }
-.w2-view { animation: w2-fade 150ms var(--ease) both; }
+/* Inspector 页签切换：200ms 淡入 + 3px 上浮（旧 150ms 纯透明度淡入像“蹦”一下）。 */
+.w2-view { animation: w2-view-in 200ms var(--ease) both; }
+@keyframes w2-view-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+/* Inspector 内容错峰：页签切换时各区块依次轻 rise（容器 key={view} 已重挂载，错峰随切换重播）。 */
+.w2-view > * { animation: live-rise 200ms var(--spring) backwards; }
+.w2-view > *:nth-child(2) { animation-delay: 40ms; }
+.w2-view > *:nth-child(3) { animation-delay: 80ms; }
+.w2-view > *:nth-child(4) { animation-delay: 120ms; }
+.w2-view > *:nth-child(n+5) { animation-delay: 160ms; }
 /* ---- Composer 瘦身 ---- */
 .app .popover { width: 280px; padding: 12px; }
 .w2-model-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 0; line-height: 1.4; padding: 6px 12px; min-width: 0; }
 .w2-model-chip .w2-m1 { font-size: 13px; font-weight: 600; color: var(--text); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w2-model-chip .w2-m2 { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-.w2-mode-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 999px; font-size: 13px; font-weight: 600; transition: background 150ms var(--ease); }
-.w2-mode-chip:hover { background: var(--bg-hover); }
+.w2-mode-chip { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 4px; border-radius: 999px; font-size: 13px; font-weight: 600; transition: background 150ms var(--ease), transform 150ms var(--ease); }
+.w2-mode-chip:hover { background: var(--bg-hover); transform: translateY(-1px); }
 .w2-shield { display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
 .w2-shield .w2-dot { margin-left: 0; }
-.app .effort-row { display: flex; gap: 0; background: var(--bg-soft); border-radius: 8px; padding: 2px; flex-wrap: nowrap; }
+.app .effort-row { display: flex; gap: 0; background: var(--bg-soft); border-radius: 8px; padding: 2px; flex-wrap: nowrap; position: relative; }
 .app .effort { flex: 1; border: none; padding: 6px 2px; font-size: 12px; text-align: center; }
+/* 分段控件滑动药丸（与 .w2-seg 同款机制）：选中底衬 260ms 弹簧滑过去；
+ * 老引擎不支持 :has() 时 @supports 整体不生效，退回按钮自身底色，无回归。 */
+@supports selector(:has(*)) {
+  .app .effort-row::before { content: ""; position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / var(--n, 2)); border-radius: 6px; background: var(--accent); transform: translateX(calc(var(--i, 0) * 100%)); transition: transform 260ms var(--spring); z-index: 0; pointer-events: none; }
+  .app .effort { position: relative; z-index: 1; background: transparent; transition: color 150ms var(--ease); }
+  .app .effort.selected { background: transparent; color: var(--on-accent); }
+  .app .effort-row:has(> button:nth-child(2):last-child) { --n: 2; }
+  .app .effort-row:has(> button:nth-child(3):last-child) { --n: 3; }
+  .app .effort-row:has(> button:nth-child(5):last-child) { --n: 5; }
+  .app .effort-row:has(> button:nth-child(1).selected) { --i: 0; }
+  .app .effort-row:has(> button:nth-child(2).selected) { --i: 1; }
+  .app .effort-row:has(> button:nth-child(3).selected) { --i: 2; }
+  .app .effort-row:has(> button:nth-child(4).selected) { --i: 3; }
+  .app .effort-row:has(> button:nth-child(5).selected) { --i: 4; }
+}
 .w2-pop-back { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-3); padding: 4px 8px; margin-bottom: 4px; width: 100%; text-align: left; border-radius: 8px; }
 .w2-pop-back:hover { background: var(--bg-hover); color: var(--text); }
 /* ---- W4 · EVA 切换仪式（1350ms，分拍变身/呼气收尾） ----
@@ -231,22 +280,42 @@ const WAVE2_CSS = `
  * --ease-exp（淡入 + 4px 上移），列表项 hover/选中 100ms --ease。
  */
 const S7_CSS = `
-.s7-overlay { position: fixed; inset: 0; z-index: 80; background: var(--scrim); display: flex; align-items: center; justify-content: center; animation: s7-fade 150ms var(--ease) both; }
+.s7-overlay { position: fixed; inset: 0; z-index: 80; background: var(--scrim); display: flex; align-items: center; justify-content: center; animation: s7-fade 200ms var(--ease) both; }
 @keyframes s7-fade { from { opacity: 0; } to { opacity: 1; } }
-.s7-modal { width: 640px; max-width: calc(100vw - 48px); max-height: calc(100vh - 96px); background: var(--bg-panel); color: var(--text); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-modal-in 240ms var(--ease-exp) both; }
-@keyframes s7-modal-in { from { opacity: 0; transform: scale(0.98) translateY(4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-.s7-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px 0; }
+/* 退出：遮罩 180ms 淡出（App 的 useOverlayExitValue 先播动画再卸载）。 */
+.s7-overlay.closing { animation: s7-fade-out 180ms var(--ease) both; }
+@keyframes s7-fade-out { from { opacity: 1; } to { opacity: 0; } }
+.s7-modal { width: 680px; max-width: calc(100vw - 48px); max-height: calc(100vh - 96px); background: var(--bg-panel); color: var(--text); border-radius: 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-modal-in 260ms var(--ease-exp) both; }
+@keyframes s7-modal-in { from { opacity: 0; transform: scale(0.96) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+/* 退出：modal 180ms 回缩 + 下沉 + 淡出，不许“蹦”一下消失。 */
+.s7-modal.closing { animation: s7-modal-out 180ms var(--ease) both; }
+@keyframes s7-modal-out { from { opacity: 1; transform: scale(1) translateY(0); } to { opacity: 0; transform: scale(0.97) translateY(6px); } }
+.s7-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 24px 28px 0; }
 .s7-modal-title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.4; }
-.s7-modal-body { display: flex; flex: 1; min-height: 0; padding-top: 12px; }
-.s7-nav { width: 160px; flex-shrink: 0; padding: 4px 12px 24px 16px; display: flex; flex-direction: column; gap: 4px; }
-.s7-nav button { position: relative; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease); }
-.s7-nav button:hover { background: var(--bg-hover); color: var(--text); }
+/* 关闭按钮：28px 圆角软底（旧的纯 × 文字看着廉价），悬停微亮。 */
+.s7-modal-head .btn-ghost { width: 28px; height: 28px; border-radius: 50%; background: var(--bg-soft); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; font-size: 15px; padding: 0; transition: background 150ms var(--ease), color 150ms var(--ease); }
+.s7-modal-head .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+.s7-modal-body { display: flex; flex: 1; min-height: 0; padding-top: 16px; }
+.s7-nav { width: 160px; flex-shrink: 0; padding: 8px 12px 28px 20px; display: flex; flex-direction: column; gap: 4px; }
+.s7-nav button { position: relative; text-align: left; padding: 10px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--ease); }
+.s7-nav button:hover { background: var(--bg-hover); color: var(--text); transform: translateX(2px); }
 .s7-nav button.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
-.s7-content { flex: 1; min-width: 0; overflow-y: auto; padding: 4px 24px 24px; animation: s7-fade 150ms var(--ease) both; }
-.s7-group { display: flex; flex-direction: column; gap: 12px; padding: 16px 0; }
-.s7-group:first-child { padding-top: 4px; }
-.s7-group:last-child { padding-bottom: 0; }
-.s7-group .drawer-section { margin-top: 0; }
+/* 当前页签的 accent 指示条：从中间纵向长出来（切签时播一次）。 */
+.s7-nav button.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 999px; background: var(--accent); animation: live-bar-y 200ms var(--spring) backwards; }
+/* 页签切换：220ms 淡入 + 4px 上浮（旧 150ms 纯透明度淡入像“蹦”一下）。 */
+.s7-content { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 28px 28px 24px; animation: s7-content-in 220ms var(--ease) both; }
+@keyframes s7-content-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+/* ---- 设置分组改卡片（去“表单堆砌”廉价感）：每组一块软底圆角卡，
+ * 组与组之间留 16px 呼吸；不用 1px 框线（去线条铁律），只靠色阶分层。
+ * 卡内控件再沉一层：输入框 / 分段控件容器 / 空态 / kbd 一律用 panel 底，
+ * 卡面（soft）与控件（panel）拉开两个色阶，层级一眼分明。 */
+.s7-group { display: flex; flex-direction: column; gap: 12px; padding: 20px; background: var(--bg-soft); border-radius: 16px; }
+.s7-group + .s7-group { margin-top: 16px; }
+.s7-group .drawer-section { margin-top: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--text); }
+.s7-group .field-input { background: var(--bg-panel); }
+.app .s7-group .effort-row { background: var(--bg-panel); }
+.s7-group .s7-empty { background: var(--bg-panel); }
+.s7-group .s7-kbd-list kbd { background: var(--bg-panel); }
 .s7-identity { display: flex; align-items: center; gap: 8px; }
 .s7-identity-name { font-size: 14px; font-weight: 600; }
 .s7-identity-id { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
@@ -259,10 +328,14 @@ const S7_CSS = `
 .s7-kbd-list { display: flex; flex-direction: column; gap: 8px; }
 .s7-kbd-list > div { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--text-2); }
 .s7-kbd-list kbd { font-family: var(--mono); font-size: 11px; color: var(--text-2); background: var(--bg-soft); border-radius: 4px; padding: 2px 6px; min-width: 88px; text-align: center; }
-/* ---- Cmd-K 命令面板：560px 居中，150ms --ease-exp 淡入 + 4px 上移 ---- */
-.s7-palette-overlay { position: fixed; inset: 0; z-index: 90; background: var(--scrim); display: flex; justify-content: center; padding-top: 18vh; animation: s7-fade 150ms var(--ease) both; }
-.s7-palette { width: 560px; max-width: calc(100vw - 48px); height: fit-content; max-height: 60vh; background: var(--bg-panel); color: var(--text); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-palette-in 150ms var(--ease-exp) both; }
-@keyframes s7-palette-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+/* ---- Cmd-K 命令面板：560px 居中，200ms --ease-exp 淡入 + 8px 上移 ---- */
+.s7-palette-overlay { position: fixed; inset: 0; z-index: 90; background: var(--scrim); display: flex; justify-content: center; padding-top: 18vh; animation: s7-fade 200ms var(--ease) both; }
+.s7-palette-overlay.closing { animation: s7-fade-out 180ms var(--ease) both; }
+.s7-palette { width: 560px; max-width: calc(100vw - 48px); height: fit-content; max-height: 60vh; background: var(--bg-panel); color: var(--text); border-radius: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; animation: s7-palette-in 200ms var(--ease-exp) both; }
+@keyframes s7-palette-in { from { opacity: 0; transform: translateY(-8px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+/* 退出：面板 180ms 上收 + 淡出。 */
+.s7-palette.closing { animation: s7-palette-out 180ms var(--ease) both; }
+@keyframes s7-palette-out { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.99); } }
 .s7-palette-input { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
 .s7-palette-prompt { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
 .s7-palette-input input { flex: 1; min-width: 0; border: none; outline: none; background: none; font-size: 14px; color: var(--text); }
@@ -271,11 +344,25 @@ const S7_CSS = `
 .s7-palette-group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--text-3); padding: 8px 12px 4px; }
 .s7-palette-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: var(--text-2); transition: background 100ms var(--ease), color 100ms var(--ease); }
 .s7-palette-item.sel { background: var(--accent-soft); color: var(--text); }
+/* Cmd-K 结果错峰：打开时各行依次轻 rise（React 复用节点，输入过滤时已在列表的行不重播）。 */
+.s7-palette-list > div:nth-child(1) .s7-palette-item { animation: live-rise 180ms var(--spring) backwards; }
+.s7-palette-list > div:nth-child(2) .s7-palette-item { animation: live-rise 180ms var(--spring) 22ms backwards; }
+.s7-palette-list > div:nth-child(3) .s7-palette-item { animation: live-rise 180ms var(--spring) 44ms backwards; }
+.s7-palette-list > div:nth-child(4) .s7-palette-item { animation: live-rise 180ms var(--spring) 66ms backwards; }
+.s7-palette-list > div:nth-child(5) .s7-palette-item { animation: live-rise 180ms var(--spring) 88ms backwards; }
+.s7-palette-list > div:nth-child(6) .s7-palette-item { animation: live-rise 180ms var(--spring) 110ms backwards; }
+.s7-palette-list > div:nth-child(7) .s7-palette-item { animation: live-rise 180ms var(--spring) 132ms backwards; }
+.s7-palette-list > div:nth-child(8) .s7-palette-item { animation: live-rise 180ms var(--spring) 154ms backwards; }
+.s7-palette-list > div:nth-child(9) .s7-palette-item { animation: live-rise 180ms var(--spring) 176ms backwards; }
+.s7-palette-list > div:nth-child(n+10) .s7-palette-item { animation: live-rise 180ms var(--spring) 198ms backwards; }
 .s7-palette-hint { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
 .s7-palette-foot { display: flex; gap: 16px; padding: 8px 16px; font-size: 11px; color: var(--text-3); }
 /* ---- 命令执行后的轻反馈（toast 已删，仪式本身就是反馈；只有没有界面可开的命令才落这行小字） ---- */
 .s7-notice { position: fixed; left: calc(50% + 116px); bottom: 96px; transform: translateX(-50%); z-index: 95; max-width: 60vw; background: var(--bg-panel); color: var(--text); border-radius: 999px; box-shadow: var(--shadow); padding: 8px 16px; font-size: 13px; line-height: 1.5; animation: s7-notice-in 240ms var(--ease-exp) both; }
 @keyframes s7-notice-in { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+/* 退出：通知 180ms 淡出下沉（3500ms 到时先播退出再卸载）。 */
+.s7-notice.closing { animation: s7-notice-out 180ms var(--ease) both; }
+@keyframes s7-notice-out { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, 4px); } }
 @media (prefers-reduced-motion: reduce) { .s7-overlay, .s7-modal, .s7-content, .s7-palette-overlay, .s7-palette, .s7-notice { animation-duration: 0.01ms !important; } }
 `;
 
@@ -639,6 +726,58 @@ function ErrorCard({ msg, onRetry, eva, fast, ritual, gaze }: {
   );
 }
 
+/* ---- 全站平滑过渡铁律（2026-11-13 用户定：不允许任何功能点一下就蹦出来） ----
+ * 所有浮层原来只有进场动画、没有退场动画：关闭时 React 立刻卸载，视觉上就是
+ * “蹦”一下消失。这个 hook 把“关闭”拆成两步：先把值置空并给组件挂 closing
+ * class 播 180ms 退出动画（淡出 + 回缩/滑出），动画播完才真正卸载。
+ * prefers-reduced-motion 时退出时长为 0，不拖沓。用法：
+ *   const [renderDrawer, drawerClosing] = useOverlayExitValue(drawer);
+ *   {renderDrawer === "settings" && <SettingsModal closing={drawerClosing} ... />}
+ * 注意：value 从一个非空值切到另一个非空值（比如抽屉之间直切）不走退出流程，
+ * 直接换——和原来一样，不更差。 */
+function useOverlayExitValue<T>(
+  value: T | null,
+  exitMs = 180,
+): [T | null, boolean] {
+  const [renderValue, setRenderValue] = useState<T | null>(value);
+  const [closing, setClosing] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (value !== null) {
+      if (timerRef.current !== null) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setRenderValue(value);
+      setClosing(false);
+      return;
+    }
+    if (renderValue === null) return;
+    const ms =
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? 0
+        : exitMs;
+    setClosing(true);
+    timerRef.current = window.setTimeout(() => {
+      setRenderValue(null);
+      setClosing(false);
+      timerRef.current = null;
+    }, ms);
+    // renderValue 只在判断“是否正在展示”时读，不跟它走 effect。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, exitMs]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  return [renderValue, closing];
+}
+
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [boot, setBoot] = useState(true);
@@ -692,6 +831,17 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   /** 审计：连接向导开关（只在没配 Key 时由空态 CTA / gate 提示打开）。 */
   const [wizardOpen, setWizardOpen] = useState(false);
+  /* ---- 浮层退出动画（useOverlayExitValue）：关闭时先播 180ms 退出动画再卸载。
+   * render* 是“仍在屏上”的值（关闭动画播完前还保留旧值），closing 是“正在退场”。 */
+  const [renderDrawer, drawerClosing] = useOverlayExitValue(drawer);
+  const [renderInspector, inspectorClosing] = useOverlayExitValue(inspector);
+  const [renderWizard, wizardClosing] = useOverlayExitValue(
+    wizardOpen ? true : null,
+  );
+  const [renderPalette, paletteClosing] = useOverlayExitValue(
+    paletteOpen ? true : null,
+  );
+  const [renderNotice, noticeClosing] = useOverlayExitValue(notice);
   /** 审计 P1-4：消息编辑与删除两步确认。 */
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -2595,11 +2745,12 @@ export default function App() {
         </div>
       </main>
 
-      {inspector && (
+      {renderInspector && (
         <RightPanel
-          view={inspector}
+          view={renderInspector}
           onViewChange={setInspector}
           onClose={() => setInspector(null)}
+          closing={inspectorClosing}
           wide={inspectorWide}
           onToggleWide={() => setInspectorWide((w) => !w)}
           running={running}
@@ -2637,11 +2788,12 @@ export default function App() {
       </div>
       )}
 
-      {drawer === "settings" && (
+      {renderDrawer === "settings" && (
         <SettingsModal
           settings={settings}
           onPatch={patchSettings}
           onClose={() => setDrawer(null)}
+          closing={drawerClosing}
           codexInfo={codexInfo}
           onTestConnection={handleTestConnection}
           testing={testing}
@@ -2657,37 +2809,45 @@ export default function App() {
           }}
         />
       )}
-      {drawer === "archive" && (
+      {renderDrawer === "archive" && (
         <ArchiveDrawer
           tasks={tasks}
           onRestore={handleRestoreTask}
           onDelete={handleDeleteArchivedTask}
           onClose={() => setDrawer(null)}
+          closing={drawerClosing}
         />
       )}
-      {drawer === "help" && <HelpDrawer onClose={() => setDrawer(null)} />}
-      {wizardOpen && (
+      {renderDrawer === "help" && (
+        <HelpDrawer onClose={() => setDrawer(null)} closing={drawerClosing} />
+      )}
+      {renderWizard && (
         <ConnectWizard
           settings={settings}
           onPatch={patchSettings}
           onTestConnection={handleTestConnection}
           onFetchModels={handleFetchModels}
           onClose={() => setWizardOpen(false)}
+          closing={wizardClosing}
           onOpenSettings={() => {
             setWizardOpen(false);
             openSettings("model");
           }}
         />
       )}
-      {paletteOpen && (
+      {renderPalette && (
         <CommandPalette
           onClose={() => setPaletteOpen(false)}
+          closing={paletteClosing}
           getItems={paletteItems}
         />
       )}
-      {notice && (
-        <div className="s7-notice" role="status">
-          {notice}
+      {renderNotice && (
+        <div
+          className={noticeClosing ? "s7-notice closing" : "s7-notice"}
+          role="status"
+        >
+          {renderNotice}
         </div>
       )}
     </div>
