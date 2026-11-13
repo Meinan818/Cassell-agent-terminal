@@ -991,7 +991,7 @@ async fn run_agent_native_inner(
     // P0-6 目标模式的工作纪律（只在目标模式下进 system 消息，放在冻结
     // 前缀之后、动态部分；目标会话内固定不变，有利前缀缓存）。
     let goal_block = if req.goal_text.is_some() {
-        "\n【当前目标】\n这是一项目标，不是闲聊。先列出“目标清单”（## 目标清单，2–5 条可检查的标准），然后一轮接一轮做到做完为止，不要中途停下来问用户要不要继续。\n完成之前必须先验证：重新读取你改过的文件确认内容正确，或运行验证命令并看到成功输出。验证通过后汇报：改了什么、验证结果是什么，再停下来。\n每轮只做有进展的事；不要反复读同一个文件、不要重复执行已经失败的命令；连续没进展就停下来，如实说卡在哪、还需要什么。"
+        "\n【当前目标】\n这是一项目标，不是闲聊。先列出“目标清单”（## 目标清单，2–5 条可检查的标准，每条用“- [ ] ”开头），然后一轮接一轮做到做完为止，不要中途停下来问用户要不要继续。\n完成之前必须先验证：重新读取你改过的文件确认内容正确，或运行验证命令并看到成功输出。验证通过后汇报：改了什么、验证结果是什么，再停下来。\n每轮只做有进展的事；不要反复读同一个文件、不要重复执行已经失败的命令；连续没进展就停下来，如实说卡在哪、还需要什么。"
     } else {
         ""
     };
@@ -1053,6 +1053,14 @@ async fn run_agent_native_inner(
                     fresh.messages = messages.clone();
                     session = fresh;
                     goal_mode = true;
+                    // P0-7：另起新目标——清掉旧目标的检查点，拍一张目标
+                    // 开始前的基线快照（turn 0）。拍失败不拦任务。
+                    crate::goal::clear_checkpoints(&app, &gid);
+                    if let Err(e) =
+                        crate::goal::snapshot_workdir(&app, &gid, 0, &workdir)
+                    {
+                        eprintln!("[goal] 基线快照失败：{e}");
+                    }
                 } else {
                     // 续跑已有目标：新消息追加进会话；resume 时只追加一句运行时提示。
                     goal_mode = true;
@@ -1078,6 +1086,13 @@ async fn run_agent_native_inner(
                     fresh.messages = messages.clone();
                     session = fresh;
                     goal_mode = true;
+                    // P0-7：新目标——清掉可能残留的旧检查点，拍基线快照（turn 0）。
+                    crate::goal::clear_checkpoints(&app, &gid);
+                    if let Err(e) =
+                        crate::goal::snapshot_workdir(&app, &gid, 0, &workdir)
+                    {
+                        eprintln!("[goal] 基线快照失败：{e}");
+                    }
                 } else {
                     // goal_id 指了一个不存在的会话：当普通对话跑。
                     let mut eph = GoalSession::new(
@@ -1163,7 +1178,7 @@ async fn run_agent_native_inner(
             } else {
                 outcome.text.clone()
             };
-            let _ = crate::goal::write_checkpoint(&app, &session, &summary);
+            let _ = crate::goal::write_checkpoint(&app, &mut session, &summary);
             let _ = app.emit("agent-goal-progress", session.summary());
         }
         if outcome.cancelled {

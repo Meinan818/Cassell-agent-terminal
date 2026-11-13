@@ -246,6 +246,8 @@ pub fn is_repeating(session: &GoalSession) -> bool {
 
 /// 从一轮的正文里解析“目标清单”块（模型按目标提示词在首轮列出）。
 /// 找不到就返回空——没有清单就不显示，绝不编一个假的。
+/// 接受的写法：- [ ] / - [x]（首选）、- 文本、* 文本、1. 文本——
+/// 模型常写数字列表（实测任务 1 就是 1. 2. 3.），只认复选框会漏掉。
 pub fn parse_checklist(text: &str) -> Vec<CheckItem> {
     let mut items = Vec::new();
     let mut in_block = false;
@@ -261,11 +263,38 @@ pub fn parse_checklist(text: &str) -> Vec<CheckItem> {
         if !in_block {
             continue;
         }
-        if let Some(rest) = t.strip_prefix("- [ ]").or_else(|| t.strip_prefix("- [x]").or_else(|| t.strip_prefix("- [X]"))) {
+        // - [ ] / - [x] 复选框。
+        if let Some(rest) = t
+            .strip_prefix("- [ ]")
+            .or_else(|| t.strip_prefix("- [x]").or_else(|| t.strip_prefix("- [X]")))
+        {
             let done = !t.starts_with("- [ ]");
             let item = rest.trim().to_string();
             if !item.is_empty() {
                 items.push(CheckItem { text: item, done });
+            }
+            continue;
+        }
+        // - 文本 / * 文本（无复选框，未完成）。
+        if let Some(rest) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+            let item = rest.trim().to_string();
+            if !item.is_empty() {
+                items.push(CheckItem { text: item, done: false });
+            }
+            continue;
+        }
+        // 1. 文本 / 1) 文本（数字列表，未完成）。
+        if let Some(dot) = t.find(|c| c == '.' || c == ')') {
+            let (num, rest) = t.split_at(dot);
+            if !num.is_empty()
+                && num.chars().all(|c| c.is_ascii_digit())
+                && rest.len() > 1
+                && rest.as_bytes()[1] == b' '
+            {
+                let item = rest[2..].trim().to_string();
+                if !item.is_empty() {
+                    items.push(CheckItem { text: item, done: false });
+                }
             }
         }
     }
@@ -298,6 +327,199 @@ pub struct FileBackup {
     pub backup: Option<String>,
     pub existed: bool,
     pub turn: u32,
+}
+
+/// 工作区快照里的单个文件（相对路径 + 大小 + 内容哈希）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotFile {
+    pub path: String,
+    pub size: u64,
+    pub hash: u64,
+}
+
+/// 一回合结束时的工作区快照清单。快照存在 `snap/<turn:03>/`（文件按相对
+/// 路径原样放），清单在 `snap/<turn:03>.json`。
+/// 快照是倒带的主力：模型用 `run_shell`（sed、echo >、tee…）改文件时，
+/// 写前备份根本看不到，只有快照能兜住。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapshotManifest {
+    pub turn: u32,
+    pub files: Vec<SnapshotFile>,
+    /// 拍满了才算完整；超上限被截断时为 false，倒带只恢复、不删文件。
+    pub complete: bool,
+}
+
+/// 快照上限：单个文件 1MB、最多 2000 个文件、总共 50MB。超了就截断
+/// （清单标 complete=false），不让大项目把磁盘撑爆。
+const SNAP_MAX_FILE_BYTES: u64 = 1_048_576;
+const SNAP_MAX_FILES: usize = 2000;
+const SNAP_MAX_TOTAL_BYTES: u64 = 50_000_000;
+/// 快照跳过的目录（依赖与构建产物，倒带不该碰它们）。
+const SNAP_SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".venv",
+    "__pycache__",
+    ".cache",
+    ".idea",
+    ".vscode",
+];
+
+/// 这条相对路径要不要进快照：跳过重型目录与隐藏目录（.cache 这类），
+/// 隐藏文件本身（如 .gitignore）照常进。
+fn snap_wanted(rel: &Path, is_dir: bool) -> bool {
+    for c in rel.components() {
+        let s = c.as_os_str().to_string_lossy();
+        if SNAP_SKIP_DIRS.contains(&s.as_ref()) {
+            return false;
+        }
+        if is_dir && s.starts_with('.') {
+            return false;
+        }
+    }
+    true
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+fn snap_dir(app: &AppHandle, goal_id: &str, turn: u32) -> PathBuf {
+    checkpoints_dir(app, goal_id)
+        .join("snap")
+        .join(format!("{turn:03}"))
+}
+
+fn snap_manifest_path(app: &AppHandle, goal_id: &str, turn: u32) -> PathBuf {
+    checkpoints_dir(app, goal_id)
+        .join("snap")
+        .join(format!("{turn:03}.json"))
+}
+
+/// 清掉一个目标的全部检查点（另起新目标时，旧目标的快照不能混进来）。
+pub fn clear_checkpoints(app: &AppHandle, goal_id: &str) {
+    let _ = std::fs::remove_dir_all(checkpoints_dir(app, goal_id));
+}
+
+/// 给工作区拍一张快照（turn 0 = 目标开始前的基线，turn N = 第 N 回合结束时）。
+/// 返回清单；拍的过程中出错不致命（调用方记日志、继续跑），倒带时没有
+/// 快照就回退到写前备份的老办法。
+pub fn snapshot_workdir(
+    app: &AppHandle,
+    goal_id: &str,
+    turn: u32,
+    workdir: &str,
+) -> Result<SnapshotManifest, String> {
+    let root = Path::new(workdir);
+    let out_dir = snap_dir(app, goal_id, turn);
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("建快照目录失败：{e}"))?;
+    let mut files: Vec<SnapshotFile> = Vec::new();
+    let mut total: u64 = 0;
+    let mut complete = true;
+    // 手写递归走目录（不用 walkdir 依赖）：先目录后文件，顺序稳定。
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for path in entries {
+            let rel = match path.strip_prefix(root) {
+                Ok(r) => r.to_path_buf(),
+                Err(_) => continue,
+            };
+            let md = match std::fs::symlink_metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if md.file_type().is_symlink() {
+                continue;
+            }
+            if md.is_dir() {
+                if snap_wanted(&rel, true) {
+                    stack.push(path);
+                }
+                continue;
+            }
+            if !md.is_file() || !snap_wanted(&rel, false) {
+                continue;
+            }
+            if md.len() > SNAP_MAX_FILE_BYTES {
+                complete = false;
+                continue;
+            }
+            if files.len() >= SNAP_MAX_FILES || total + md.len() > SNAP_MAX_TOTAL_BYTES {
+                complete = false;
+                continue;
+            }
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            let dest = out_dir.join(&rel);
+            if let Some(parent) = dest.parent() {
+                if std::fs::create_dir_all(parent).is_err() {
+                    continue;
+                }
+            }
+            if std::fs::write(&dest, &bytes).is_err() {
+                continue;
+            }
+            total += md.len();
+            files.push(SnapshotFile {
+                path: rel.to_string_lossy().replace('\\', "/"),
+                size: md.len(),
+                hash: hash_bytes(&bytes),
+            });
+        }
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    let manifest = SnapshotManifest {
+        turn,
+        files,
+        complete,
+    };
+    let text = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(snap_manifest_path(app, goal_id, turn), text)
+        .map_err(|e| format!("写快照清单失败：{e}"))?;
+    Ok(manifest)
+}
+
+fn load_snapshot_manifest(app: &AppHandle, goal_id: &str, turn: u32) -> Option<SnapshotManifest> {
+    let text = std::fs::read_to_string(snap_manifest_path(app, goal_id, turn)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// 两张快照之间变了哪些文件（新增、内容变了、删了）：相对路径列表。
+fn snapshot_diff(prev: &SnapshotManifest, cur: &SnapshotManifest) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let prev_map: HashMap<&str, u64> =
+        prev.files.iter().map(|f| (f.path.as_str(), f.hash)).collect();
+    for f in &cur.files {
+        match prev_map.get(f.path.as_str()) {
+            Some(h) if *h == f.hash => {}
+            _ => out.push(f.path.clone()),
+        }
+    }
+    let cur_set: std::collections::HashSet<&str> =
+        cur.files.iter().map(|f| f.path.as_str()).collect();
+    for f in &prev.files {
+        if !cur_set.contains(f.path.as_str()) {
+            out.push(f.path.clone());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -400,14 +622,41 @@ pub fn backup_before_write(
     save_manifest(app, &manifest)
 }
 
-/// 每回合结束写一个检查点：消息快照 + 摘要。
+/// 每回合结束写一个检查点：消息快照 + 摘要 + 工作区快照。
+/// 快照 diff 算出本回合真正改了哪些文件（含 run_shell 的改动），并进
+/// files_changed、记 last_write_round——交付门与目标卡片终于能看到
+/// shell 改动了（以前只认 write_file，sed 改的全漏掉）。
 pub fn write_checkpoint(
     app: &AppHandle,
-    session: &GoalSession,
+    session: &mut GoalSession,
     summary: &str,
 ) -> Result<CheckpointMeta, String> {
     let dir = checkpoints_dir(app, &session.id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("建检查点目录失败：{e}"))?;
+    // 先拍快照、算 diff，再写 meta，这样 meta.files_changed 就是本回合
+    // 结束时的真实改动列表。
+    if !session.workdir.trim().is_empty() {
+        match snapshot_workdir(app, &session.id, session.turns_used, &session.workdir) {
+            Ok(cur) => {
+                let prev_turn = session.turns_used.saturating_sub(1);
+                let prev = load_snapshot_manifest(app, &session.id, prev_turn)
+                    .or_else(|| load_snapshot_manifest(app, &session.id, 0));
+                if let Some(prev) = prev {
+                    let changed = snapshot_diff(&prev, &cur);
+                    if !changed.is_empty() {
+                        for p in changed {
+                            if !session.files_changed.contains(&p) {
+                                session.files_changed.push(p);
+                            }
+                        }
+                        session.last_write_round = session.rounds_used;
+                        session.refresh_unverified();
+                    }
+                }
+            }
+            Err(e) => eprintln!("[goal] 回合快照失败：{e}"),
+        }
+    }
     let meta = CheckpointMeta {
         turn: session.turns_used,
         summary: summary.chars().take(120).collect(),
@@ -463,12 +712,22 @@ fn load_checkpoint_messages(
         .ok_or_else(|| "检查点里没有消息快照".to_string())
 }
 
-/// 倒带回第 N 回合时的代码状态：对每个被改过的文件，取第 N 回合之后
-/// 第一次写之前的备份（那份备份就是第 N 回合结束时的内容）；之后新建
-/// 的文件（写之前不存在）删掉；第 N 回合之后没动过的文件保持原样。
+/// 倒带回第 N 回合时的代码状态。优先用快照：第 N 回合结束时的快照里
+/// 有什么就恢复成什么；工作区里现在有、快照里没有的文件（第 N 回合
+/// 之后新建的）删掉；第 N 回合之后没动过的文件保持原样。
+/// 没有快照的老检查点，回退到写前备份的老办法（只认 write_file）。
 /// 返回实际恢复/删除的文件列表。
 pub fn rewind_code(app: &AppHandle, goal_id: &str, workdir: &str, turn: u32) -> Result<Vec<String>, String> {
+    if let Some(snap) = load_snapshot_manifest(app, goal_id, turn) {
+        return rewind_code_from_snapshot(app, goal_id, workdir, turn, &snap);
+    }
     let manifest = load_manifest(app, goal_id);
+    if manifest.writes.is_empty() {
+        return Err(format!(
+            "第 {turn} 回合没有快照，也没有写前备份，恢复不了代码。\
+            （这次运行里模型可能只用 shell 改文件，而检查点是旧版格式。）"
+        ));
+    }
     let mut by_path: HashMap<String, Vec<&FileBackup>> = HashMap::new();
     for w in &manifest.writes {
         by_path.entry(w.path.clone()).or_default().push(w);
@@ -495,6 +754,78 @@ pub fn rewind_code(app: &AppHandle, goal_id: &str, workdir: &str, turn: u32) -> 
                 // 写之前不存在 = 第 N 回合之后新建的，删掉。
                 let _ = std::fs::remove_file(&target);
                 restored.push(format!("{path}（第 {turn} 回合后新建的，已删除）"));
+            }
+        }
+    }
+    restored.sort();
+    Ok(restored)
+}
+
+/// 用快照倒带：先把快照里的文件逐个恢复，再删掉快照里没有、工作区里
+/// 有的文件（第 N 回合之后新建的）。快照不完整时（超上限被截断）只
+/// 恢复、不删——宁可少删一个，不误删。
+fn rewind_code_from_snapshot(
+    app: &AppHandle,
+    goal_id: &str,
+    workdir: &str,
+    turn: u32,
+    snap: &SnapshotManifest,
+) -> Result<Vec<String>, String> {
+    let root = Path::new(workdir);
+    let snap_root = snap_dir(app, goal_id, turn);
+    let mut restored: Vec<String> = Vec::new();
+    for f in &snap.files {
+        let src = snap_root.join(&f.path);
+        let bytes = std::fs::read(&src).map_err(|e| format!("读快照失败 {}：{e}", f.path))?;
+        let target = root.join(&f.path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&target, bytes).map_err(|e| format!("恢复文件失败 {}：{e}", f.path))?;
+        restored.push(format!("{}（恢复到第 {turn} 回合）", f.path));
+    }
+    if snap.complete {
+        // 删第 N 回合之后新建的文件：现在工作区里有、快照里没有的。
+        // 只对快照规则内的文件动手（重型目录、大文件本来就不进快照，不碰）。
+        let in_snap: std::collections::HashSet<&str> =
+            snap.files.iter().map(|f| f.path.as_str()).collect();
+        let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let rd = match std::fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in rd.flatten() {
+                let path = entry.path();
+                let rel = match path.strip_prefix(root) {
+                    Ok(r) => r.to_path_buf(),
+                    Err(_) => continue,
+                };
+                let md = match std::fs::symlink_metadata(&path) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if md.file_type().is_symlink() {
+                    continue;
+                }
+                if md.is_dir() {
+                    if snap_wanted(&rel, true) {
+                        stack.push(path);
+                    }
+                    continue;
+                }
+                if !md.is_file() || !snap_wanted(&rel, false) {
+                    continue;
+                }
+                if md.len() > SNAP_MAX_FILE_BYTES {
+                    continue;
+                }
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                if !in_snap.contains(rel_str.as_str()) {
+                    if std::fs::remove_file(&path).is_ok() {
+                        restored.push(format!("{rel_str}（第 {turn} 回合后新建的，已删除）"));
+                    }
+                }
             }
         }
     }
@@ -656,6 +987,19 @@ mod tests {
     }
 
     #[test]
+    fn checklist_parses_numbered_list() {
+        // 实测：模型常把清单写成数字列表（任务 1 就是 1. 2. 3.），不能漏。
+        let text = "先看现场：\n## 目标清单\n1. 读取四个目标文件\n2. 把 VERSION=1 改成 VERSION=2\n3. 跑 grep 检查并汇报\n";
+        let items = parse_checklist(text);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].text, "读取四个目标文件");
+        assert!(!items.iter().any(|i| i.done));
+        // 数字列表后面跟了别的 ## 段就停。
+        let text2 = "## 目标清单\n- 把 A 改成 B\n## 其他\n- 不算\n";
+        assert_eq!(parse_checklist(text2).len(), 1);
+    }
+
+    #[test]
     fn checklist_missing_is_empty_not_fake() {
         assert!(parse_checklist("没有清单，就是普通回复。").is_empty());
     }
@@ -693,5 +1037,40 @@ mod tests {
         assert_eq!(t.len(), 2);
         assert_eq!(t[0], ("user".to_string(), "改 VERSION".to_string()));
         assert_eq!(t[1], ("assistant".to_string(), "改完了两个".to_string()));
+    }
+
+    #[test]
+    fn snapshot_diff_sees_shell_edits() {
+        // 快照 diff 是交付门与倒带看到 shell 改动的唯一途径：sed 改了文件
+        // 内容（哈希变了）、新建了一个、删了一个，都要算出来。
+        let prev = SnapshotManifest {
+            turn: 0,
+            files: vec![
+                SnapshotFile { path: "a.txt".into(), size: 3, hash: 11 },
+                SnapshotFile { path: "b.txt".into(), size: 3, hash: 22 },
+                SnapshotFile { path: "gone.txt".into(), size: 3, hash: 33 },
+            ],
+            complete: true,
+        };
+        let cur = SnapshotManifest {
+            turn: 1,
+            files: vec![
+                SnapshotFile { path: "a.txt".into(), size: 3, hash: 11 },
+                SnapshotFile { path: "b.txt".into(), size: 3, hash: 99 },
+                SnapshotFile { path: "new.txt".into(), size: 3, hash: 44 },
+            ],
+            complete: true,
+        };
+        let diff = snapshot_diff(&prev, &cur);
+        assert_eq!(diff, vec!["b.txt", "gone.txt", "new.txt"]);
+    }
+
+    #[test]
+    fn snap_skips_heavy_dirs() {
+        assert!(!snap_wanted(Path::new("node_modules/x.js"), false));
+        assert!(!snap_wanted(Path::new(".git/config"), false));
+        assert!(!snap_wanted(Path::new("target"), true));
+        assert!(snap_wanted(Path::new("src/main.rs"), false));
+        assert!(snap_wanted(Path::new(".gitignore"), false));
     }
 }
