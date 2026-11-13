@@ -15,7 +15,13 @@ import random
 from PIL import Image
 
 SEED = 1337
-N = 10000
+N = 30000
+# 30000 颗 + 1px 晕染：真校徽的笔画在 300px 尺度只有 1–3px 宽，
+# 10000 颗沿细笔画排是断续的虚线，成型后像淡淡的云；参考视频
+# （frame-09）里的心形是一条粗实、密不透风的发光带。1px 晕染
+# 让笔画加粗成带（形状本身不动），30000 颗填满这条带，粒子
+# 重叠成实心的光带。20000 颗一版已验证可读、中心不过曝，
+# 再加到 30000 颗是往视频那种“密不透风”再推一档。
 SRC = "public/cassell-seal.jpg"
 OUT = "src/components/sealTargets.ts"
 
@@ -33,16 +39,38 @@ def lum(x, y):
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
+# 亮度预计算（1px 晕染要反复查邻域，先算好一张表）。
+LUM = [[lum(x, y) for x in range(sw)] for y in range(sh)]
+
+
+def neighbor_max_lum(x, y):
+    m = 0
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < sw and 0 <= ny < sh and LUM[ny][nx] > m:
+                m = LUM[ny][nx]
+    return m
+
+
 raw = []
 guard = 0
-while len(raw) < N and guard < N * 60:
+while len(raw) < N and guard < N * 80:
     guard += 1
     sx = random.randrange(sw)
     sy = random.randrange(sh)
-    L = lum(sx, sy)
-    if L < 55:
+    L = LUM[sy][sx]
+    if L >= 55:
+        if random.random() > (L - 55) / 200 + 0.15:
+            continue
+        raw.append((sx, sy, int(L)))
         continue
-    if random.random() > (L - 55) / 200 + 0.15:
+    # 1px 晕染：紧贴亮像素的暗像素以较低概率采入（晕染层比核心稀疏，
+    # 光带是亮核 + 柔边，不是生硬加粗），笔画加粗成发光带。
+    nl = neighbor_max_lum(sx, sy)
+    if nl < 55:
+        continue
+    if random.random() > 0.35 * ((nl - 55) / 200 + 0.15):
         continue
     raw.append((sx, sy, int(L)))
 

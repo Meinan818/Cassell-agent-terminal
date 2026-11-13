@@ -363,16 +363,18 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   }, []);
 
   // Particle field: the seal IS the particles — a true 3D particle crest.
-  // 参考视频（gemini3 全息粒子演示）式细腻星尘：10000 颗细小白色光点
+  // 参考视频（gemini3 全息粒子演示）式细腻星尘：30000 颗细小白色光点
   // 从纯黑夜空被引力牵引、沿同一方向的漩涡优雅流进来（远处先出发、
   // 近处后出发），ease-out 轻柔落位，拼成一个有厚度、有纵深的 3D
   // 粒子模型（不是平面拼图）；成型后 6.5–8.0s 再沿流入路径散回星野。
-  // 校徽按真校徽照片采样布点；每个粒子带 z 轴深度：前脸 / 后脸 /
-  // 侧壁三层构成 0.65R 厚的立体校徽；成型后绕 Y 轴缓慢摆动（±22°）
-  // + 透视投影，厚度与视差一眼可见。背景是纯黑夜空 #000000 + 4500 颗
-  // 清晰可见的星野（远近星点带视差漂移），不要发蓝。粒子要亮、要
-  // 看得清（尺寸 0.8–3.6、base 0.5–0.95），边缘柔和衰减——细腻但
-  // 不暗，不要粗大糊团、不要中心过曝成白团。
+  // 校徽按真校徽照片采样布点（30000 颗，含 1px 晕染层：笔画是粗实
+  // 的发光带，不是单像素细线——视频里的心形就是密不透风的光带）；
+  // 每个粒子带 z 轴深度：前脸 / 后脸 / 侧壁三层构成 0.65R 厚的立体
+  // 校徽；成型后绕 Y 轴缓慢摆动（±22°）+ 透视投影，厚度与视差一眼
+  // 可见。背景是纯黑夜空 #000000 + 4500 颗清晰可见的星野（远近星点
+  // 带视差漂移），不要发蓝。粒子要亮、要密、要看得清（尺寸 1.0–4.0、
+  // base 0.65–1.0），边缘柔和衰减——细腻但不暗，不要粗大糊团、
+  // 不要中心过曝成白团。
   // 全程只用白色粒子，照片校徽 <img> 已彻底去掉。
   useEffect(() => {
     if (phase !== "particles") return;
@@ -399,12 +401,13 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       const g = c.getContext("2d");
       if (!g) return c;
       const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      // 亮核 + 柔晕：中心亮到 1.0（亮点），0.25 处 0.45、0.6 处 0.12
-      // 拖出柔光晕——每颗是发光的星尘点，不是灰色 smudge；形状靠
-      // 亮点堆叠发光（加色混合），不是靠中心光晕糊成一团。
+      // 亮核 + 柔晕：中心亮到 1.0（亮点），0.35 处 0.55、0.7 处 0.15
+      // 拖出柔光晕——亮核比之前更实（0.25→0.35），每颗的发光面积更大，
+      // 30000 颗叠起来才是密实的光带，不是稀疏的虚点；形状靠亮点堆叠
+      // 发光（加色混合），不是靠中心光晕糊成一团。
       grad.addColorStop(0, "rgba(255,255,255,1)");
-      grad.addColorStop(0.25, "rgba(255,255,255,0.45)");
-      grad.addColorStop(0.6, "rgba(255,255,255,0.12)");
+      grad.addColorStop(0.35, "rgba(255,255,255,0.55)");
+      grad.addColorStop(0.7, "rgba(255,255,255,0.15)");
       grad.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = grad;
       g.fillRect(0, 0, 64, 64);
@@ -434,7 +437,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     // x/y 已归一化到 [-1, 1]，直接按 R 缩放。运行时不再加载图片，
     // 没有竞态、没有兜底双环。----
     type Target = { x: number; y: number; z: number; lum: number };
-    const N_CREST = 10000;
+    const N_CREST = 30000;
     const targets: Target[] = [];
     const buildTargets = () => {
       for (const sp of SEAL_TARGETS.slice(0, N_CREST)) {
@@ -495,11 +498,12 @@ export default function Boot({ onDone }: { onDone: () => void }) {
           delay: (1 - farK) * 1.1 + Math.random() * 0.6,
           // 更长的飞行时间 + ease-out 落位：越近越慢，轻柔落位不砸进去。
           dur: 2.2 + Math.random() * 1.0,
-          // 星尘要亮、要看得清（用户：截图上都看不清粒子）：小 0.8–1.4、
-          // 中 1.4–2.3、hero 2.3–3.6；base 0.5–0.8、hero 0.95。中心
-          // 光晕仍克制，不会过曝成白团——亮度靠粒子本身，不靠糊光晕。
-          size: (hero ? 2.3 + Math.random() * 1.3 : sizeRoll > 0.8 ? 1.4 + Math.random() * 0.9 : 0.8 + Math.random() * 0.6) * S,
-          base: hero ? 0.95 : 0.5 + Math.random() * 0.3,
+          // 星尘要亮、要密、要看得清（用户：成型后还是太淡，没有视频
+          // 里那种密集感）：小 1.0–1.7、中 1.7–2.6、hero 2.6–4.0；
+          // base 0.65–0.9、hero 1.0。中心光晕仍克制，不会过曝成白团
+          // ——亮度靠粒子本身（20000 颗叠出来的实心光带），不靠糊光晕。
+          size: (hero ? 2.6 + Math.random() * 1.4 : sizeRoll > 0.8 ? 1.7 + Math.random() * 0.9 : 1.0 + Math.random() * 0.7) * S,
+          base: hero ? 1.0 : 0.65 + Math.random() * 0.25,
           tw: Math.random() * Math.PI * 2,
           hero,
         };
@@ -597,7 +601,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         const px = cx + x2 * sc * br;
         const py = cy + y2 * sc * br;
         if (px < -40 || px > w + 40 || py < -40 || py > h + 40) continue;
-        const twk = 1 - 0.22 * formed * (0.5 + 0.5 * Math.sin(t * 2.2 + p.tw * 3));
+        const twk = 1 - 0.12 * formed * (0.5 + 0.5 * Math.sin(t * 2.2 + p.tw * 3));
         // 透视增益压到 1.15：近处粒子不再爆亮，纵深靠大小与位置，不靠亮度炸。
         const a = p.base * Math.pow(sc, 1.15) * fadeIn * (0.55 + 0.45 * e2) * twk;
         if (a < 0.02) continue;
