@@ -480,19 +480,17 @@ const AUDIT_CSS = `
 .app .w2-review-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--bg-soft); color: var(--text-3); }
 .app .w2-review-badge.hot { background: var(--accent); color: #fff; }
 /* ---- P1-4：消息操作（悬停出现；出错卡片里重试是主按钮） ----
- * 绝对定位脱离文档流：旧写法 opacity:0 藏起来仍占约 24px 高，
- * 在用户气泡里留一块死空白。锚点是 .msg-body；用户气泡下沿有
- * 8px 内边距，按钮组“骑”在边线上 4px；助手消息则贴在正文下方。
- * 按钮组总高约 15px（11px 字、行高 1.2、上下 1px 内边距），
- * 塞进 .chat 的 16px 消息间距，不盖住下一条消息。
+ * 0.1.9 重做：旧写法把按钮组挂在气泡下沿（top:100%），最后一条消息的
+ * 按钮会被输入框盖住下半截，11px 淡灰字糊成一团——真机上看着就是
+ * “丑字体”。现在改成气泡内右上角浮层小药丸：不超出气泡下沿，永远
+ * 不被输入框盖；字显式 12px/500、颜色 text-2，用的就是正文字体，
+ * 不再靠继承链猜。无框线（不要线条），靠背景 + 阴影分层。
  * 藏起时 pointer-events:none，避免看不见的按钮挡住下一条消息的点击。 */
 .app .msg { position: relative; }
 .app .msg-body { position: relative; }
-.app .w2-msg-actions { position: absolute; top: 100%; display: flex; gap: 2px; margin-top: 0; opacity: 0; pointer-events: none; transition: opacity 150ms var(--ease); z-index: 3; }
+.app .w2-msg-actions { position: absolute; top: 6px; right: 8px; display: flex; gap: 2px; padding: 2px; background: var(--bg-panel); border-radius: 8px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity 150ms var(--ease); z-index: 3; }
 .app .msg:hover .w2-msg-actions, .app .w2-msg-actions:focus-within { opacity: 1; pointer-events: auto; }
-.app .msg.user .w2-msg-actions { justify-content: flex-end; right: 0; top: calc(100% - 4px); }
-.app .msg.assistant .w2-msg-actions { left: 0; }
-.app .w2-msg-actions button { border: none; background: none; color: var(--text-3); font-size: 11px; line-height: 1.2; padding: 1px 7px; border-radius: 6px; cursor: pointer; transition: background 100ms var(--ease), color 100ms var(--ease); }
+.app .w2-msg-actions button { border: none; background: none; color: var(--text-2); font-family: var(--font); font-size: 12px; font-weight: 500; line-height: 1.4; padding: 2px 8px; border-radius: 6px; cursor: pointer; transition: background 100ms var(--ease), color 100ms var(--ease); }
 .app .w2-msg-actions button:hover { background: var(--bg-hover); color: var(--text); }
 .app .w2-msg-actions button.danger:hover { color: #dc2626; }
 .app .w2-msg-edit { width: 100%; }
@@ -2542,7 +2540,12 @@ export default function App() {
           id: taskId,
           title: text.length > 24 ? `${text.slice(0, 24)}…` : text,
           project: projectId,
-          messages: [],
+          // 0.1.9：新会话首条就是自我介绍（和切模式时同一条），不是等模型现编。
+          // 一是用户一眼看到龙族身份；二是这条进了对话历史，反代即使吞掉
+          // 系统提示词，模型也能从历史里知道自己是谁、该叫用户什么。
+          messages: [
+            { id: uid(), role: "assistant", text: modeIntro(s.mode, s.display_name?.trim() || "路明非") },
+          ],
           createdAt: Date.now(),
         };
         setTasks((prev) => [task, ...prev]);

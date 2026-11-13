@@ -1,6 +1,6 @@
 [package]
 name = "cassell-agent-terminal"
-version = "0.1.8"
+version = "0.1.9"
 description = "卡塞尔专员终端 — Cassell College specialist AI agent desktop terminal (Tauri 2 + React + Codex CLI engine)"
 authors = ["Meinan818"]
 edition = "2024"
