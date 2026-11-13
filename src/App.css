@@ -1305,19 +1305,94 @@ select {
 
 .boot-skip {
   position: absolute;
-  top: 18px;
+  top: 20px;
   right: 22px;
   z-index: 2;
-  color: color-mix(in srgb, var(--boot-white) 55%, transparent);
-  font-size: 13px;
-  border: 1px solid color-mix(in srgb, var(--boot-white) 22%, transparent);
-  border-radius: 8px;
-  padding: 8px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 8px;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--boot-white) 45%, transparent);
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  cursor: pointer;
+  /* 悄悄进场：比舞台晚 700ms 淡入，不和第一帧抢；both 填充保住淡入终态。 */
+  animation: boot-skip-in 700ms var(--ease) 700ms both;
+  transition:
+    color 300ms var(--ease),
+    opacity 120ms var(--ease);
 }
 
+@keyframes boot-skip-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 悬停只变光（亮到 95% + 发丝下划线长出来），不位移、不变色块；
+   按下只暗一下。廉价感来自“按钮形状”，高级感来自“光”。 */
 .boot-skip:hover {
-  color: var(--boot-white);
-  border-color: color-mix(in srgb, var(--boot-white) 50%, transparent);
+  color: color-mix(in srgb, var(--boot-white) 95%, transparent);
+}
+
+.boot-skip:active {
+  opacity: 0.55;
+}
+
+.boot-skip:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--boot-white) 60%, transparent);
+  outline-offset: 4px;
+}
+
+/* “跳过”二字下的发丝线：悬停时从左长出来，300ms --ease-exp。 */
+.boot-skip-label {
+  position: relative;
+}
+
+.boot-skip-label::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0.28em; /* 抵掉末字字距，不让线拖出字外 */
+  bottom: -4px;
+  height: 1px;
+  background: color-mix(in srgb, var(--boot-white) 60%, transparent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 300ms var(--ease-exp);
+}
+
+.boot-skip:hover .boot-skip-label::after {
+  transform: scaleX(1);
+}
+
+/* ESC 键帽：发丝框里的 9px 字距小字，像刻在黑暗里的键位提示。 */
+.boot-skip-esc {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--boot-white) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--boot-white) 20%, transparent);
+  border-radius: 3px;
+  padding: 2px 5px;
+  transition:
+    color 300ms var(--ease),
+    border-color 300ms var(--ease);
+}
+
+.boot-skip:hover .boot-skip-esc {
+  color: color-mix(in srgb, var(--boot-white) 70%, transparent);
+  border-color: color-mix(in srgb, var(--boot-white) 45%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-skip {
+    animation: none;
+  }
 }
 
 .boot-stage {

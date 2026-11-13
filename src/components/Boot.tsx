@@ -121,6 +121,10 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   const [exitingFading, setExitingFading] = useState(false);
   const [logCount, setLogCount] = useState(0);
   const [leaving, setLeaving] = useState(false);
+  // 跳过退出仪式：点跳过后整屏 600ms 溶解 + 轻微收拢进工作区，不再
+  // 硬切到欢迎段闪一下。skippingRef 是 finish() 定时的依据。
+  const [skipping, setSkipping] = useState(false);
+  const skippingRef = useRef(false);
   const [sealGone, setSealGone] = useState(false);
   // 画布淡出（8.0s）：比铭文晚 1.5s——6.5–8.0s 是校徽散回星野的时间，
   // 散完画布才淡出，不要一边散一边被 CSS 盖掉。
@@ -156,11 +160,14 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     if (doneRef.current) return;
     doneRef.current = true;
     setLeaving(true);
-    // 开机结束 300ms 交叉淡化交接（--ease）：onDone 在淡出中途（150ms）
-    // 就触发，App 随即挂载标题栏 + 三栏壳（300ms 淡入），Boot 再留
-    // 150ms 才卸载——淡出与淡入重叠 150ms，不许硬切（见 App.tsx 的
-    // handleBootDone）。七步流程与每步时长一律不动。
-    later(onDone, 150);
+    // 开机结束交叉淡化交接：正常路径 300ms 淡出（--ease），onDone 在淡出
+    // 中途（150ms）触发，App 随即挂载标题栏 + 三栏壳（300ms 淡入），Boot
+    // 再留 150ms 才卸载——淡出与淡入重叠 150ms，不许硬切（见 App.tsx
+    // 的 handleBootDone）。七步流程与每步时长一律不动。
+    // 跳过路径：整屏 600ms 溶解（--ease-exp）+ 轻微收拢，onDone 放在
+    // 450ms——App 在 600ms 时卸载 Boot，正好是溶解完成的一刻；主界面
+    // 300ms 淡入与溶解最后 150ms 重叠，同样不许硬切。
+    later(onDone, skippingRef.current ? 450 : 150);
   };
 
   /** 切到下一阶段：旧阶段留场淡出 600ms，新阶段 450ms 后淡入。 */
@@ -180,15 +187,24 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     later(() => setExiting(null), STAGE_MS);
   };
 
-  /** Esc / 跳过：直接进欢迎段，900ms 后结束；已在欢迎段则直接结束。 */
+  /** Esc / 跳过：退出仪式，不是硬切。
+   * 旧路径是 goTo("welcome") + 900ms 后 finish：当前段的动画被半截掐断，
+   * 欢迎段刚错峰入场就被打断、一闪而过，整个过程像硬切，很廉价。
+   * 新路径不走欢迎段：点下即进退出仪式——按钮与日志先退场（250ms），
+   * 整屏 600ms 溶解 + 轻微收拢（scale 0.99 / 上浮 6px），主界面在溶解
+   * 末段交叉淡入。全程约 750ms，比旧路径（900+300ms）更快，也更克制。
+   * 舞台内的入场动画不杀死、不掐断——它在溶解之下继续走完，没有跳变；
+   * 七步正常流程与每步时长一字不动，只改跳过这条路径。 */
   const skip = () => {
-    if (doneRef.current) return;
-    if (phaseRef.current === "welcome") {
+    if (doneRef.current || skippingRef.current) return;
+    // 减弱动效：直接结束，不要任何过渡动画。
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       finish();
       return;
     }
-    goTo("welcome");
-    later(finish, 900);
+    skippingRef.current = true;
+    setSkipping(true);
+    finish();
   };
 
   // 卸载时清掉所有待定计时器。
@@ -209,6 +225,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       return () => window.clearTimeout(t);
     }
     const timer = window.setTimeout(() => {
+      // 跳过进行中：不再切下一阶段，等退出仪式走完、Boot 卸载。
+      if (doneRef.current || skippingRef.current) return;
       const i = ORDER.indexOf(phaseRef.current);
       if (i >= ORDER.length - 1) {
         finish();
@@ -1162,15 +1180,21 @@ export default function Boot({ onDone }: { onDone: () => void }) {
 
   return (
     <div
-      className={`boot ${leaving ? "boot-leaving" : ""}`}
+      className={`boot ${leaving ? "boot-leaving" : ""} ${skipping ? "boot-skipping" : ""}`}
       role="dialog"
       aria-label="启动"
       style={{
         ...bootVars,
-        // 背景恒定纯黑，不再有背景色过渡；只剩淡出（离开时 300ms）。
-        transition: leaving ? "opacity 300ms var(--ease)" : undefined,
+        // 背景恒定纯黑，不再有背景色过渡；只剩淡出。
+        // 正常结束：300ms 淡出。跳过：600ms 溶解 + 轻微收拢（见下 .boot-skipping 规则）。
+        transition: leaving
+          ? skipping
+            ? "opacity 600ms var(--ease-exp), transform 600ms var(--ease-exp)"
+            : "opacity 300ms var(--ease)"
+          : undefined,
         // 淡出期间不再挡输入：标题栏已在 Boot 之下淡入，空白处可拖、按钮可点。
-        pointerEvents: leaving ? "none" : undefined,
+        // 跳过开始即不再挡输入：按钮已退场，重复点击由 skip() 的守卫挡住。
+        pointerEvents: leaving || skipping ? "none" : undefined,
       }}
     >
       {/* Boot 局部关键帧（只改 Boot.tsx：不写进 App.css） */}
@@ -1190,6 +1214,18 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         }
         @keyframes boot-ring-done { 0% { opacity: 0; } 30% { opacity: 0.55; } 100% { opacity: 0; } }
         @keyframes boot-s-in { from { transform: scale(0.88); } to { transform: scale(1); } }
+        /* 跳过退出仪式：铬件（按钮、日志）先退场 250ms；整屏溶解时轻微收拢，
+           像场景向后退一步再化开——克制的退出，不是“啪一下没了”。
+           溶解 600ms + onDone 在 450ms：主界面淡入与溶解末段重叠 150ms，
+           Boot 在溶解完成一刻卸载，不截断、不闪白。 */
+        .boot-skipping .boot-log,
+        .boot-skipping .boot-skip {
+          opacity: 0;
+          transition: opacity 250ms var(--ease);
+        }
+        .boot-skipping.boot-leaving {
+          transform: scale(0.99) translateY(-6px);
+        }
       `}</style>
 
       {/* 常驻纯黑夜空（开机全程的底，z-index 0；各段内容在其上） */}
@@ -1205,8 +1241,16 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         }}
       />
 
-      <button className="boot-skip" onClick={skip} type="button">
-        跳过
+      <button
+        className="boot-skip"
+        onClick={skip}
+        type="button"
+        aria-label="跳过启动动画（Esc）"
+      >
+        <span className="boot-skip-label">跳过</span>
+        <span aria-hidden="true" className="boot-skip-esc">
+          ESC
+        </span>
       </button>
 
       {exiting !== null && (
