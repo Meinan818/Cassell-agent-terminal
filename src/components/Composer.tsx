@@ -30,6 +30,11 @@ interface ComposerProps {
   /** P0-5 运行模式： "execute" 执行 | "plan" 计划（只调查、出方案）。 */
   runMode: RunMode;
   onRunModeChange: (m: RunMode) => void;
+  /** P0-6 目标模式开关：开着时，下一条消息立一个目标（后端自己跑到底）。 */
+  goalMode: boolean;
+  onGoalModeChange: (v: boolean) => void;
+  /** P0-6 当前对话已有进行中的目标：开关收起，显示“目标进行中”。 */
+  goalActive: boolean;
   /** P0-5 修改方案：App 点"修改方案"时 +1，输入框聚焦。 */
   focusNonce: number;
 }
@@ -54,6 +59,9 @@ export default function Composer({
   getSlashCommands,
   runMode,
   onRunModeChange,
+  goalMode,
+  onGoalModeChange,
+  goalActive,
   focusNonce,
 }: ComposerProps) {
   const [text, setText] = useState("");
@@ -443,6 +451,34 @@ export default function Composer({
             计划
           </button>
         </div>
+        {/* P0-6 目标开关：放在计划/执行旁边。开着时，下一条消息立一个目标，
+            后端自己一轮接一轮跑到底，中途不用点什么。计划模式下不可用
+            （计划只调查、不写文件，立目标没有意义）；目标进行中时显示状态。 */}
+        {goalActive ? (
+          <span
+            className="w2-goal-chip w2-on"
+            title="目标进行中：这个对话归目标所有，发消息就是接着做目标；结束目标后才能发普通消息"
+          >
+            目标进行中
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={`w2-goal-chip ${goalMode ? "w2-on" : ""}`}
+            aria-pressed={goalMode}
+            disabled={runMode === "plan"}
+            onClick={() => onGoalModeChange(!goalMode)}
+            title={
+              runMode === "plan"
+                ? "计划模式下不能立目标（计划只调查、不写文件）"
+                : goalMode
+                  ? "目标模式已开：下一条消息会立一个目标，自己跑到底"
+                  : "目标：下一条消息立一个目标，自己一轮接一轮做到做完为止"
+            }
+          >
+            目标
+          </button>
+        )}
         <span className="composer-spacer" />
         <button
           type="button"

@@ -2252,9 +2252,9 @@ select {
   margin-top: 10px;
 }
 
-/* 轮次上限提示：无框线、柔和底色、淡入上浮，与计划操作同一套语言。
-   只是一句提醒 + 一个按钮，不抢对话的视觉重心。 */
-.round-limit-notice {
+/* P0-6 到总预算上限 / 卡住的提示：无框线、柔和底色、淡入上浮，与计划操作同一套语言。
+   只是一句提醒，没有按钮，不抢对话的视觉重心（8 轮只是内部单位，没有“继续”按钮）。 */
+.run-limit-notice {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2267,6 +2267,209 @@ select {
   line-height: 1.5;
   color: var(--text-2);
   animation: live-rise 300ms var(--ease) both;
+}
+
+/* P0-6 目标开关（Composer 行内小芯片，与计划/执行同一套语言）。 */
+.w2-goal-chip {
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg-soft);
+  transition: background 150ms ease, color 150ms ease;
+}
+.w2-goal-chip:hover:not(:disabled) {
+  color: var(--text);
+}
+.w2-goal-chip.w2-on {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.w2-goal-chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+span.w2-goal-chip.w2-on {
+  cursor: default;
+}
+
+/* P0-6/P0-7 目标卡片：钉在对话区顶部。无框线、柔和底色、细腻阴影、
+   大圆角；出现/收起 300ms 过渡；不许金色、不许假数据。 */
+.goal-card {
+  margin: 12px 16px 4px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--bg-soft);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  animation: live-rise 300ms var(--ease) both;
+}
+.goal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goal-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+.goal-status {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text-2);
+}
+.goal-status-running {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.goal-status-done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.goal-status-stuck,
+.goal-status-budget {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.goal-rounds {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.goal-spacer {
+  flex: 1;
+}
+.goal-text {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.goal-bar {
+  margin-top: 10px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.goal-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 300ms var(--ease);
+}
+.goal-checklist {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+.goal-checklist li.done {
+  color: var(--text-3, var(--text-2));
+  opacity: 0.75;
+}
+.goal-check-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.goal-files {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.goal-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.goal-note {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.goal-live {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.goal-cps {
+  margin-top: 10px;
+}
+.goal-cps-toggle {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.goal-cps-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: live-rise 300ms var(--ease) both;
+}
+.goal-cps-empty {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.goal-cp {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg);
+}
+.goal-cp-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.goal-cp-turn {
+  font-weight: 600;
+}
+.goal-cp-time {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.goal-cp-summary {
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.goal-cp-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.goal-cp-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+.goal-cp-actions .btn-ghost {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.goal-cp-actions .btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* P0-4 删除确认弹窗（居中遮罩 + 软底卡片，与设置 modal 同一套语言）。 */

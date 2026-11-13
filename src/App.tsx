@@ -4,7 +4,10 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AgentResult,
   ChatMsg,
+  CheckpointInfo,
   CodexInfo,
+  GoalState,
+  GoalSummary,
   InspectorView,
   Mode,
   Project,
@@ -36,6 +39,7 @@ import MorphIcon, {
 import { stateFor } from "./components/mark/ballAdapter";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
+import GoalCard from "./components/GoalCard";
 import ConnectWizard from "./components/ConnectWizard";
 import RightPanel, { type MergeSummary } from "./components/RightPanel";
 import {
@@ -1379,6 +1383,16 @@ export default function App() {
   /** P0-5 运行模式： "execute" 执行 | "plan" 计划（只调查、出方案）。 */
   const [runMode, setRunMode] = useState<RunMode>("execute");
   const runModeRef = useRef<RunMode>("execute");
+  /** P0-6 目标模式开关：开着时，下一条消息立一个目标（后端自己跑到底）。
+      目标进行中时开关保持开启（目标拥有这个对话），结束目标后自动关掉。 */
+  const [goalMode, setGoalMode] = useState(false);
+  const goalModeRef = useRef(false);
+  const setGoalModeBoth = useCallback((v: boolean) => {
+    goalModeRef.current = v;
+    setGoalMode(v);
+  }, []);
+  /** P0-7 检查点列表展开/收起（按任务记）。 */
+  const [showCheckpoints, setShowCheckpoints] = useState(false);
   /** P0-9 NORMA 交付：本任务里写过的文件（从 agent-tool-result 汇总），按任务分。 */
   const [deliverablesByTask, setDeliverablesByTask] = useState<
     Record<string, { path: string; at: number }[]>
@@ -2062,6 +2076,28 @@ export default function App() {
         },
       ),
     );
+    // P0-6 目标进度：后端每回合结束推一份摘要，目标卡片实时刷新
+    // （轮数/状态/改了哪些文件/清单）。检查点列表保持前端已有的那份，
+    // 跑完后 runTurn 会统一拉一次。
+    add(
+      listen<GoalSummary>("agent-goal-progress", ({ payload }) => {
+        const taskId = activeTaskIdRef.current;
+        if (!taskId || payload.id !== taskId) return;
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskId
+              ? {
+                  ...t,
+                  goal: {
+                    ...payload,
+                    checkpoints: t.goal?.checkpoints ?? [],
+                  },
+                }
+              : t,
+          ),
+        );
+      }),
+    );
 
     return () => {
       alive = false;
@@ -2212,6 +2248,7 @@ export default function App() {
       prompt: string,
       assistantMsgId: string,
       userText: string,
+      opts?: { resumeGoal?: boolean },
     ) => {
       const s = settingsRef.current;
       if (!s) return;
@@ -2220,6 +2257,35 @@ export default function App() {
       const isAuthorized = s.workdir
         ? authorizedDirsRef.current.has(s.workdir)
         : false;
+      // P0-6 目标上下文：这个任务上有进行中的目标 → 续跑它；
+      // 开关开着、且没有进行中的目标 → 这条消息立一个新目标。
+      const task0 = tasksRef.current.find((t) => t.id === taskId);
+      const activeGoal = task0?.goal;
+      const goalActive =
+        !!activeGoal &&
+        (activeGoal.status === "running" || activeGoal.status === "paused");
+      const startGoal = goalModeRef.current && !goalActive;
+      const goalId =
+        startGoal || goalActive || opts?.resumeGoal ? taskId : undefined;
+      if (startGoal) {
+        // 目标卡先出现（乐观状态），后端进度事件随后会刷新真实数字。
+        const optimistic: GoalState = {
+          id: taskId,
+          text: prompt,
+          status: "running",
+          status_label: "进行中",
+          rounds_used: 0,
+          rounds_budget: 40,
+          turns_used: 0,
+          files_changed: [],
+          checklist: [],
+          unverified_writes: [],
+          checkpoints: [],
+        };
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, goal: optimistic } : t)),
+        );
+      }
       // 历史只取本轮之前的回合（刚发的这条不重复进历史，prompt 已是最后一条）。
       const task = tasksRef.current.find((t) => t.id === taskId);
       const prior = (task?.messages ?? []).filter(
@@ -2256,14 +2322,53 @@ export default function App() {
             run_mode: rm,
             authorized: isAuthorized,
             delete_confirm: s.delete_confirm,
+            // P0-6 目标模式：有 goal_id 时后端按目标循环跑到底（自动续跑，
+            // 带完整上下文）；没有就是普通对话（同样自动续跑到总预算）。
+            goal_id: goalId,
+            goal_text: startGoal ? prompt : undefined,
+            resume_goal: opts?.resumeGoal ? true : undefined,
           },
         });
+        // P0-6：目标跑完后把检查点拉下来，挂在目标卡片上。
+        // （目标状态本身由下面主更新里的 result.goal 写，不依赖这次拉取。）
+        if (goalId && result.goal) {
+          try {
+            const cps = await invoke<CheckpointInfo[]>(
+              "list_checkpoints_cmd",
+              { goal_id: goalId },
+            );
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === taskId && t.goal
+                  ? { ...t, goal: { ...t.goal, checkpoints: cps } }
+                  : t,
+              ),
+            );
+          } catch {
+            // 检查点拉不到不影响主流程（目标卡片照常显示，检查点区为空）。
+          }
+          // 目标结束了（做完/卡住/到预算）：开关自动关掉，回到普通对话。
+          if (
+            result.goal.status === "done" ||
+            result.goal.status === "stuck" ||
+            result.goal.status === "budget"
+          ) {
+            setGoalModeBoth(false);
+          }
+        }
         const thinkId = thinkMsgIdRef.current;
         setTasks((prev) =>
           prev.map((t) =>
             t.id === taskId
               ? {
                   ...t,
+                  // P0-6：目标摘要写回目标卡片（检查点列表保持已有的那份）。
+                  goal: result.goal
+                    ? {
+                        ...result.goal,
+                        checkpoints: t.goal?.checkpoints ?? [],
+                      }
+                    : t.goal,
                   messages: t.messages.map((m) => {
                     if (thinkId && m.id === thinkId)
                       return { ...m, streaming: false };
@@ -2287,13 +2392,29 @@ export default function App() {
                       rm === "plan" &&
                       result.text.includes("## 目标") &&
                       result.text.includes("## 步骤");
+                    // P0-6：到总预算上限 / 卡住时，消息下方挂一句说明——没有
+                    // “继续”按钮。普通对话也会自动续跑到预算；想继续直接发消息。
+                    // 目标模式下限由目标卡片承担，这里不重复挂。
+                    const limitNotice =
+                      !result.goal &&
+                      (result.stop_reason === "budget" ||
+                        result.stop_reason === "stalled")
+                        ? {
+                            reason: result.stop_reason as
+                              | "budget"
+                              | "stalled",
+                            text:
+                              result.stop_detail ||
+                              (result.stop_reason === "budget"
+                                ? "这次已经跑到上限了，还没做完。"
+                                : "我卡住了，没进展了。"),
+                          }
+                        : undefined;
                     return {
                       ...m,
                       streaming: false,
                       plan: isPlan ? true : undefined,
-                      // 撞到 8 轮上限：任务可能没做完，下方挂提示 +“继续”，
-                      // 不要显示成一次正常成功的结束。
-                      roundLimitHit: result.round_limit_hit ? true : undefined,
+                      limitNotice,
                       text:
                         result.text || m.text || "（本轮没有文字输出）",
                       usage,
@@ -2478,6 +2599,113 @@ export default function App() {
       })
       .catch(() => undefined);
   }, []);
+
+  // ---- P0-6 目标操作 ----
+  // 继续跑（目标卡片上的按钮）：不发新用户消息，后端直接从会话里接着跑。
+  // 目标模式下“停止”= 暂停（会话保留在后端），点这个就能续上。
+  const resumeGoal = useCallback(() => {
+    const s = settingsRef.current;
+    if (!s || runningRef.current) return;
+    const taskId = activeTaskIdRef.current;
+    if (!taskId) return;
+    const task = tasksRef.current.find((t) => t.id === taskId);
+    if (!task?.goal) return;
+    const assistantMsg: ChatMsg = {
+      id: uid(),
+      role: "assistant",
+      text: "",
+      streaming: true,
+    };
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? { ...t, messages: [...t.messages, assistantMsg] }
+          : t,
+      ),
+    );
+    streamMsgIdRef.current = assistantMsg.id;
+    thinkMsgIdRef.current = null;
+    lastToolMsgIdRef.current = null;
+    setRunning(true);
+    setMarkState(stateFor("runStart"));
+    runStartRef.current = Date.now();
+    stickToBottom.current = true;
+    requestAnimationFrame(() => {
+      void runTurn(taskId, "继续完成目标", assistantMsg.id, "继续完成目标", {
+        resumeGoal: true,
+      });
+    });
+  }, [runTurn]);
+
+  // 结束目标：后端会话清掉，卡片消失；检查点留在磁盘上（审计用）。
+  const endGoal = useCallback((taskId: string) => {
+    if (runningRef.current) return;
+    invoke("clear_goal_cmd", { goal_id: taskId }).catch(() => undefined);
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, goal: undefined } : t)),
+    );
+    setGoalModeBoth(false);
+  }, [setGoalModeBoth]);
+
+  // P0-7 倒带：scope = "conversation"（只回对话）| "code"（只回代码）
+  // | "both"（两者都回）。回对话后界面按快照重建；回代码后显示恢复清单。
+  const rewindGoal = useCallback(
+    async (taskId: string, turn: number, scope: "conversation" | "code" | "both") => {
+      if (runningRef.current) return;
+      try {
+        // 重启后会话不在内存里时，后端靠这三个值重建会话（从任务与设置里取）。
+        const task = tasksRef.current.find((t) => t.id === taskId);
+        const s = settingsRef.current;
+        const r = await invoke<{
+          restored_files: string[];
+          transcript: { role: string; text: string }[];
+          goal: GoalSummary | null;
+        }>("rewind_checkpoint_cmd", {
+          goal_id: taskId,
+          turn,
+          scope,
+          goal_text: task?.goal?.text ?? null,
+          mode: s?.mode ?? null,
+          workdir: s?.workdir ?? null,
+        });
+        setTasks((prev) =>
+          prev.map((t) => {
+            if (t.id !== taskId) return t;
+            const next: Task = { ...t };
+            if (scope !== "code" && r.transcript.length > 0) {
+              next.messages = r.transcript.map((m) => ({
+                id: uid(),
+                role: m.role as "user" | "assistant",
+                text: m.text,
+              }));
+            }
+            if (r.goal && next.goal) {
+              next.goal = {
+                ...r.goal,
+                checkpoints: next.goal.checkpoints,
+              };
+            }
+            if (scope !== "conversation") {
+              const files = r.restored_files;
+              next.goal = next.goal
+                ? {
+                    ...next.goal,
+                    rewindNote:
+                      files.length > 0
+                        ? `已把代码恢复到第 ${turn} 回合：${files.slice(0, 3).join("、")}${files.length > 3 ? ` 等 ${files.length} 个文件` : ""}`
+                        : `第 ${turn} 回合之后没有改过文件，不用恢复。`,
+                  }
+                : next.goal;
+            }
+            return next;
+          }),
+        );
+      } catch (e) {
+        showNotice(`倒带失败：${e}`);
+      }
+    },
+    [],
+  );
 
   const handleNewTask = () => setActiveTaskId(null);
 
@@ -3224,6 +3452,21 @@ export default function App() {
               if (dist < 160) setHasNewMsg(false);
             }}
           >
+            {/* P0-6/P0-7 目标卡片：目标进行中或刚结束时钉在对话区顶部，
+                进度、状态、清单、检查点一眼可见；跑完也不马上消失。 */}
+            {activeTask?.goal && (
+              <GoalCard
+                goal={activeTask.goal}
+                running={running}
+                showCheckpoints={showCheckpoints}
+                onToggleCheckpoints={() => setShowCheckpoints((v) => !v)}
+                onResume={resumeGoal}
+                onEnd={() => activeTask && endGoal(activeTask.id)}
+                onRewind={(turn, scope) =>
+                  activeTask && void rewindGoal(activeTask.id, turn, scope)
+                }
+              />
+            )}
             {messages.map((m, i) =>
               m.role === "user" ? (
                 <div
@@ -3421,28 +3664,14 @@ export default function App() {
                           </button>
                         </div>
                       )}
-                    {/* 撞到 8 轮工具调用上限：任务可能没做完，明确告诉用户，
-                        不要显示成一次正常成功的结束。只在最新一条上限消息上挂。
-                        “继续”走正常发送路径：带上之前的对话历史再跑，模型会
-                        自己重读文件、从做到一半的地方接着做。 */}
-                    {m.roundLimitHit &&
-                      !m.streaming &&
-                      messages.slice(i + 1).every((x) => !x.roundLimitHit) && (
-                        <div className="round-limit-notice">
-                          <span>
-                            这轮到 8 次工具调用上限了，任务可能还没做完——点「继续」，我接着把它做完。
-                          </span>
-                          <button
-                            type="button"
-                            className="btn-approve"
-                            onClick={() =>
-                              handleSend("继续，把上面这个任务做完", [])
-                            }
-                          >
-                            继续
-                          </button>
-                        </div>
-                      )}
+                    {/* P0-6：到总预算上限 / 卡住时挂一句说明——没有“继续”按钮。
+                        普通对话也会自动续跑到预算；想继续直接发消息。
+                        目标模式的上限由目标卡片承担，这里不重复挂。 */}
+                    {m.limitNotice && !m.streaming && (
+                      <div className="run-limit-notice">
+                        <span>{m.limitNotice.text}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ),
@@ -3543,6 +3772,13 @@ export default function App() {
             getSlashCommands={(q) => paletteItems(q)}
             runMode={runMode}
             onRunModeChange={setRunModeBoth}
+            goalMode={goalMode}
+            onGoalModeChange={setGoalModeBoth}
+            goalActive={
+              !!activeTask?.goal &&
+              (activeTask.goal.status === "running" ||
+                activeTask.goal.status === "paused")
+            }
             focusNonce={focusNonce}
           />
         </div>

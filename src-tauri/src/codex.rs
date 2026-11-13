@@ -44,6 +44,10 @@ pub struct RunState {
     /// explicit confirmation; `resolve_approval` (UI) or cancel/timeout
     /// resolves it. Entries are removed exactly once, by whoever resolves.
     pub approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// P0-6 目标会话（按 task id 存）：后端持有完整对话（含 tool_calls
+    /// 与工具结果），目标循环在后端自己一轮接一轮跑到底；暂停/继续/
+    /// 倒带都靠它。运行期间会话会短暂从表里取出，结束后再放回去。
+    pub goals: Mutex<HashMap<String, crate::goal::GoalSession>>,
 }
 
 impl RunState {

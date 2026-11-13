@@ -1,6 +1,7 @@
 mod agent;
 mod codex;
 mod fsutil;
+mod goal;
 mod lore;
 mod settings;
 mod shell;
@@ -42,6 +43,7 @@ pub fn run() {
             native_cancel: std::sync::atomic::AtomicBool::new(false),
             native_running: std::sync::atomic::AtomicBool::new(false),
             approvals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            goals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -55,6 +57,9 @@ pub fn run() {
             agent::test_provider,
             agent::list_models,
             agent::pick_folder,
+            goal::list_checkpoints_cmd,
+            goal::rewind_checkpoint_cmd,
+            goal::clear_goal_cmd,
             fsutil::list_files,
             fsutil::read_file,
             fsutil::read_file_base64,

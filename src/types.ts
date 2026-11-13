@@ -76,8 +76,9 @@ export interface ChatMsg {
   toolLabel?: string;
   /** 服务商回报的真实用量（本轮结束时才有）。 */
   usage?: { prompt: number; completion: number; total: number };
-  /** 本轮撞到 8 轮工具调用上限、任务可能没做完：下方挂提示 +“继续”。 */
-  roundLimitHit?: boolean;
+  /** 本轮撞到总预算上限或卡住：下方挂一句说明（没有“继续”按钮——
+      8 轮只是内部单回合单位，普通对话也会自动续跑到预算；想继续直接发消息）。 */
+  limitNotice?: { reason: "budget" | "stalled"; text: string };
   /** Permission card payload (kind === "perm"). */
   perm?: {
     command: string;
@@ -100,6 +101,42 @@ export interface ChatMsg {
   thinkSecs?: number;
 }
 
+/** P0-6 目标清单的一项（模型首轮列出，之后更新；没有就不显示，不编假的）。 */
+export interface GoalCheckItem {
+  text: string;
+  done: boolean;
+}
+
+/** P0-6 目标摘要（后端每次进度事件与每轮返回都带一份）。 */
+export interface GoalSummary {
+  id: string;
+  text: string;
+  status: "running" | "paused" | "done" | "stuck" | "budget";
+  status_label: string;
+  rounds_used: number;
+  rounds_budget: number;
+  turns_used: number;
+  files_changed: string[];
+  checklist: GoalCheckItem[];
+  unverified_writes: string[];
+}
+
+/** P0-7 检查点（每回合一个消息快照 + 写前备份）。 */
+export interface CheckpointInfo {
+  turn: number;
+  summary: string;
+  files_changed: string[];
+  rounds_used: number;
+  created_at: number;
+}
+
+/** P0-6 一个任务上的目标状态（存在 Task 里，随任务列表持久化）。 */
+export interface GoalState extends GoalSummary {
+  checkpoints: CheckpointInfo[];
+  /** 倒带后的一句回执（恢复了哪些文件），看过即清。 */
+  rewindNote?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -113,6 +150,8 @@ export interface Task {
   status?: "running" | "done" | "idle";
   /** Collapsible sub-sessions (EVA) shown under the task. */
   subSessions?: { id: string; title: string; state: string }[];
+  /** P0-6：这个任务上的目标（有它就是目标模式；没有就是普通对话）。 */
+  goal?: GoalState;
 }
 
 export interface ReviewFile {
@@ -177,8 +216,14 @@ export interface AgentResult {
   completion_tokens: number | null;
   total_tokens: number | null;
   tools_run: string[];
-  /** 撞到 8 轮工具调用上限、循环耗尽时还没收尾：任务可能没做完。 */
-  round_limit_hit: boolean;
+  /** 本轮为什么停下："finished"（正常收尾）| "budget"（到总预算上限）
+      | "stalled"（连续多轮无进展，确实卡住了）| "cancelled"（用户叫停）。
+      8 轮只是内部单回合单位，对外不可见。 */
+  stop_reason: "finished" | "budget" | "stalled" | "cancelled";
+  /** 停下时的补充说明（到预算/卡住时写清原因；正常收尾为空）。 */
+  stop_detail: string;
+  /** P0-6 目标摘要（目标模式才有）。 */
+  goal?: GoalSummary | null;
 }
 
 export const EFFORT_LABELS: Record<Effort, string> = {
