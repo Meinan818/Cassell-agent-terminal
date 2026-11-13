@@ -60,10 +60,20 @@ fn shell_program() -> String {
     }
     #[cfg(not(windows))]
     {
-        match std::env::var("SHELL") {
-            Ok(s) if !s.trim().is_empty() => s,
-            _ => "sh".to_string(),
+        if let Ok(s) = std::env::var("SHELL") {
+            if !s.trim().is_empty() {
+                return s;
+            }
         }
+        // $SHELL 未设置时不要退回 dash：dash 没有行编辑，方向键翻不了
+        // 历史、Tab 补全也没有，真终端验收（清屏/翻历史）过不了。
+        // 按常见位置找一个像样的交互 shell，都没有才退回 sh。
+        for cand in ["/bin/bash", "/usr/bin/bash", "/bin/zsh", "/usr/bin/zsh"] {
+            if std::path::Path::new(cand).exists() {
+                return cand.to_string();
+            }
+        }
+        "sh".to_string()
     }
 }
 
@@ -108,8 +118,9 @@ pub async fn pty_spawn(
         .map_err(|e| format!("打不开 PTY：{e}"))?;
     let mut cmd = CommandBuilder::new(shell_program());
     // 前端是 xterm.js（xterm 兼容终端）：TERM 必须配成 xterm-256color。
-    // 不配时子进程继承到的 TERM=dumb，bash 会关掉 readline（方向键
-    // 变成字面 ^[[A、翻不了历史），clear/vim/top 这类程序直接报错。
+    // 不配时子进程环境里根本没有 TERM，bash 会把 shell 变量 TERM 默
+    // 认成 dumb（还不导出）：方向键变成字面 ^[[A、翻不了历史，
+    // clear/vim/top 这类程序直接报错。
     cmd.env("TERM", "xterm-256color");
     if !workdir.trim().is_empty() {
         cmd.cwd(&workdir);
@@ -329,6 +340,47 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&buf).contains("PTY-PING-123"),
             "PTY 输出里没读到回显：{}",
+            String::from_utf8_lossy(&buf)
+        );
+    }
+
+    /// TERM 必须进子进程：pty_spawn 用 CommandBuilder::env 配 TERM，
+    /// 子进程 echo 出来的 TERM 得是配的值，不能是父进程继承来的 dumb。
+    #[test]
+    fn pty_env_term_reaches_child() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.env("TERM", "xterm-256color");
+        cmd.arg("-c");
+        cmd.arg("echo TERM-is-$TERM; sleep 0.2");
+        let mut child = pair.slave.spawn_command(cmd).expect("spawn");
+        let mut reader = pair.master.try_clone_reader().expect("reader");
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 1024];
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(5) {
+            match reader.read(&mut tmp) {
+                Ok(0) => break,
+                Ok(n) => {
+                    buf.extend_from_slice(&tmp[..n]);
+                    if String::from_utf8_lossy(&buf).contains("TERM-is-") {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        let _ = child.wait();
+        assert!(
+            String::from_utf8_lossy(&buf).contains("TERM-is-xterm-256color"),
+            "子进程 TERM 没拿到 xterm-256color：{}",
             String::from_utf8_lossy(&buf)
         );
     }
