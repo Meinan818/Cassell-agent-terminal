@@ -60,6 +60,11 @@ pub struct AgentRequest {
     /// 循环自己一轮接一轮跑到底（带完整上下文自动续跑），中途不问用户。
     #[serde(default)]
     pub goal_id: Option<String>,
+    /// P0-11④ 前端 task id（对话 id）：终端 PTY 按它分会话，
+    /// agent 的 `read_terminal` 读的就是这个对话的终端。
+    /// 目标模式下 goal_id 就是 task id；普通对话也传。
+    #[serde(default)]
+    pub task_id: Option<String>,
     /// P0-6 目标原文（用户发的那条任务）。None = 普通对话或续跑已有目标。
     #[serde(default)]
     pub goal_text: Option<String>,
@@ -132,7 +137,7 @@ fn default_delete_confirm() -> String {
 /// 不是前端文字游戏）：
 /// - 计划模式：只有 read_file / list_dir，写与执行一律不暴露；
 /// - NORMA：读 + 写文档，没有 run_shell（办公不跑终端，见调研 §4.1 硬禁）；
-/// - EVA 执行模式：四项全有。
+/// - EVA 执行模式：六项全有（读 / 写 / 命令 / 开浏览器 / 读终端）。
 fn tool_definitions(run_mode: &str, mode: &str) -> Value {
     let mut tools = vec![
         json!({
@@ -197,6 +202,31 @@ fn tool_definitions(run_mode: &str, mode: &str) -> Value {
                         "command": {"type": "string", "description": "要执行的命令"}
                     },
                     "required": ["command"]
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "open_browser",
+                "description": "在应用内置浏览器里打开一个网址（本地 dev server 或外网页面），不用跳系统浏览器。用于起服务后在应用内查看页面、确认效果。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "要打开的网址，如 http://localhost:3000 或 https://example.com"}
+                    },
+                    "required": ["url"]
+                }
+            }
+        }));
+        tools.push(json!({
+            "type": "function",
+            "function": {
+                "name": "read_terminal",
+                "description": "读取当前对话终端（Inspector 终端页签）最近的输出。用于构建挂了、服务起不来时看终端里的报错找原因。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
                 }
             }
         }));
@@ -347,6 +377,8 @@ struct ToolCtx<'a> {
     mode: String,
     authorized: bool,
     delete_confirm: String,
+    /// P0-11④ 终端会话 id（= 前端 task id，缺省 "default"）。
+    session_id: String,
 }
 
 async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut Vec<String>) -> String {
@@ -546,6 +578,46 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                 Err(e) => format!("执行失败：{e}"),
             }
         }
+        "open_browser" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            if ctx.run_mode == "plan" {
+                return format!(
+                    "计划模式：我现在只调查、不打开浏览器。`{url}` 已记进方案里，等你点「确认执行」后再打开。"
+                );
+            }
+            if ctx.mode == "norma" {
+                return format!(
+                    "我是诺玛，办公模式不在内置浏览器里开页面。`{url}` 需要切到 EVA（工程模式）再开。"
+                );
+            }
+            if url.trim().is_empty() {
+                return "要打开的网址为空。".to_string();
+            }
+            tools_run.push(format!("在内置浏览器打开 {url}"));
+            // 前端接这个事件：切到 Inspector 浏览器页签，在子 webview 里打开。
+            let _ = ctx
+                .app
+                .emit("agent-open-browser", serde_json::json!({ "url": url }));
+            format!("已在应用内置浏览器打开 {url}（应用内查看，不用跳系统浏览器）。")
+        }
+        "read_terminal" => {
+            if ctx.run_mode == "plan" {
+                return "计划模式：我现在只调查、不读终端。".to_string();
+            }
+            if ctx.mode == "norma" {
+                return "我是诺玛，办公模式不读终端。需要切到 EVA（工程模式）再读。".to_string();
+            }
+            tools_run.push("读取终端输出".to_string());
+            let out = crate::pty::snapshot_for_agent(&ctx.app, &ctx.session_id);
+            if out.trim().is_empty() {
+                return "终端还没有输出（这个对话的终端一次没打开过，或者刚起还没出东西）。".to_string();
+            }
+            let mut s = out;
+            if s.chars().count() > 8000 {
+                s = s.chars().skip(s.chars().count() - 8000).collect();
+            }
+            format!("终端最近的输出：\n{s}")
+        }
         _ => format!("未知工具：{name}"),
     }
 }
@@ -652,6 +724,8 @@ struct TurnCtx {
     workdir: String,
     authorized: bool,
     delete_confirm: String,
+    /// P0-11④ 终端会话 id（= 前端 task id，缺省 "default"）。
+    session_id: String,
     tools: Value,
     system_with_appendix: String,
 }
@@ -990,6 +1064,7 @@ async fn run_inner_turn(
                         mode: ctx.mode.clone(),
                         authorized: ctx.authorized,
                         delete_confirm: ctx.delete_confirm.clone(),
+                        session_id: ctx.session_id.clone(),
                     };
                     let result = exec_tool(&tool_ctx, name, &args, &mut tools_run).await;
                     let _ = app.emit(
@@ -1325,6 +1400,11 @@ async fn run_agent_native_inner(
         workdir: workdir.clone(),
         authorized: req.authorized,
         delete_confirm: req.delete_confirm.clone(),
+        session_id: req
+            .task_id
+            .clone()
+            .or(req.goal_id.clone())
+            .unwrap_or_else(|| "default".to_string()),
         tools: frozen.tools.clone(),
         system_with_appendix: frozen.with_appendix(&appendix),
     };
@@ -1738,7 +1818,14 @@ mod tests {
         let names = tool_names(&tool_definitions("execute", "eva"));
         assert_eq!(
             names,
-            vec!["read_file", "list_dir", "write_file", "run_shell"]
+            vec![
+                "read_file",
+                "list_dir",
+                "write_file",
+                "run_shell",
+                "open_browser",
+                "read_terminal"
+            ]
         );
     }
 

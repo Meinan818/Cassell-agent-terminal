@@ -1341,7 +1341,11 @@ export default function App() {
   );
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [terminalLines, setTerminalLines] = useState<string[]>([]);
+  /** P0-11③ agent 的 open_browser 工具发来的打开请求（消费后清掉）。 */
+  const [browserRequest, setBrowserRequest] = useState<{
+    url: string;
+    nonce: number;
+  } | null>(null);
   const [review, setReview] = useState<ReviewState | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [merge, setMerge] = useState<MergeSummary | null>(null);
@@ -2124,6 +2128,15 @@ export default function App() {
         );
       }),
     );
+    // P0-11③ agent 的 open_browser 工具：切到 Inspector 浏览器页签，
+    // BrowserPane 接到请求后在子 webview 里打开。
+    add(
+      listen<{ url: string }>("agent-open-browser", ({ payload }) => {
+        if (!payload.url) return;
+        setBrowserRequest({ url: payload.url, nonce: Date.now() });
+        setInspector("browser");
+      }),
+    );
 
     return () => {
       alive = false;
@@ -2203,7 +2216,7 @@ export default function App() {
         refreshReview();
       })
       .catch((e) => {
-        setTerminalLines((prev) => [...prev, `· 审查还原失败：${e}`]);
+        setReviewError(`审查还原失败：${e}`);
       });
   };
 
@@ -2244,28 +2257,6 @@ export default function App() {
       return null;
     });
   };
-
-  // ---- Shell ----
-  const handleRunShell = useCallback((command: string) => {
-    const s = settingsRef.current;
-    setTerminalLines((prev) => [...prev, `$ ${command}`]);
-    invoke<{ stdout: string; stderr: string; code: number | null }>("run_shell", {
-      command,
-      workdir: s?.workdir ?? "",
-    })
-      .then((r) => {
-        setTerminalLines((prev) => {
-          const lines = [...prev];
-          if (r.stdout.trim()) lines.push(...r.stdout.replace(/\n$/, "").split("\n"));
-          if (r.stderr.trim()) lines.push(...r.stderr.replace(/\n$/, "").split("\n"));
-          lines.push(`（退出码 ${r.code ?? "?"}）`);
-          return lines.length > 300 ? lines.slice(-300) : lines;
-        });
-      })
-      .catch((e) => {
-        setTerminalLines((prev) => [...prev, `执行失败：${e}`]);
-      });
-  }, []);
 
   // ---- Run one agent turn (deferred a frame so the bubble paints first) ----
   const runTurn = useCallback(
@@ -2351,6 +2342,9 @@ export default function App() {
             // P0-6 目标模式：有 goal_id 时后端按目标循环跑到底（自动续跑，
             // 带完整上下文）；没有就是普通对话（同样自动续跑到总预算）。
             goal_id: goalId,
+            // P0-11④ 前端 task id：终端 PTY 按它分会话，agent 的
+            // read_terminal 读的就是这个对话的终端。
+            task_id: taskId,
             goal_text: startGoal ? prompt : undefined,
             resume_goal: opts?.resumeGoal ? true : undefined,
           },
@@ -3859,8 +3853,9 @@ export default function App() {
           onUndoMerge={handleUndoMerge}
           onDismissMerge={() => setMerge(null)}
           merge={merge}
-          terminalLines={terminalLines}
-          onRunShell={handleRunShell}
+          terminalSessionId={activeTaskId ?? "default"}
+          browserRequested={browserRequest}
+          onBrowserRequestedConsumed={() => setBrowserRequest(null)}
           settings={settings}
           mode={settings.mode}
           /* P0-11 ②：逐行评论发给当前任务的智能体（handleSend 本身会拦：运行中 / 没配 Key 时返回 false）。 */

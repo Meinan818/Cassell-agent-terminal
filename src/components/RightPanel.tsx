@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import hljs from "highlight.js/lib/common";
 import type {
   FileEntry,
@@ -11,6 +10,8 @@ import type {
   Settings,
 } from "../types";
 import Mark from "./Mark";
+import TerminalPane from "./TerminalPane";
+import BrowserPane, { type BrowserRequest } from "./BrowserPane";
 import {
   displayNo,
   lineKey,
@@ -69,8 +70,11 @@ interface RightPanelProps {
   onUndoMerge: () => void;
   onDismissMerge: () => void;
   merge: MergeSummary | null;
-  terminalLines: string[];
-  onRunShell: (cmd: string) => void;
+  /** P0-11④ 终端会话 id（= 当前对话 task id，普通对话是 "default"）。 */
+  terminalSessionId: string;
+  /** P0-11③ agent 的 open_browser 工具发来的打开请求（App 持有，消费后清掉）。 */
+  browserRequested: BrowserRequest | null;
+  onBrowserRequestedConsumed: () => void;
   settings: Settings;
   /** P0-9 当前模式：审查/交付入口与标题随模式换名。 */
   mode: Mode;
@@ -94,8 +98,6 @@ const VIEWS: { id: InspectorView; label: string }[] = [
   { id: "workflow", label: "工作流" },
 ];
 
-const TERM_HISTORY_KEY = "cassell-term-history";
-/** P0-11 ①：文件预览按需渲染，每页行数（不再一次渲染几千行 DOM）。 */
 const PREVIEW_PAGE = 300;
 
 function formatBytes(n: number): string {
@@ -586,8 +588,9 @@ export default function RightPanel(props: RightPanelProps) {
     onUndoMerge,
     onDismissMerge,
     merge,
-    terminalLines,
-    onRunShell,
+    terminalSessionId,
+    browserRequested,
+    onBrowserRequestedConsumed,
     settings,
     mode,
     onSendToAgent,
@@ -799,93 +802,11 @@ export default function RightPanel(props: RightPanelProps) {
       .catch((e) => setPreview({ path: f.path, text: `无法预览：${e}`, bytes: null, truncated: false }));
   };
 
-  // ---- Terminal view state ----
-  const [cmd, setCmd] = useState("");
-  const [history, setHistory] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(TERM_HISTORY_KEY);
-      const arr = raw ? (JSON.parse(raw) as unknown) : [];
-      return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
-    } catch {
-      return [];
-    }
-  });
-  const [histIdx, setHistIdx] = useState<number | null>(null);
-  const [draftCmd, setDraftCmd] = useState("");
-  // “清空”只隐藏本面板已显示的行（App 持有的 terminalLines 不动，不影响已执行命令）。
-  const [clearedAt, setClearedAt] = useState(0);
-  const termLogRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    termLogRef.current?.scrollTo({ top: termLogRef.current.scrollHeight });
-  }, [terminalLines, clearedAt]);
-
-  const runCmd = (c: string) => {
-    const t = c.trim();
-    if (!t) return;
-    setCmd("");
-    setHistIdx(null);
-    setDraftCmd("");
-    setHistory((prev) => {
-      if (prev[prev.length - 1] === t) return prev;
-      const next = [...prev, t].slice(-100);
-      try {
-        localStorage.setItem(TERM_HISTORY_KEY, JSON.stringify(next));
-      } catch {
-        // 存储不可用时历史只留本会话，不报错。
-      }
-      return next;
-    });
-    onRunShell(t);
-  };
-
-  const onTermKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      runCmd(cmd);
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (history.length === 0) return;
-      const next = histIdx === null ? history.length - 1 : Math.max(0, histIdx - 1);
-      if (histIdx === null) setDraftCmd(cmd);
-      setHistIdx(next);
-      setCmd(history[next]);
-      return;
-    }
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (histIdx === null) return;
-      const next = histIdx + 1;
-      if (next >= history.length) {
-        setHistIdx(null);
-        setCmd(draftCmd);
-      } else {
-        setHistIdx(next);
-        setCmd(history[next]);
-      }
-    }
-  };
-
-  // ---- Browser view state（agent 工作视图：看文档、看页面） ----
-  const [url, setUrl] = useState("");
-  const openWebUrl = async () => {
-    const u = url.trim();
-    if (!u) return;
-    const full = /^https?:\/\//i.test(u) ? u : `https://${u}`;
-    try {
-      await openUrl(full);
-    } catch {
-      // opener failed; nothing to fake — leave the URL in the box.
-    }
-  };
-
   const pendingCount = (review?.files ?? []).filter(
     (f) => (f.state ?? "pending") === "pending",
   ).length;
   const plugins = settings.extensions.filter((e) => e.kind === "plugin");
   const mcps = settings.extensions.filter((e) => e.kind === "mcp");
-  const visibleTermLines = terminalLines.slice(clearedAt);
 
   return (
     <aside
@@ -1238,50 +1159,7 @@ export default function RightPanel(props: RightPanelProps) {
           )}
 
           {view === "terminal" && (
-            <div className="rp-section terminal-tab">
-              <div className="rp-head">
-                <span>终端</span>
-                <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <span className="rp-note">{workdir || "工作区未设置"}</span>
-                  <button
-                    type="button"
-                    className="btn-ghost"
-                    onClick={() => setClearedAt(terminalLines.length)}
-                    title="只清空本面板的显示，不影响已执行命令"
-                  >
-                    清空
-                  </button>
-                </span>
-              </div>
-              <div className="term-log" aria-live="polite" ref={termLogRef}>
-                {visibleTermLines.length === 0 && (
-                  <div className="term-line dim">终端就绪。输入命令，回车执行。↑ / ↓ 翻命令历史。</div>
-                )}
-                {visibleTermLines.map((l, i) => (
-                  <div key={i} className="term-line">
-                    {l}
-                  </div>
-                ))}
-              </div>
-              <div className="term-quick">
-                {["pwd", "ls", "git status"].map((c) => (
-                  <button key={c} type="button" onClick={() => runCmd(c)}>
-                    {c}
-                  </button>
-                ))}
-              </div>
-              <input
-                className="term-input"
-                value={cmd}
-                onChange={(e) => {
-                  setCmd(e.target.value);
-                  setHistIdx(null);
-                }}
-                onKeyDown={onTermKeyDown}
-                placeholder="$ 输入命令，回车执行（↑ / ↓ 翻历史）"
-                aria-label="终端命令"
-              />
-            </div>
+            <TerminalPane sessionId={terminalSessionId} workdir={workdir} />
           )}
 
           {view === "files" && (
@@ -1392,34 +1270,10 @@ export default function RightPanel(props: RightPanelProps) {
           )}
 
           {view === "browser" && (
-            <div className="rp-section">
-              <div className="rp-head">
-                <span>浏览器</span>
-              </div>
-              <div className="rp-empty-text">
-                Agent 工作视图：查看文档与页面。打开后走系统浏览器；学院邀请码已收到侧栏段位牌里。
-              </div>
-              <div className="browser-card">
-                <div className="browser-card-title">打开网页</div>
-                <div className="browser-open-row">
-                  <input
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") openWebUrl();
-                    }}
-                    placeholder="输入网址，如 github.com"
-                    aria-label="网址"
-                  />
-                  <button type="button" className="btn-primary" onClick={openWebUrl}>
-                    打开
-                  </button>
-                </div>
-                <div className="rp-empty-text">
-                  在系统浏览器中打开。内置浏览器下个版本接入。
-                </div>
-              </div>
-            </div>
+            <BrowserPane
+              requested={browserRequested}
+              onRequestedConsumed={onBrowserRequestedConsumed}
+            />
           )}
 
           {view === "plugins" && (

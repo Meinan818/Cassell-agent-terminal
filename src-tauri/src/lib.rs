@@ -1,4 +1,5 @@
 mod agent;
+mod browser;
 mod codex;
 mod dsml;
 mod frozen;
@@ -6,6 +7,7 @@ mod fsutil;
 mod goal;
 mod lore;
 mod models;
+mod pty;
 mod sandbox;
 mod settings;
 mod shell;
@@ -51,6 +53,8 @@ pub fn run() {
             goals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             session_usage: tokio::sync::Mutex::new(crate::usage::UsageStats::default()),
         })
+        .manage(browser::BrowserState::default())
+        .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
@@ -74,6 +78,21 @@ pub fn run() {
             fsutil::revert_file,
             fsutil::commit_files,
             shell::run_shell,
+            browser::browser_open,
+            browser::browser_navigate,
+            browser::browser_back,
+            browser::browser_forward,
+            browser::browser_reload,
+            browser::browser_set_rect,
+            browser::browser_show,
+            browser::browser_hide,
+            browser::browser_close,
+            browser::browser_current,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_snapshot,
+            pty::pty_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
