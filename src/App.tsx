@@ -2335,7 +2335,7 @@ export default function App() {
           try {
             const cps = await invoke<CheckpointInfo[]>(
               "list_checkpoints_cmd",
-              { goal_id: goalId },
+              { goalId },
             );
             setTasks((prev) =>
               prev.map((t) =>
@@ -2640,7 +2640,7 @@ export default function App() {
   // 结束目标：后端会话清掉，卡片消失；检查点留在磁盘上（审计用）。
   const endGoal = useCallback((taskId: string) => {
     if (runningRef.current) return;
-    invoke("clear_goal_cmd", { goal_id: taskId }).catch(() => undefined);
+    invoke("clear_goal_cmd", { goalId: taskId }).catch(() => undefined);
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, goal: undefined } : t)),
     );
@@ -2661,10 +2661,10 @@ export default function App() {
           transcript: { role: string; text: string }[];
           goal: GoalSummary | null;
         }>("rewind_checkpoint_cmd", {
-          goal_id: taskId,
+          goalId: taskId,
           turn,
           scope,
-          goal_text: task?.goal?.text ?? null,
+          goalText: task?.goal?.text ?? null,
           mode: s?.mode ?? null,
           workdir: s?.workdir ?? null,
         });
