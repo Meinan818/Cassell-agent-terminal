@@ -110,6 +110,7 @@ fn build_codex_command(
     let full_prompt = format!("[身份设定] {persona}\n\n[任务]\n{}", req.prompt);
 
     let mut cmd = Command::new(codex_binary(settings));
+    crate::hide_console(&mut cmd);
     cmd.arg("exec")
         .arg("--json")
         .arg("--skip-git-repo-check")
@@ -312,11 +313,10 @@ pub async fn cancel_run(state: State<'_, RunState>) -> Result<bool, String> {
 pub async fn check_codex(app: AppHandle) -> Result<CodexInfo, String> {
     let settings = load_settings(&app);
     let bin = codex_binary(&settings);
-    let out = Command::new(&bin)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .output()
-        .await;
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--version").stdin(Stdio::null());
+    crate::hide_console(&mut cmd);
+    let out = cmd.output().await;
     match out {
         Ok(o) if o.status.success() => Ok(CodexInfo {
             found: true,

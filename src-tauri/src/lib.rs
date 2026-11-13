@@ -8,6 +8,19 @@ use codex::RunState;
 use settings::Settings;
 use tauri::AppHandle;
 
+/// Windows 上 spawn 子进程时不弹控制台窗口（CREATE_NO_WINDOW）。
+/// 不加这个 flag 时，Windows 会为每个子进程（cmd /C、git、codex CLI）
+/// 短暂弹出一个终端窗口。Linux 上是空操作。
+#[cfg(windows)]
+pub(crate) fn hide_console(cmd: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+    // CREATE_NO_WINDOW = 0x08000000
+    cmd.as_std_mut().creation_flags(0x08000000);
+}
+
+#[cfg(not(windows))]
+pub(crate) fn hide_console(_cmd: &mut tokio::process::Command) {}
+
 #[tauri::command]
 fn get_settings(app: AppHandle) -> Settings {
     settings::load_settings(&app)

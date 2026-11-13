@@ -251,11 +251,12 @@ async fn exec_tool(
             }
             tools_run.push(format!("执行 `{cmd}`"));
             #[cfg(windows)]
-            let out = tokio::process::Command::new("cmd")
-                .args(["/C", cmd])
-                .current_dir(workdir)
-                .output()
-                .await;
+            let out = {
+                let mut c = tokio::process::Command::new("cmd");
+                c.args(["/C", cmd]).current_dir(workdir);
+                crate::hide_console(&mut c);
+                c.output().await
+            };
             #[cfg(not(windows))]
             let out = tokio::process::Command::new("sh")
                 .args(["-c", cmd])

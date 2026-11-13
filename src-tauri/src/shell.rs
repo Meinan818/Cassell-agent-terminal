@@ -29,6 +29,7 @@ pub async fn run_shell(command: String, workdir: String) -> Result<ShellResult, 
     if !workdir.trim().is_empty() {
         cmd.current_dir(&workdir);
     }
+    crate::hide_console(&mut cmd);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

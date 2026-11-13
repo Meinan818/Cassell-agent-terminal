@@ -82,10 +82,12 @@ pub struct ReviewState {
 }
 
 async fn git(workdir: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
+    let mut cmd = Command::new("git");
+    cmd.args(args)
         .current_dir(workdir)
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    crate::hide_console(&mut cmd);
+    let out = cmd
         .output()
         .await
         .map_err(|e| format!("无法运行 git：{e}（请确认已安装 Git）"))?;
