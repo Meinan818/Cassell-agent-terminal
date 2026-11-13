@@ -27,6 +27,10 @@ import type { Effort, Theme } from "./types";
 import Boot from "./components/Boot";
 import TitleBar from "./components/TitleBar";
 import Mark, { type MarkState } from "./components/Mark";
+import MorphIcon, {
+  type MorphShape,
+  prefersReducedMotion,
+} from "./components/MorphIcon";
 import { stateFor } from "./components/mark/ballAdapter";
 import Sidebar from "./components/Sidebar";
 import Composer from "./components/Composer";
@@ -146,33 +150,53 @@ const WAVE2_CSS = `
 .msg.think, .msg.tool-group { animation: w2-rise-in 170ms var(--spring) both; }
 .msg.tool { animation: w2-rise-in 160ms var(--spring) both; }
 @keyframes w2-fade { from { opacity: 0; } to { opacity: 1; } }
-/* ---- 思考动画：细弧旋转 + 省略号呼吸；完成时弧线淡出、对勾淡入（不生硬变绿药丸） ---- */
-.think-ico { position: relative; width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); transition: color 300ms var(--ease); }
+/* ---- 变形图标系统（Grok 变形动画标准）：一个图标在不同形态之间平滑变形 ----
+ * 4 颗“墨滴”在 gooey 滤镜下始终连成一个整体：位置/半径用 550ms 指数缓出
+ * 过渡，形状是真正“变形”过去的，不消失、不硬切、不是画个东西动两下；
+ * 几何形态（文件/文件夹/终端）是一块圆角方片从墨滴中心舒展开；细节描边
+ * （笔尖/文件行/文件夹标签/终端 >_ /放大镜）随形态淡入淡出；运行中整体
+ * 轻呼吸。完成态：变形收束成一颗安静的小圆点 + 弱色文字，不用绿药丸、
+ * 不打对号。缓动统一用指数缓出 Cubic(0.645, 0.045, 0.355, 1.0)（grokbot
+ * 规范同款），永不超调。 ---- */
+.morph-svg { display: block; flex-shrink: 0; color: inherit; overflow: visible; }
+.morph-svg.breathe { animation: morph-breathe 1.8s ease-in-out infinite; }
+@keyframes morph-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+.morph-blob-pos { transition: transform 550ms cubic-bezier(0.645, 0.045, 0.355, 1.0); }
+.morph-blob { fill: currentColor; transition: r 550ms cubic-bezier(0.645, 0.045, 0.355, 1.0); }
+.morph-blob-bob { animation: morph-bob 1.1s ease-in-out infinite; }
+@keyframes morph-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+.morph-tile { fill: currentColor; opacity: 0; transform: scale(0.7); transform-box: fill-box; transform-origin: center; transition: opacity 300ms var(--ease), transform 550ms cubic-bezier(0.645, 0.045, 0.355, 1.0); }
+.morph-svg[data-shape="file"] .morph-tile, .morph-svg[data-shape="folder"] .morph-tile, .morph-svg[data-shape="terminal"] .morph-tile { opacity: 1; transform: scale(1); }
+.morph-svg[data-shape="folder"] .morph-tile { transform: translateY(1.2px) scale(1); }
+.morph-detail { opacity: 0; transition: opacity 300ms var(--ease); }
+.morph-detail-ring { transform: scale(0.8); transform-box: fill-box; transform-origin: center; transition: opacity 300ms var(--ease), transform 550ms cubic-bezier(0.645, 0.045, 0.355, 1.0); }
+.morph-svg[data-shape="pen"] .morph-pen-tip { opacity: 1; }
+.morph-svg[data-shape="file"] .morph-file-detail { opacity: 1; }
+.morph-svg[data-shape="folder"] .morph-folder-detail { opacity: 1; }
+.morph-svg[data-shape="terminal"] .morph-terminal-detail { opacity: 1; }
+/* 方片上的细节描边必须刻出颜色：方片是 currentColor 实心，描边若也是 currentColor
+ * 就是白线画在白片上、完全看不见。改用 --bg 刻成暗线（浅色主题下 --bg 是浅色、方片是深色，同样可见）。 */
+.morph-file-detail, .morph-folder-detail, .morph-terminal-detail { stroke: var(--bg); }
+.morph-svg[data-shape="ring"] .morph-ring { opacity: 1; transform: scale(1); }
+.morph-svg[data-shape="search"] .morph-search-detail { opacity: 1; transform: scale(1); }
+/* 状态文字随形态切换：淡入 + 2px 上浮（不是硬换字）。 */
+.morph-label { display: inline-block; animation: morph-label-in 300ms var(--ease) both; }
+@keyframes morph-label-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .morph-svg.breathe, .morph-blob-bob { animation: none; }
+}
+/* ---- 思考块 / 工具执行态：图标是变形图标（MorphIcon），颜色随完成态变弱 ---- */
+.think-ico { position: relative; width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); transition: color 300ms var(--ease); display: flex; align-items: center; justify-content: center; }
 .think-ico.done { color: var(--text-2); }
-.think-ico svg { position: absolute; inset: 0; display: block; }
-.think-ico .think-arc { animation: think-spin 1.1s linear infinite; transition: opacity 300ms var(--ease); }
-.think-ico .think-check { opacity: 0; transform: scale(0.7); transition: opacity 300ms var(--ease), transform 300ms var(--spring); }
-.think-ico.done .think-arc { opacity: 0; animation-play-state: paused; }
-.think-ico.done .think-check { opacity: 1; transform: scale(1); }
-@keyframes think-spin { to { transform: rotate(360deg); } }
 .think-status { color: var(--accent); transition: color 300ms var(--ease); }
 .think-status.done { color: var(--text-2); }
-.think-dots span { animation: think-dot 1.2s ease-in-out infinite; }
-.think-dots span:nth-child(2) { animation-delay: 0.2s; }
-.think-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes think-dot { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
 /* ---- 工具图标芯片 + 执行态：执行中图标呼吸、状态弧旋转；完成时平滑过渡 ---- */
 .tool-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--bg-soft); color: var(--text-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .tool-ico.run { animation: tool-breathe 1.6s ease-in-out infinite; }
 @keyframes tool-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: 0.85; } }
 .tool-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; flex-shrink: 0; color: var(--accent); transition: color 300ms var(--ease); }
 .tool-status.done { color: var(--text-2); }
-.tool-status-ico { position: relative; width: 14px; height: 14px; flex-shrink: 0; }
-.tool-status-ico svg { position: absolute; inset: 0; display: block; }
-.tool-status-ico .tool-spin { animation: think-spin 1s linear infinite; transition: opacity 300ms var(--ease); }
-.tool-status-ico .tool-check { opacity: 0; transform: scale(0.7); transition: opacity 300ms var(--ease), transform 300ms var(--spring); }
-.tool-status-ico.done .tool-spin { opacity: 0; animation-play-state: paused; }
-.tool-status-ico.done .tool-check { opacity: 1; transform: scale(1); }
+.tool-status-ico { position: relative; width: 14px; height: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .tool-code { font-family: var(--mono); font-size: 12px; line-height: 1.6; background: var(--bg-soft); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; color: var(--text-2); max-height: 180px; overflow-y: auto; }
 .tool-code .tok-cmd { color: var(--accent); font-weight: 600; }
 .tool-label { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin: 2px 0 6px; }
@@ -561,14 +585,53 @@ function EvaNote({
   );
 }
 
-/** 思考块（B 档卡片）：标题行 + 思考动画，默认只露标题行；跑完默认收起。
- * 思考指示不是一行静止的字：细弧旋转 + 省略号呼吸；完成时弧线淡出、
- * 对勾淡入、颜色由 accent 平滑过渡到弱色——不生硬变绿药丸。 */
+/** 思考块（B 档卡片）：标题行 + 变形图标，默认只露标题行；跑完默认收起。
+ * 思考动画是 Grok 标准的变形图标：一个图标在三点/球/圆环/笔之间平滑变形、
+ * 循环切换，配随形态变化的状态文字（思考中/探索中/撰写中）——不是转圈
+ * spinner，不是一行字加绿药丸。完成时图标变形收束成一颗安静小圆点、文字
+ * 平滑过渡到“已思考”，颜色由 accent 过渡到弱色。 */
+/** L1 安静状态行的小标记：运行时是三点/球来回变形的图标，空闲时是安静小圆点。 */
+function L1Mark({ running }: { running: boolean }) {
+  const [alt, setAlt] = useState(false);
+  useEffect(() => {
+    if (!running || prefersReducedMotion()) return;
+    const t = setInterval(() => setAlt((a) => !a), 1200);
+    return () => clearInterval(t);
+  }, [running]);
+  if (!running) return <span className="w2-dot ok" />;
+  return (
+    <span style={{ display: "inline-flex", color: "var(--accent)" }}>
+      <MorphIcon shape={alt ? "ball" : "dots"} size={13} breathing />
+    </span>
+  );
+}
+
+const THINK_CYCLE: { shape: MorphShape; label: string }[] = [
+  { shape: "dots", label: "思考中" },
+  { shape: "ball", label: "思考中" },
+  { shape: "ring", label: "探索中" },
+  { shape: "pen", label: "撰写中" },
+];
+
 function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
+  const [cycleIdx, setCycleIdx] = useState(0);
   useEffect(() => {
     if (!streaming) setOpen(false);
   }, [streaming]);
+  // 思考中：形态按 1.3s 一步循环变形（三点 → 球 → 圆环 → 笔），文字与形态对应。
+  useEffect(() => {
+    if (!streaming || prefersReducedMotion()) return;
+    setCycleIdx(0);
+    const t = setInterval(
+      () => setCycleIdx((i) => (i + 1) % THINK_CYCLE.length),
+      1300,
+    );
+    return () => clearInterval(t);
+  }, [streaming]);
+  const phase = streaming
+    ? THINK_CYCLE[cycleIdx]
+    : { shape: "dot" as MorphShape, label: "已思考" };
   return (
     <div className="msg think">
       <div className="w2-card" style={{ width: "100%" }}>
@@ -579,20 +642,13 @@ function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }) {
           aria-expanded={open}
         >
           <span className={`think-ico ${streaming ? "" : "done"}`} aria-hidden="true">
-            <svg className="think-arc" width="18" height="18" viewBox="0 0 18 18">
-              <circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="32 12" />
-            </svg>
-            <svg className="think-check" width="18" height="18" viewBox="0 0 18 18">
-              <path d="M4.5 9.5 L7.5 12.5 L13.5 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <MorphIcon shape={phase.shape} size={18} breathing={streaming} />
           </span>
           <span className="w2-card-title" style={{ fontFamily: "var(--font)", fontWeight: 600 }}>思考过程</span>
           <span className={`w2-card-sum think-status ${streaming ? "" : "done"}`}>
-            {streaming ? (
-              <>正在思考<span className="think-dots"><span>.</span><span>.</span><span>.</span></span></>
-            ) : (
-              "已思考"
-            )}
+            <span key={phase.label} className="morph-label">
+              {phase.label}
+            </span>
           </span>
           <span>{open ? "▾" : "▸"}</span>
         </button>
@@ -719,16 +775,45 @@ function ToolIcon({ kind }: { kind: ToolIconKind }) {
   }
 }
 
-/** 执行态小标记：旋转细弧（执行中）与对勾（完成）交叉淡入淡出。 */
-function StatusMark({ running }: { running: boolean }) {
+/** 工具类型 → 变形图标形态：每种工具执行中都有自己对应的形态。 */
+function toolMorphShape(kind: ToolIconKind): MorphShape {
+  switch (kind) {
+    case "file":
+      return "file";
+    case "folder":
+      return "folder";
+    case "terminal":
+      return "terminal";
+    case "edit":
+      return "pen";
+    default:
+      return "ball";
+  }
+}
+
+/** 执行态小标记：变形图标——执行中在工具形态与球之间来回变形（活的，
+ * 不是转圈）；完成时变形收束成一颗安静小圆点，不用绿药丸、不打对号。 */
+function StatusMark({
+  running,
+  shape,
+}: {
+  running: boolean;
+  shape: MorphShape;
+}) {
+  const [alt, setAlt] = useState(false);
+  useEffect(() => {
+    if (!running || prefersReducedMotion()) return;
+    const t = setInterval(() => setAlt((a) => !a), 1200);
+    return () => clearInterval(t);
+  }, [running]);
+  const live: MorphShape = alt
+    ? shape === "ball"
+      ? "dots"
+      : "ball"
+    : shape;
   return (
     <span className={`tool-status-ico ${running ? "run" : "done"}`} aria-hidden="true">
-      <svg className="tool-spin" width="14" height="14" viewBox="0 0 14 14">
-        <circle cx="7" cy="7" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="25 9.5" />
-      </svg>
-      <svg className="tool-check" width="14" height="14" viewBox="0 0 14 14">
-        <path d="M3.5 7.5 L6 10 L10.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <MorphIcon shape={running ? live : "dot"} size={14} breathing={running} />
     </span>
   );
 }
@@ -761,7 +846,7 @@ function renderToolArgs(name: string, args: Record<string, unknown>): ReactNode 
 }
 
 /** 工具调用卡（B 档，Codex 式）：人话描述 + 图标 + 执行/完成态，不甩原始 JSON。
- * 标题行 = 图标芯片 + 人话（读取文件 x / 执行命令 y）+ 状态（执行中弧线旋转 / 完成对勾）；
+ * 标题行 = 图标芯片 + 人话（读取文件 x / 执行命令 y）+ 状态（执行中按工具类型变形 / 完成收束成小圆点）；
  * 展开后看参数（命令/路径，命令首词着色）与结果（等宽块内联显示）；读图片时给缩略图。 */
 function ToolCard({
   msg,
@@ -816,7 +901,7 @@ function ToolCard({
           </span>
           <span className="w2-card-sum">{summary.text}</span>
           <span className={`tool-status ${running ? "run" : "done"}`}>
-            <StatusMark running={running} />
+            <StatusMark running={running} shape={toolMorphShape(summary.icon)} />
             {running ? "执行中" : "完成"}
           </span>
           <span>{open ? "▾" : "▸"}</span>
@@ -855,7 +940,7 @@ function ToolCard({
  * 连续的 kind:"tool" 消息收成一个分组，默认只露一行摘要（N 个 · 工具名），
  * 点开再看里面每一条；每条 ToolCard 本身仍默认折叠。
  * 灵动性：分组展开的瞬间，各卡按下标错峰 70ms 依次进来（瀑布）；展开 1.4s 后
- * 新到的卡片不再延迟、直接入场。分组头有执行态（执行中弧线旋转 / 完成对勾）。 */
+ * 新到的卡片不再延迟、直接入场。分组头有执行态（执行中三点/球来回变形 / 完成收束成小圆点）。 */
 function ToolGroup({
   msgs,
   workdir,
@@ -896,7 +981,7 @@ function ToolGroup({
             {msgs.length} 个 · {names.join("、")}
           </span>
           <span className={`tool-status ${running ? "run" : "done"}`}>
-            <StatusMark running={running} />
+            <StatusMark running={running} shape="ball" />
             {running ? "执行中" : "完成"}
           </span>
           <span>{open ? "▾" : "▸"}</span>
@@ -2774,13 +2859,13 @@ export default function App() {
             className="w2-l1"
             onClick={() => setInspector(l1Target)}
           >
-            <span className={`w2-dot ${running ? "busy" : "ok"}`} />
+            <L1Mark running={running} />
             {l1Text}
             <span aria-hidden="true">›</span>
           </button>
         ) : (
           <div className="w2-l1" role="status">
-            <span className="w2-dot ok" />
+            <L1Mark running={running} />
             {l1Text}
           </div>
         )}
