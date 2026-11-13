@@ -13,8 +13,13 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::oneshot;
+
+/// 审批请求自增序号（生成唯一请求 id，不引入新依赖）。
+static APPROVAL_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// 一次运行的请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +39,20 @@ pub struct AgentRequest {
     /// is accepted and recorded, but no multi-agent orchestration is performed.
     #[serde(default)]
     pub ultracode: bool,
+    /// 运行模式： "execute"（执行，默认）| "plan"（计划：只调查不写文件）。
+    /// 由前端的 计划/执行 切换传入。
+    #[serde(default = "default_run_mode")]
+    pub run_mode: String,
+    /// 本轮是否已获本会话的文件夹授权。false 时所有文件工具一律拒绝，
+    /// 前端必须先让用户选文件夹（或授权当前文件夹）才能读写。
+    /// 注意：这不是 settings.workdir 的翻版——workdir 只是"记住的上次目录"，
+    /// 授权是"本会话用户明确同意"，两者分开才有意义。
+    #[serde(default)]
+    pub authorized: bool,
+    /// 删除确认设置： "always"（每次删都问，默认）| "never"（不再询问）。
+    /// 由设置页传入；引擎据此决定删文件类命令要不要走审批卡。
+    #[serde(default = "default_delete_confirm")]
+    pub delete_confirm: String,
     /// 用户显示名（界面设置）。空 = 默认“路专员”。
     #[serde(default)]
     pub display_name: String,
@@ -94,10 +113,24 @@ fn cancelled_result(
     }
 }
 
+fn default_run_mode() -> String {
+    "execute".to_string()
+}
+
+fn default_delete_confirm() -> String {
+    "always".to_string()
+}
+
 /// 工具定义：只暴露真实实现的能力，不做样子。
-fn tool_definitions() -> Value {
-    json!([
-        {
+///
+/// 工具表随运行模式与身份变化（这是 P0-5/P0-9 的后端 enforcement，
+/// 不是前端文字游戏）：
+/// - 计划模式：只有 read_file / list_dir，写与执行一律不暴露；
+/// - NORMA：读 + 写文档，没有 run_shell（办公不跑终端，见调研 §4.1 硬禁）；
+/// - EVA 执行模式：四项全有。
+fn tool_definitions(run_mode: &str, mode: &str) -> Value {
+    let mut tools = vec![
+        json!({
             "type": "function",
             "function": {
                 "name": "read_file",
@@ -110,8 +143,8 @@ fn tool_definitions() -> Value {
                     "required": ["path"]
                 }
             }
-        },
-        {
+        }),
+        json!({
             "type": "function",
             "function": {
                 "name": "list_dir",
@@ -123,23 +156,32 @@ fn tool_definitions() -> Value {
                     }
                 }
             }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "write_file",
-                "description": "向工作区写入/覆盖一个文件。用于改代码。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "相对工作区的文件路径"},
-                        "content": {"type": "string", "description": "要写入的完整内容"}
-                    },
-                    "required": ["path", "content"]
-                }
+        }),
+    ];
+    if run_mode == "plan" {
+        return Value::Array(tools);
+    }
+    tools.push(json!({
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": if mode == "eva" {
+                "向工作区写入/覆盖一个文件。用于改代码。"
+            } else {
+                "向工作区写入/覆盖一个办公文档（Markdown/纯文本等）。"
+            },
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对工作区的文件路径"},
+                    "content": {"type": "string", "description": "要写入的完整内容"}
+                },
+                "required": ["path", "content"]
             }
-        },
-        {
+        }
+    }));
+    if mode == "eva" {
+        tools.push(json!({
             "type": "function",
             "function": {
                 "name": "run_shell",
@@ -152,8 +194,85 @@ fn tool_definitions() -> Value {
                     "required": ["command"]
                 }
             }
+        }));
+    }
+    Value::Array(tools)
+}
+
+/// 删文件类命令的识别（大小写不敏感；按 && / || / ; / | 拆段逐段判断）。
+/// 返回命中的命令名（如 "rm"），没有命中返回 None。
+/// 覆盖：rm / del / erase / rmdir / rd / Remove-Item / git clean -f / git rm。
+fn destructive_command(cmd: &str) -> Option<&'static str> {
+    let lower = cmd.to_ascii_lowercase();
+    for seg in lower
+        .split(|c| c == '&' || c == '|' || c == ';')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let mut toks = seg.split_whitespace();
+        let first = toks.next().unwrap_or("");
+        // "sudo rm ..." 也算 rm（Linux 下的写法）。
+        let first = if first == "sudo" {
+            toks.next().unwrap_or("")
+        } else {
+            first
+        };
+        match first {
+            "rm" => return Some("rm"),
+            "del" => return Some("del"),
+            "erase" => return Some("erase"),
+            "rmdir" => return Some("rmdir"),
+            "rd" => return Some("rd"),
+            "remove-item" => return Some("Remove-Item"),
+            "git" => {
+                let sub = toks.next().unwrap_or("");
+                if sub == "clean" && toks.any(|t| t.starts_with("-f")) {
+                    return Some("git clean -f");
+                }
+                if sub == "rm" {
+                    return Some("git rm");
+                }
+            }
+            _ => {}
         }
-    ])
+    }
+    None
+}
+
+/// 灾难性删根：rm -rf /、rm -rf ~、rm -rf C:\ 这类——无论删除确认设置
+/// 如何一律拒绝，不走审批卡（批了也不该执行）。
+fn catastrophic_command(cmd: &str) -> bool {
+    let lower = cmd.to_ascii_lowercase();
+    for seg in lower
+        .split(|c| c == '&' || c == '|' || c == ';')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let mut toks = seg.split_whitespace();
+        let first = toks.next().unwrap_or("");
+        let first = if first == "sudo" {
+            toks.next().unwrap_or("")
+        } else {
+            first
+        };
+        if first != "rm" {
+            continue;
+        }
+        let rest: Vec<&str> = toks.collect();
+        let has_rf = rest
+            .iter()
+            .any(|t| *t == "-rf" || *t == "-fr" || *t == "-r" || *t == "-f");
+        if !has_rf {
+            continue;
+        }
+        let targets_root = rest.iter().any(|t| {
+            matches!(*t, "/" | "/*" | "~" | "~/" | "c:" | "c:/" | "c:\\" | "c:\\*")
+        });
+        if targets_root {
+            return true;
+        }
+    }
+    false
 }
 
 /// 路径安全检查：不允许跳出工作区
@@ -176,22 +295,94 @@ fn safe_join(workdir: &str, rel: &str) -> Result<std::path::PathBuf, String> {
     Ok(out)
 }
 
-async fn exec_tool(
-    workdir: &str,
-    sandbox: &str,
-    name: &str,
-    args: &Value,
-    tools_run: &mut Vec<String>,
-) -> String {
+/// 向界面发一次审批请求（审批卡），等用户点"批准"或"拒绝"。
+/// 180 秒无人决定按拒绝处理（不挂住这一轮）；用户取消任务时也按拒绝处理。
+/// 返回 true = 用户批准执行，false = 拒绝/超时/取消。
+async fn request_approval(
+    app: &AppHandle,
+    state: &RunState,
+    kind: &str,
+    label: &str,
+    detail: &str,
+) -> bool {
+    let id = format!(
+        "appr-{}",
+        APPROVAL_SEQ.fetch_add(1, Ordering::SeqCst)
+    );
+    let (tx, rx) = oneshot::channel::<bool>();
+    {
+        let mut map = state.approvals.lock().await;
+        map.insert(id.clone(), tx);
+    }
+    let _ = app.emit(
+        "agent-approval-request",
+        json!({ "id": id, "kind": kind, "label": label, "detail": detail }),
+    );
+    let decided = tokio::time::timeout(Duration::from_secs(180), rx).await;
+    // 无论结果如何，清理挂起表（已由 resolve_approval 取走时这里是空操作）。
+    {
+        let mut map = state.approvals.lock().await;
+        map.remove(&id);
+    }
+    match decided {
+        Ok(Ok(allow)) => allow,
+        _ => false, // 超时，或发送端（取消）被丢弃
+    }
+}
+
+/// 前端审批卡的按钮调用：批准/拒绝一次挂起的审批请求。
+/// 返回 true = 该请求还在挂起并已被解析；false = 请求已超时/取消/解析过。
+#[tauri::command]
+pub async fn resolve_approval(
+    state: State<'_, RunState>,
+    id: String,
+    allow: bool,
+) -> Result<bool, String> {
+    let tx = {
+        let mut map = state.approvals.lock().await;
+        map.remove(&id)
+    };
+    match tx {
+        Some(tx) => {
+            let _ = tx.send(allow);
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+/// 工具执行上下文：一次 run 内所有工具调用共享的权限状态。
+struct ToolCtx<'a> {
+    app: AppHandle,
+    state: &'a RunState,
+    workdir: String,
+    sandbox: String,
+    approval: String,
+    run_mode: String,
+    mode: String,
+    authorized: bool,
+    delete_confirm: String,
+}
+
+async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut Vec<String>) -> String {
+    // P0-4 授权闸：本会话未授权时，所有文件工具一律拒绝，绝不读盘、
+    // 绝不编造内容。前端收到这条文本后会提示用户先选文件夹。
+    if !ctx.authorized {
+        return "未授权：请先在界面上选择文件夹并授权，授权后我才能读写这个文件夹里的文件。".to_string();
+    }
     match name {
         "read_file" => {
             let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            match safe_join(workdir, rel) {
+            match safe_join(&ctx.workdir, rel) {
                 Ok(p) => match tokio::fs::read_to_string(&p).await {
                     Ok(s) => {
                         tools_run.push(format!("读取 {rel}"));
-                        let capped = if s.len() > 40_000 { format!("{}…（已截断）", &s[..40_000]) } else { s };
-                        capped
+                        let capped: String = s.chars().take(40_000).collect();
+                        if s.chars().count() > 40_000 {
+                            format!("{capped}…（已截断）")
+                        } else {
+                            capped
+                        }
                     }
                     Err(e) => format!("读取失败：{e}"),
                 },
@@ -200,7 +391,7 @@ async fn exec_tool(
         }
         "list_dir" => {
             let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            match safe_join(workdir, rel) {
+            match safe_join(&ctx.workdir, rel) {
                 Ok(p) => match tokio::fs::read_dir(&p).await {
                     Ok(mut rd) => {
                         let mut items = Vec::new();
@@ -223,12 +414,33 @@ async fn exec_tool(
             }
         }
         "write_file" => {
-            if sandbox == "read-only" {
+            // P0-5 计划模式：写操作一律拦住，不落盘。
+            if ctx.run_mode == "plan" {
+                return format!(
+                    "计划模式：我现在只调查、不写文件。{rel} 的改动已记进方案里，等你点「确认执行」后再动手。",
+                    rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("")
+                );
+            }
+            if ctx.sandbox == "read-only" || ctx.approval == "read-only" {
                 return "当前是只读模式，不能改文件。".to_string();
             }
             let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            match safe_join(workdir, rel) {
+            // 写前确认档位：先问用户，批了才写。
+            if ctx.approval == "ask" {
+                let ok = request_approval(
+                    &ctx.app,
+                    ctx.state,
+                    "write",
+                    &format!("写入文件 {rel}"),
+                    &format!("要写入文件 {rel}，内容约 {} 字。", content.chars().count()),
+                )
+                .await;
+                if !ok {
+                    return format!("用户没有批准这次写入（{rel} 没动）。");
+                }
+            }
+            match safe_join(&ctx.workdir, rel) {
                 Ok(p) => {
                     if let Some(parent) = p.parent() {
                         let _ = tokio::fs::create_dir_all(parent).await;
@@ -246,21 +458,53 @@ async fn exec_tool(
         }
         "run_shell" => {
             let cmd = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-            if sandbox == "read-only" {
+            // P0-5 计划模式：不执行命令。
+            if ctx.run_mode == "plan" {
+                return format!(
+                    "计划模式：我现在只调查、不执行命令。`{cmd}` 已记进方案里，等你点「确认执行」后再跑。"
+                );
+            }
+            // P0-9 NORMA 硬禁：办公不跑终端。
+            if ctx.mode == "norma" {
+                return format!(
+                    "我是诺玛，办公模式不跑终端命令。`{cmd}` 需要切到 EVA（工程模式）再跑。"
+                );
+            }
+            if ctx.sandbox == "read-only" || ctx.approval == "read-only" {
                 return "当前是只读模式，不能执行命令。".to_string();
+            }
+            // 灾难性删根：无论删除确认设置如何一律拒绝。
+            if catastrophic_command(cmd) {
+                return format!("这条命令太危险了（删根目录），我拒绝执行：`{cmd}`");
+            }
+            // 删文件类命令：按删除确认设置决定要不要单独问一次。
+            if let Some(hit) = destructive_command(cmd) {
+                if ctx.delete_confirm != "never" {
+                    let ok = request_approval(
+                        &ctx.app,
+                        ctx.state,
+                        "delete",
+                        &format!("执行删除命令（{hit}）"),
+                        &format!("要执行这条删除命令：`{cmd}`\n删除后文件无法直接恢复，确定要执行吗？"),
+                    )
+                    .await;
+                    if !ok {
+                        return format!("用户没有批准这条删除命令（没执行）：`{cmd}`");
+                    }
+                }
             }
             tools_run.push(format!("执行 `{cmd}`"));
             #[cfg(windows)]
             let out = {
                 let mut c = tokio::process::Command::new("cmd");
-                c.args(["/C", cmd]).current_dir(workdir);
+                c.args(["/C", cmd]).current_dir(&ctx.workdir);
                 crate::hide_console(&mut c);
                 c.output().await
             };
             #[cfg(not(windows))]
             let out = tokio::process::Command::new("sh")
                 .args(["-c", cmd])
-                .current_dir(workdir)
+                .current_dir(&ctx.workdir)
                 .output()
                 .await;
             match out {
@@ -363,9 +607,9 @@ async fn run_agent_native_inner(
     } else {
         req.workdir.clone()
     };
-    if workdir.trim().is_empty() {
-        return Err("还没有选择工作区。先告诉我项目文件夹在哪。".to_string());
-    }
+    // P0-4：没有工作区也不直接报错——用户还能正常聊天，只是文件工具
+    // 会在 exec_tool 里以"未授权"拒绝，并由界面引导他选文件夹。
+    // （旧行为是整轮报错，用户连问问题都不行。）
 
     // 组装消息
     // Ultracode 如实处理：当前引擎是单智能体循环，不假装并行编排；
@@ -378,13 +622,24 @@ async fn run_agent_native_inner(
     }
     let title = title_for(&req.display_name);
     let persona = if req.mode == "eva" {
-        format!("你是 EVA，卡塞尔学院的并行执行体，与诺玛共用同一套记忆。称呼用户为{title}。面对复杂任务先拆解、核对后再交付，回答直接、有决断。")
+        format!("你是 EVA，卡塞尔学院的并行执行体，与诺玛共用同一套记忆。称呼用户为{title}。面对复杂任务先拆解、核对后再交付，回答直接、有决断。你的产出是可验证的改动：改了什么文件、测试结果如何，都要拿证据说话。")
     } else {
-        format!("你是诺玛，卡塞尔学院的中枢 AI。称呼用户为{title}。回答简洁、准确，先给结论再给步骤。")
+        format!("你是诺玛，卡塞尔学院的中枢 AI。称呼用户为{title}。回答简洁、准确，先给结论再给步骤。你的产出是文档和结论：写文档、整理资料、查信息、理思路。你不改代码、不跑终端命令——用户要改代码时，请他切到 EVA。")
+    };
+    let plan_hint = if req.run_mode == "plan" {
+        "你现在处于计划模式：只调查、不写文件、不执行命令。先读相关文件、理清现状，再产出一份结构化方案，格式固定为：\n## 目标\n## 发现\n## 步骤\n## 风险\n不要直接动手改文件，等用户确认方案后再执行。"
+    } else {
+        ""
+    };
+    let auth_hint = if !req.authorized {
+        "\n当前工作区未授权：文件工具不可用。如果用户要你读写文件，请先请用户在界面上选择文件夹并授权，不要编造文件内容、不要猜文件里有什么。"
+    } else {
+        ""
     };
     let mut messages: Vec<Value> = vec![json!({
         "role": "system",
-        "content": format!("{persona}\n\n当前工作区：{workdir}\n允许的操作：{}",
+        "content": format!("{persona}\n{plan_hint}\n当前工作区：{}\n允许的操作：{}{auth_hint}",
+            if req.authorized { workdir.as_str() } else { "未授权（请先选择文件夹）" },
             if req.sandbox == "read-only" { "只能读取，不能修改" } else { "可以读写文件并执行命令" })
     })];
     if let Some(h) = &req.history {
@@ -422,7 +677,7 @@ async fn run_agent_native_inner(
             "model": req.model,
             "messages": messages,
             "temperature": effort_temperature(&req.effort),
-            "tools": tool_definitions(),
+            "tools": tool_definitions(&req.run_mode, &req.mode),
             "tool_choice": "auto",
             "stream": true,
             "stream_options": {"include_usage": true}
@@ -562,7 +817,18 @@ async fn run_agent_native_inner(
                     let args_str = call.pointer("/function/arguments").and_then(|a| a.as_str()).unwrap_or("{}");
                     let args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
                     let _ = app.emit("agent-tool", json!({"name": name, "args": args}));
-                    let result = exec_tool(&workdir, &req.sandbox, name, &args, &mut tools_run).await;
+                    let ctx = ToolCtx {
+                        app: app.clone(),
+                        state,
+                        workdir: workdir.clone(),
+                        sandbox: req.sandbox.clone(),
+                        approval: req.approval.clone(),
+                        run_mode: req.run_mode.clone(),
+                        mode: req.mode.clone(),
+                        authorized: req.authorized,
+                        delete_confirm: req.delete_confirm.clone(),
+                    };
+                    let result = exec_tool(&ctx, name, &args, &mut tools_run).await;
                     let _ = app.emit("agent-tool-result", json!({"name": name, "result": result}));
                     messages.push(json!({
                         "role": "tool",
@@ -737,5 +1003,71 @@ pub async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         }
         Ok(None) => Ok(None),
         Err(e) => Err(format!("打开选择框失败：{e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_names(v: &Value) -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| {
+                        t.pointer("/function/name")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn plan_mode_exposes_read_only_tools() {
+        let names = tool_names(&tool_definitions("plan", "eva"));
+        assert_eq!(names, vec!["read_file", "list_dir"]);
+    }
+
+    #[test]
+    fn norma_has_no_shell() {
+        let names = tool_names(&tool_definitions("execute", "norma"));
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(names.contains(&"write_file".to_string()));
+        assert!(!names.contains(&"run_shell".to_string()));
+    }
+
+    #[test]
+    fn eva_execute_has_all_tools() {
+        let names = tool_names(&tool_definitions("execute", "eva"));
+        assert_eq!(
+            names,
+            vec!["read_file", "list_dir", "write_file", "run_shell"]
+        );
+    }
+
+    #[test]
+    fn destructive_detection() {
+        assert_eq!(destructive_command("rm -f foo.txt"), Some("rm"));
+        assert_eq!(destructive_command("rm -rf build && npm run build"), Some("rm"));
+        assert_eq!(destructive_command("del C:\\temp\\a.txt"), Some("del"));
+        assert_eq!(destructive_command("Remove-Item foo.txt"), Some("Remove-Item"));
+        assert_eq!(destructive_command("git clean -fd"), Some("git clean -f"));
+        assert_eq!(destructive_command("git rm old.txt"), Some("git rm"));
+        assert_eq!(destructive_command("npm test"), None);
+        assert_eq!(destructive_command("cargo build"), None);
+        assert_eq!(destructive_command("ls -la"), None);
+    }
+
+    #[test]
+    fn catastrophic_detection() {
+        assert!(catastrophic_command("rm -rf /"));
+        assert!(catastrophic_command("sudo rm -rf /"));
+        assert!(catastrophic_command("rm -rf ~"));
+        assert!(catastrophic_command("rm -rf C:\\"));
+        assert!(!catastrophic_command("rm -rf /tmp/foo"));
+        assert!(!catastrophic_command("rm -f /tmp/foo.txt"));
+        assert!(!catastrophic_command("npm test"));
     }
 }

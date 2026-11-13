@@ -1,7 +1,11 @@
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 /** 模式：norma（通用工作 / Cowork）| eva（工程开发 / Code）。与思考强度、Ultracode 各自独立。 */
 export type Mode = "norma" | "eva";
-export type Approval = "auto" | "read-only";
+export type Approval = "auto" | "ask" | "read-only";
+/** 删除确认： "always" 每次都问（默认）| "never" 不再询问。 */
+export type DeleteConfirm = "always" | "never";
+/** 运行模式： "execute" 执行（动手改文件/跑命令）| "plan" 计划（只调查、出方案）。 */
+export type RunMode = "plan" | "execute";
 export type Sandbox = "read-only" | "workspace-write" | "danger-full-access";
 export type Theme = "light" | "dark" | "system";
 /** 主题偏好在 localStorage 里的镜像 key（只供首绘脚本读，Rust 设置文件仍是唯一事实来源）。 */
@@ -37,6 +41,8 @@ export interface Settings {
   /** Ultracode：高级工程工作流的独立开关（多智能体并行、交叉验证、迭代）。 */
   ultracode: boolean;
   approval: Approval;
+  /** 删除确认： "always" 每次都问（默认）| "never" 不再询问。持久化在 Rust 设置文件。 */
+  delete_confirm: DeleteConfirm;
   sandbox: Sandbox;
   theme: Theme;
   streaming: boolean;
@@ -73,8 +79,14 @@ export interface ChatMsg {
   /** Permission card payload (kind === "perm"). */
   perm?: {
     command: string;
-    decision?: "allow-once" | "allow-session" | "deny";
+    decision?: "allow-once" | "allow-session" | "deny" | "批准" | "拒绝" | "稍后处理";
+    /** 挂起的后端审批请求 id（有它就是真审批卡，按钮调 resolve_approval）。 */
+    requestId?: string;
+    /** 审批种类：写文件 / 删除命令。 */
+    kind?: "write" | "delete";
   };
+  /** 计划模式产出的完整方案：显示在对话里，下方挂"确认执行/修改方案"。 */
+  plan?: boolean;
   /** Inquiry card payload (kind === "ask"). */
   ask?: {
     question: string;
@@ -176,6 +188,32 @@ export const EFFORTS: Effort[] = ["low", "medium", "high", "xhigh", "max"];
 export const MODE_LABELS: Record<Mode, string> = {
   norma: "诺玛",
   eva: "EVA",
+};
+
+/** 状态栏模式标识：NORMA 办公 · Cowork / EVA 工程 · Code。 */
+export const MODE_TAG: Record<Mode, string> = {
+  norma: "办公 · Cowork",
+  eva: "工程 · Code",
+};
+
+/** P0-9 切换 = 换工位：切模式时自动带过去的默认配置（用户随后可改）。 */
+export const MODE_DEFAULTS: Record<Mode, { effort: Effort; approval: Approval }> = {
+  norma: { effort: "medium", approval: "ask" },
+  eva: { effort: "high", approval: "auto" },
+};
+
+/** P0-9 问候语：NORMA 办公口吻，EVA 工程口吻（不要只换名字）。 */
+export function modeGreeting(mode: Mode, hour: number, displayName: string): string {
+  const base = `${greetingForHour(hour)}，${displayName.charAt(0)}专员。`;
+  return mode === "eva" ? `${base}要改哪块代码？` : `${base}今天想处理什么文档/任务？`;
+}
+
+/** P0-9 切换后的自我介绍：第一条消息说清"我现在是谁、能做什么、不能做什么"。 */
+export const MODE_INTRO: Record<Mode, string> = {
+  norma:
+    "现在我是诺玛，通用工作模式。我能帮你写文档、整理资料、查信息、理思路；改文件会先问你。不能做的事：不改代码、不跑终端命令——那是 EVA 的活，需要的话一键切过去。",
+  eva:
+    "现在我是 EVA，工程开发模式。我能读代码、改代码、跑测试，改动会拿测试和 diff 作证据；写文件默认直接动手，删文件仍会单独问你。不能做的事：不写办公文档、不碰日程邮件——那是诺玛的活。",
 };
 
 export const SANDBOX_LABELS: Record<Sandbox, string> = {

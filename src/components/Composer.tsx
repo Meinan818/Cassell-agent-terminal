@@ -5,6 +5,7 @@ import type {
   Effort,
   FileEntry,
   Mode,
+  RunMode,
   Sandbox,
   Settings,
 } from "../types";
@@ -26,6 +27,11 @@ interface ComposerProps {
   markState: MarkState;
   /** P1-6：斜杠命令用同一套命令注册表（行首打 / 时弹迷你面板）。 */
   getSlashCommands: (query: string) => CommandItem[];
+  /** P0-5 运行模式： "execute" 执行 | "plan" 计划（只调查、出方案）。 */
+  runMode: RunMode;
+  onRunModeChange: (m: RunMode) => void;
+  /** P0-5 修改方案：App 点"修改方案"时 +1，输入框聚焦。 */
+  focusNonce: number;
 }
 
 type Popover = "model" | "perm" | "attach" | "mode" | null;
@@ -46,6 +52,9 @@ export default function Composer({
   onModeChange,
   markState,
   getSlashCommands,
+  runMode,
+  onRunModeChange,
+  focusNonce,
 }: ComposerProps) {
   const [text, setText] = useState("");
   const [popover, setPopover] = useState<Popover>(null);
@@ -100,6 +109,11 @@ export default function Composer({
     },
     [],
   );
+
+  // P0-5：App 点"修改方案"时把输入框聚焦（focusNonce 每次 +1 触发，初值 0 不触发）。
+  useEffect(() => {
+    if (focusNonce > 0) taRef.current?.focus();
+  }, [focusNonce]);
 
   // Load the workdir listing when the attach popover opens.
   useEffect(() => {
@@ -334,9 +348,11 @@ export default function Composer({
           }
         }}
         placeholder={
-          settings.mode === "eva"
-            ? "向 EVA 下达指令…例如：把校验规则抽成一个单独的函数"
-            : "向诺玛下达指令…例如：把校验规则抽成一个单独的函数"
+          runMode === "plan"
+            ? "计划模式：先调查、再出方案，不改文件…例如：把这个项目重构一下，先出方案"
+            : settings.mode === "eva"
+              ? "向 EVA 下达指令…例如：把校验规则抽成一个单独的函数"
+              : "向诺玛下达指令…例如：帮我起草一份会议纪要"
         }
         aria-label={
           settings.mode === "eva" ? "给 EVA 下达指令" : "给诺玛下达指令"
@@ -375,7 +391,13 @@ export default function Composer({
           </svg>
           <span
             className={`w2-dot ${settings.approval === "auto" ? "ok" : "warn"}`}
-            title={settings.approval === "auto" ? "全自动" : "只读确认"}
+            title={
+              settings.approval === "auto"
+                ? "全自动"
+                : settings.approval === "ask"
+                  ? "写前确认"
+                  : "只读"
+            }
           />
         </button>
         <button
@@ -395,6 +417,32 @@ export default function Composer({
           {settings.mode === "eva" ? "EVA" : "诺玛"}
           <span aria-hidden="true">▾</span>
         </button>
+        {/* P0-5 计划/执行切换：放在模式切换旁边，用户一眼能看到。
+            计划模式只调查、出方案，不写文件、不跑命令。 */}
+        <div
+          className="w2-runmode"
+          role="group"
+          aria-label="运行模式：执行或计划"
+        >
+          <button
+            type="button"
+            className={runMode === "execute" ? "w2-on" : ""}
+            aria-pressed={runMode === "execute"}
+            onClick={() => onRunModeChange("execute")}
+            title="执行：直接动手改文件、跑命令"
+          >
+            执行
+          </button>
+          <button
+            type="button"
+            className={runMode === "plan" ? "w2-on" : ""}
+            aria-pressed={runMode === "plan"}
+            onClick={() => onRunModeChange("plan")}
+            title="计划：只调查、出方案，不改文件"
+          >
+            计划
+          </button>
+        </div>
         <span className="composer-spacer" />
         <button
           type="button"

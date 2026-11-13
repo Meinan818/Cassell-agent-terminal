@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   FileEntry,
   InspectorView,
+  Mode,
   ReviewFile,
   ReviewState,
   Settings,
@@ -60,6 +61,10 @@ interface RightPanelProps {
   terminalLines: string[];
   onRunShell: (cmd: string) => void;
   settings: Settings;
+  /** P0-9 当前模式：审查/交付入口与标题随模式换名。 */
+  mode: Mode;
+  /** P0-9 NORMA 交付：本任务里写过的文件（App 从 agent-tool-result 汇总）。 */
+  deliverables: { path: string; at: number }[];
   /**
    * 保留的 prop：插件开关目前是“未接入”禁用态，故本面板不再调用它。
    * 引擎真正消费 extensions[].enabled 后再恢复拨动。
@@ -231,6 +236,8 @@ export default function RightPanel(props: RightPanelProps) {
     terminalLines,
     onRunShell,
     settings,
+    mode,
+    deliverables,
   } = props;
 
   // ---- Review view state ----
@@ -489,7 +496,7 @@ export default function RightPanel(props: RightPanelProps) {
               className={view === v.id ? "w2-on" : ""}
               onClick={() => onViewChange(v.id)}
             >
-              {v.label}
+              {v.id === "review" ? (mode === "norma" ? "交付" : "审查") : v.label}
               {v.id === "review" && pendingCount > 0 && (
                 <span className="rp-badge">{pendingCount}</span>
               )}
@@ -503,7 +510,7 @@ export default function RightPanel(props: RightPanelProps) {
           {view === "review" && (
             <div className="rp-section">
               <div className="rp-head">
-                <span>审查队列</span>
+                <span>{mode === "norma" ? "本次交付" : "审查队列"}</span>
                 <span style={{ display: "flex", gap: 8 }}>
                   {/* P2-21 面板内能做的部分：关掉浮层去对照对话（审查状态保留在 App 侧）。 */}
                   <button
@@ -519,6 +526,24 @@ export default function RightPanel(props: RightPanelProps) {
                   </button>
                 </span>
               </div>
+
+              {/* P0-9 NORMA 交付：产出物以文档形式汇总（本任务里写过的文件）。
+                  下面的 diff 列表照常显示（文件改动的真实记录）。 */}
+              {mode === "norma" && deliverables.length > 0 && (
+                <div className="rp-deliverables">
+                  <div className="rp-deliverables-title">文档产出</div>
+                  {deliverables.map((d) => (
+                    <div key={d.path} className="rp-deliverable">
+                      <span className="review-path" title={d.path}>
+                        {d.path}
+                      </span>
+                      <span className="rp-deliverable-time">
+                        {new Date(d.at).toLocaleTimeString("zh-CN", { hour12: false })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {merge && (
                 <div className="merge-card" role="status">

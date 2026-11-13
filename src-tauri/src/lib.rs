@@ -40,6 +40,7 @@ pub fn run() {
             child: tokio::sync::Mutex::new(None),
             native_cancel: std::sync::atomic::AtomicBool::new(false),
             native_running: std::sync::atomic::AtomicBool::new(false),
+            approvals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
             get_settings,
@@ -49,6 +50,7 @@ pub fn run() {
             codex::check_codex,
             codex::test_connection,
             agent::run_agent_native,
+            agent::resolve_approval,
             agent::test_provider,
             agent::list_models,
             agent::pick_folder,

@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   Approval,
   CodexInfo,
+  DeleteConfirm,
   Effort,
   Mode,
   ProviderConfig,
@@ -44,6 +45,21 @@ export const SANDBOX_DESCS: Record<Sandbox, string> = {
   "read-only": "只能读文件，不能改任何东西。",
   "workspace-write": "可以改工作区里的文件，改不了工作区以外的地方。",
   "danger-full-access": "什么都能碰，很危险——只在你明确知道后果时用。",
+};
+
+/** 审批每档人话说明（P0-9：三档是真档位，引擎按档位执行——
+ * auto 直接写；ask 写前弹审批卡；read-only 不写不执行。
+ * 删文件类命令另走删除确认设置（见下），不受这档管。 */
+export const APPROVAL_DESCS: Record<Approval, string> = {
+  auto: "写文件、跑命令直接进行；删文件类命令仍按删除确认设置单独问（默认每次都问）。",
+  ask: "每次写文件前都先弹审批卡问你，批了才写；删文件类命令仍按删除确认设置单独问。",
+  "read-only": "不写文件、不执行命令，只能读。",
+};
+
+/** 删除确认两档人话说明（P0-4：默认每次都问，用户可在设置里关掉）。 */
+export const DELETE_CONFIRM_DESCS: Record<DeleteConfirm, string> = {
+  always: "每次删文件/执行删除命令前都单独弹确认，批了才删。",
+  never: "删除不再单独问，直接执行。删根目录（rm -rf / 这类）永远拒绝，不受这档影响。",
 };
 
 function DrawerShell({
@@ -638,8 +654,8 @@ export function SettingsModal({
                     </button>
                   </div>
                   <p className="drawer-note">
-                    诺玛做通用工作，EVA 做工程开发。切换模式会有一段短暂仪式；只换模式，不改思考强度，也不动
-                    Ultracode 开关。
+                    诺玛做通用工作，EVA 做工程开发。切换模式会有一段短暂仪式；切换时会带上该模式的默认思考强度与审批（诺玛默认
+                    中等 / 写前确认，EVA 默认高 / 全自动），之后可以再改；Ultracode 开关不动。
                   </p>
                 </div>
                 <div className="s7-group">
@@ -708,16 +724,46 @@ export function SettingsModal({
                     </button>
                     <button
                       type="button"
+                      className={`effort ${settings.approval === "ask" ? "selected" : ""}`}
+                      onClick={() => onPatch({ approval: "ask" as Approval })}
+                    >
+                      写前确认
+                    </button>
+                    <button
+                      type="button"
                       className={`effort ${settings.approval === "read-only" ? "selected" : ""}`}
                       onClick={() => onPatch({ approval: "read-only" as Approval })}
                     >
-                      只读确认
+                      只读
                     </button>
                   </div>
                   <p className="drawer-note">
-                    {settings.approval === "auto"
-                      ? "自动审批，可撤销；危险操作始终需要确认。"
-                      : "每次操作都要先问你一遍。"}
+                    {APPROVAL_DESCS[settings.approval]}
+                  </p>
+                </div>
+                <div className="s7-group">
+                  <div className="drawer-section">删除确认</div>
+                  <p className="drawer-note">
+                    删文件、执行删除命令时要不要单独问你一次。默认每次都问；嫌烦可以在这里关掉，随时能改回来。
+                  </p>
+                  <div className="effort-row" role="group" aria-label="删除确认">
+                    <button
+                      type="button"
+                      className={`effort ${settings.delete_confirm === "always" ? "selected" : ""}`}
+                      onClick={() => onPatch({ delete_confirm: "always" as DeleteConfirm })}
+                    >
+                      每次都问
+                    </button>
+                    <button
+                      type="button"
+                      className={`effort ${settings.delete_confirm === "never" ? "selected" : ""}`}
+                      onClick={() => onPatch({ delete_confirm: "never" as DeleteConfirm })}
+                    >
+                      不再询问
+                    </button>
+                  </div>
+                  <p className="drawer-note">
+                    {DELETE_CONFIRM_DESCS[settings.delete_confirm]}
                   </p>
                 </div>
                 <div className="s7-group">

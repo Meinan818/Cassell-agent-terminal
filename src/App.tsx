@@ -14,16 +14,18 @@ import type {
   Task,
 } from "./types";
 import {
-  GREETING_TASKS,
   THEME_KEY,
   EFFORT_LABELS,
+  MODE_DEFAULTS,
+  MODE_INTRO,
   MODE_LABELS,
+  MODE_TAG,
   folderName,
-  greetingForHour,
+  modeGreeting,
   resolveTheme,
   uid,
 } from "./types";
-import type { Effort, Theme } from "./types";
+import type { Effort, RunMode, Theme } from "./types";
 import Boot from "./components/Boot";
 import TitleBar from "./components/TitleBar";
 import Mark, { type MarkState } from "./components/Mark";
@@ -1013,8 +1015,16 @@ function collectToolRun(messages: ChatMsg[], i: number): ChatMsg[] {
   return run;
 }
 
-/** 权限 / 询问卡（B 档）：改了什么 + 风险 + 批准/拒绝/稍后处理，批准后留记录行可撤销。 */
-function PermCard({ msg }: { msg: ChatMsg }) {
+/** 权限 / 询问卡（B 档）：改了什么 + 风险 + 批准/拒绝/稍后处理，批准后留记录行可撤销。
+ * 带 requestId 时是真审批卡：按钮调 onResolve 解析后端挂起的审批请求，
+ * 决定一旦发出就不能撤销（引擎已继续跑），"稍后处理"按拒绝处理。 */
+function PermCard({
+  msg,
+  onResolve,
+}: {
+  msg: ChatMsg;
+  onResolve?: (requestId: string, allow: boolean) => void;
+}) {
   const [decision, setDecision] = useState<string | null>(
     msg.perm?.decision ?? null,
   );
@@ -1022,10 +1032,15 @@ function PermCard({ msg }: { msg: ChatMsg }) {
     msg.ask?.picked ?? null,
   );
   const isAsk = msg.kind === "ask";
+  const requestId = msg.perm?.requestId;
   const title = isAsk ? "需要你定一下" : "权限请求";
   const body = isAsk
     ? (msg.ask?.question ?? msg.text)
     : (msg.perm?.command ?? msg.text);
+  const decide = (label: string, allow: boolean) => {
+    setDecision(label);
+    if (requestId) onResolve?.(requestId, allow);
+  };
   return (
     <div className="msg">
       <div className="w2-card" style={{ width: "100%" }}>
@@ -1033,7 +1048,9 @@ function PermCard({ msg }: { msg: ChatMsg }) {
           <span className="w2-card-title">{title}</span>
           <span className="w2-card-sum">
             {decision
-              ? `已${decision} · 可撤销`
+              ? requestId
+                ? `已${decision}`
+                : `已${decision} · 可撤销`
               : picked !== null
                 ? `已选第 ${picked + 1} 项 · 可撤销`
                 : "等你确认"}
@@ -1046,7 +1063,9 @@ function PermCard({ msg }: { msg: ChatMsg }) {
           <div style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{body}</div>
           {!isAsk && (
             <div style={{ marginTop: 4 }}>
-              此操作会修改工作区，确认后才会执行；随时可以撤销。
+              {requestId
+                ? "此操作会修改工作区，确认后才会执行；决定后不能撤销（这一轮已继续）。"
+                : "此操作会修改工作区，确认后才会执行；随时可以撤销。"}
             </div>
           )}
           {decision === null && picked === null ? (
@@ -1069,21 +1088,21 @@ function PermCard({ msg }: { msg: ChatMsg }) {
                   <button
                     type="button"
                     className="btn-approve"
-                    onClick={() => setDecision("批准")}
+                    onClick={() => decide("批准", true)}
                   >
                     批准
                   </button>
                   <button
                     type="button"
                     className="btn-reject"
-                    onClick={() => setDecision("拒绝")}
+                    onClick={() => decide("拒绝", false)}
                   >
                     拒绝
                   </button>
                   <button
                     type="button"
                     className="btn-ghost"
-                    onClick={() => setDecision("稍后处理")}
+                    onClick={() => decide("稍后处理", false)}
                   >
                     稍后处理
                   </button>
@@ -1095,16 +1114,18 @@ function PermCard({ msg }: { msg: ChatMsg }) {
               <span className="review-state-label ok">
                 ✓ {decision ?? `已选第 ${(picked ?? 0) + 1} 项`}
               </span>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={() => {
-                  setDecision(null);
-                  setPicked(null);
-                }}
-              >
-                撤销
-              </button>
+              {!requestId && (
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => {
+                    setDecision(null);
+                    setPicked(null);
+                  }}
+                >
+                  撤销
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1266,6 +1287,22 @@ export default function App() {
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [confirmDeleteMsgId, setConfirmDeleteMsgId] = useState<string | null>(null);
+  /** P0-4 文件夹授权（本会话内）：用户明确选过/授权过的文件夹集合。
+   * 只活在本会话里，不持久化——下次启动重新授权（安全优先）。
+   * settings.workdir 只是"记住的上次目录"，不等同于授权。 */
+  const [authorizedDirs, setAuthorizedDirs] = useState<Set<string>>(new Set());
+  const authorizedDirsRef = useRef<Set<string>>(new Set());
+  /** P0-5 运行模式： "execute" 执行 | "plan" 计划（只调查、出方案）。 */
+  const [runMode, setRunMode] = useState<RunMode>("execute");
+  const runModeRef = useRef<RunMode>("execute");
+  /** P0-9 NORMA 交付：本任务里写过的文件（从 agent-tool-result 汇总），按任务分。 */
+  const [deliverablesByTask, setDeliverablesByTask] = useState<
+    Record<string, { path: string; at: number }[]>
+  >({});
+  /** P0-4 删除确认弹窗：审查里拒绝一个"会真删文件"的改动时弹出。 */
+  const [pendingDelete, setPendingDelete] = useState<{ path: string } | null>(null);
+  /** P0-5 修改方案：让 Composer 聚焦（每次 +1 触发）。 */
+  const [focusNonce, setFocusNonce] = useState(0);
   /** 审计 P1-5：用量行高亮（Cmd-K“查看状态与用量”滚动到这里）。 */
   const [usageFlash, setUsageFlash] = useState(false);
   /** 审计 P2-19：回到底部按钮（离开底部超过一屏时出现）。 */
@@ -1622,7 +1659,32 @@ export default function App() {
       if (ritualRef.current) return;
       const cur = settingsRef.current?.mode;
       if (!cur || cur === mode) return;
-      patchSettings({ mode });
+      // P0-9 切换 = 换工位：模式、默认思考强度、默认审批三项一起换
+      // （NORMA → Medium + 写前确认；EVA → High + 全自动），用户随后可改。
+      const defaults = MODE_DEFAULTS[mode];
+      patchSettings({
+        mode,
+        effort: defaults.effort,
+        approval: defaults.approval,
+      });
+      // P0-9 切换后第一条消息说清"我现在是谁、能做什么、不能做什么"，
+      // 不要静默切换（有任务时写进当前任务；没任务时空态问候已是新模式口吻）。
+      const taskId = activeTaskIdRef.current;
+      if (taskId) {
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskId
+              ? {
+                  ...t,
+                  messages: [
+                    ...t.messages,
+                    { id: uid(), role: "assistant", text: MODE_INTRO[mode] },
+                  ],
+                }
+              : t,
+          ),
+        );
+      }
       // 诚实文案（F 落地）：EVA 运行时也只说“工程开发”，不说“并行中”。
       setModeLine(
         mode === "eva" ? "已切换到 EVA · 工程开发" : "已切回诺玛",
@@ -1875,6 +1937,44 @@ export default function App() {
           const r = payload.result ?? "";
           const short = r.length > 400 ? `${r.slice(0, 400)}…（已截断）` : r;
           updateMsgText(id, (cur) => `${cur}\n→ ${short}`);
+          // P0-9 NORMA 交付：写成功的文件记进本任务的交付物（交付页汇总用）。
+          if (payload.name === "write_file") {
+            const m = r.match(/^已写入 (.+?)（/);
+            if (m) {
+              const path = m[1];
+              const taskId = activeTaskIdRef.current;
+              if (taskId) {
+                setDeliverablesByTask((prev) => {
+                  const cur = prev[taskId] ?? [];
+                  if (cur.some((d) => d.path === path)) return prev;
+                  return {
+                    ...prev,
+                    [taskId]: [...cur, { path, at: Date.now() }],
+                  };
+                });
+              }
+            }
+          }
+        },
+      ),
+    );
+    // P0-4/P0-9 审批请求：后端写文件/删命令需要用户确认时发来，
+    // 在对话里追加一张真审批卡（PermCard，按钮调 resolve_approval）。
+    add(
+      listen<{ id: string; kind: string; label: string; detail: string }>(
+        "agent-approval-request",
+        ({ payload }) => {
+          pushMsg({
+            id: uid(),
+            role: "assistant",
+            text: payload.detail,
+            kind: "perm",
+            perm: {
+              command: payload.label,
+              requestId: payload.id,
+              kind: payload.kind === "delete" ? "delete" : "write",
+            },
+          });
         },
       ),
     );
@@ -1933,6 +2033,22 @@ export default function App() {
   const handleApproveFile = (path: string) => setReviewState(path, "approved");
 
   const handleRejectFile = (path: string) => {
+    const s = settingsRef.current;
+    if (!s) return;
+    // P0-4 删除确认：拒绝一个"会真删文件"的改动（未追踪/已暂存的新文件）
+    // 时，按删除确认设置决定——默认"每次都问"弹确认框，"不再询问"直接删。
+    // 改动类文件（modified/deleted）是恢复到 HEAD，不删文件，不弹框。
+    const file = review?.files.find((f) => f.path === path);
+    const willDelete =
+      file?.status === "untracked" || file?.status === "added";
+    if (willDelete && s.delete_confirm === "always") {
+      setPendingDelete({ path });
+      return;
+    }
+    doRevertFile(path);
+  };
+
+  const doRevertFile = (path: string) => {
     const s = settingsRef.current;
     if (!s) return;
     invoke<string>("revert_file", { workdir: s.workdir, path })
@@ -2015,6 +2131,11 @@ export default function App() {
     ) => {
       const s = settingsRef.current;
       if (!s) return;
+      // P0-5/P0-4：本轮的运行模式与授权状态（读 ref，不读过期闭包）。
+      const rm = runModeRef.current;
+      const isAuthorized = s.workdir
+        ? authorizedDirsRef.current.has(s.workdir)
+        : false;
       // 历史只取本轮之前的回合（刚发的这条不重复进历史，prompt 已是最后一条）。
       const task = tasksRef.current.find((t) => t.id === taskId);
       const prior = (task?.messages ?? []).filter(
@@ -2036,8 +2157,9 @@ export default function App() {
             prompt,
             model: s.model,
             provider_id: s.provider_id,
-            // 模式、思考强度、Ultracode 三个独立字段各自传给引擎：
-            // EVA 模式不再强制改思考强度，Ultracode 只透传、不假装并行。
+            // 模式、思考强度、Ultracode 三个独立字段各自传给引擎；
+            // P0-9：切模式时默认思考强度/审批已由 handleModeChange 一并带过去，
+            // 这里只传当前值，不再二次改。
             effort: s.effort,
             mode: s.mode,
             ultracode: s.ultracode,
@@ -2046,6 +2168,10 @@ export default function App() {
             workdir: s.workdir,
             history,
             display_name: s.display_name ?? "",
+            // P0-5 计划模式 / P0-4 文件夹授权 / 删除确认设置，一并传给引擎。
+            run_mode: rm,
+            authorized: isAuthorized,
+            delete_confirm: s.delete_confirm,
           },
         });
         const thinkId = thinkMsgIdRef.current;
@@ -2070,9 +2196,17 @@ export default function App() {
                       // 停止按钮已在气泡后追加“（已停止）”，这里只收尾、不改文字。
                       return { ...m, streaming: false, usage };
                     }
+                    // P0-5：计划模式下产出的真方案打上 plan 标记，下方挂
+                    // "确认执行/修改方案"（空回复、非方案的闲聊不打——系统提示词
+                    // 要求方案固定用 ## 目标/## 发现/## 步骤/## 风险四段，按此识别）。
+                    const isPlan =
+                      rm === "plan" &&
+                      result.text.includes("## 目标") &&
+                      result.text.includes("## 步骤");
                     return {
                       ...m,
                       streaming: false,
+                      plan: isPlan ? true : undefined,
                       text:
                         result.text || m.text || "（本轮没有文字输出）",
                       usage,
@@ -2543,6 +2677,16 @@ export default function App() {
   }, [patchSettings]);
 
   // ---- P0-1：真项目——新建 / 切换 / 重命名 ----
+  // ---- P0-4 文件夹授权：本会话内，用户明确选过/授权过的目录 ----
+  // 选文件夹（新建项目 / 设置页改目录）= 授权；换项目/换目录 = 换授权。
+  const authorizeDir = useCallback((path: string) => {
+    if (!path) return;
+    const next = new Set(authorizedDirsRef.current);
+    next.add(path);
+    authorizedDirsRef.current = next;
+    setAuthorizedDirs(next);
+  }, []);
+
   // 切项目 = 换工作现场：settings.workdir 同步成新项目的 path（走现有的
   // save_settings 落盘），审查/终端/文件/引擎都读它，全部自动跟过去；
   // 任务列表跟着项目走：切到该项目最近的一个任务，没有就回到空态。
@@ -2565,6 +2709,8 @@ export default function App() {
     try {
       const picked = await invoke<string | null>("pick_folder");
       if (!picked) return; // 用户取消：什么都不做
+      // P0-4：用户亲手选了这个文件夹 = 本会话授权它。
+      authorizeDir(picked);
       // 同一个文件夹只建一个项目：已经存在就切过去，不建重名行
       //（否则列表里会出现两个名字、路径都一样的项目，分不清）。
       const existing = projectsRef.current.find((p) => p.path === picked);
@@ -2586,7 +2732,7 @@ export default function App() {
     } catch {
       showNotice("没能打开文件夹选择框。");
     }
-  }, [patchSettings, showNotice, handleSelectProject]);
+  }, [patchSettings, showNotice, handleSelectProject, authorizeDir]);
 
   const handleRenameProject = useCallback((id: string, name: string) => {
     const n = name.trim();
@@ -2604,6 +2750,8 @@ export default function App() {
     try {
       const picked = await invoke<string | null>("pick_folder");
       if (!picked) return; // 用户取消：保持原工作区不变
+      // P0-4：用户亲手选了这个文件夹 = 本会话授权它。
+      authorizeDir(picked);
       const cur = projectsRef.current.find(
         (p) => p.id === activeProjectIdRef.current,
       );
@@ -2635,7 +2783,62 @@ export default function App() {
     } catch {
       // 用户取消或打开失败：保持原工作区不变
     }
-  }, [patchSettings, showNotice]);
+  }, [patchSettings, showNotice, authorizeDir]);
+
+  const handleAuthorizeCurrent = useCallback(() => {
+    const w = settingsRef.current?.workdir;
+    if (w) authorizeDir(w);
+  }, [authorizeDir]);
+
+  // ---- P0-5 运行模式切换（state + ref 一起改，runTurn 读 ref） ----
+  const setRunModeBoth = useCallback((m: RunMode) => {
+    runModeRef.current = m;
+    setRunMode(m);
+  }, []);
+
+  // ---- P0-4/P0-9 审批卡：把用户的决定解析给后端挂起的审批请求 ----
+  const resolveApproval = useCallback((requestId: string, allow: boolean) => {
+    invoke("resolve_approval", { id: requestId, allow }).catch(
+      () => undefined,
+    );
+  }, []);
+
+  // ---- P0-5 计划确认：切回执行模式，带着方案原文再跑一轮 ----
+  const handleConfirmPlan = useCallback(
+    (planText: string) => {
+      const taskId = activeTaskIdRef.current;
+      if (!taskId || runningRef.current) return;
+      setRunModeBoth("execute");
+      const userMsg: ChatMsg = { id: uid(), role: "user", text: "按上面的方案开始执行。" };
+      const assistantMsg: ChatMsg = {
+        id: uid(),
+        role: "assistant",
+        text: "",
+        streaming: true,
+      };
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? { ...t, messages: [...t.messages, userMsg, assistantMsg] }
+            : t,
+        ),
+      );
+      requestAnimationFrame(() => {
+        runTurn(
+          taskId,
+          `按以下已确认的方案执行，一步一步动手改文件/跑命令，改完拿证据说话：\n\n${planText}`,
+          assistantMsg.id,
+          userMsg.text,
+        );
+      });
+    },
+    [runTurn, setRunModeBoth],
+  );
+
+  // ---- P0-5 修改方案：留在计划模式，把输入框聚焦给用户继续聊 ----
+  const handleModifyPlan = useCallback(() => {
+    setFocusNonce((n) => n + 1);
+  }, []);
 
   // 当前服务商一旦配好 Key，拦截提示自动消失
   useEffect(() => {
@@ -2656,8 +2859,9 @@ export default function App() {
 
   const hour = new Date().getHours();
   // 显示名默认“路明非”；问候取首字 + “专员”（路明非 → 路专员）。
+  // P0-9 问候语随模式换口吻：NORMA 办公、EVA 工程。
   const displayName = settings.display_name?.trim() || "路明非";
-  const greeting = `${greetingForHour(hour)}，${displayName.charAt(0)}专员。${GREETING_TASKS[0]}`;
+  const greeting = modeGreeting(settings.mode, hour, displayName);
   const hasAnyKey = Object.values(settings.api_keys).some((k) => k?.trim());
   const showEmpty = !activeTask || activeTask.messages.length === 0;
 
@@ -2668,10 +2872,8 @@ export default function App() {
     (f) => (f.state ?? "pending") === "pending",
   ).length;
   const l1Text = running
-    ? settings.mode === "eva"
-      ? "EVA 正在执行…"
-      : "正在思考…"
-    : modeLine ?? "空闲";
+    ? `${MODE_TAG[settings.mode]} · ${settings.mode === "eva" ? "EVA 正在执行…" : "正在思考…"}`
+    : modeLine ?? `${MODE_TAG[settings.mode]} · 空闲`;
   const l1Target: InspectorView = running ? "workflow" : "review";
   const l1Clickable = running || pendingCount > 0;
   // 新消息一次性出现动效：最后一条用户消息 + 流式中的 AI 气泡（150ms 淡入 + 4px 上移）。
@@ -2834,19 +3036,24 @@ export default function App() {
             </span>
           </div>
           <span className="main-head-spacer" />
-          {/* P1-13/P1-14：顶栏重排——“审查”独立入口（带待审查数量徽标，有待审时变色）；
+          {/* P1-13/P1-14：顶栏重排——“审查/交付”独立入口（带待审查数量徽标，有待审时变色）；
               “归档”收进 Cmd-K（命令面板里有“归档当前任务”），顶栏拿掉；主题按钮拿掉，
               主题只在设置 → 外观的分段控件与 Cmd-K 里切（P2-9 的“三态循环文案显示下一个状态”随之消失）。
               位置纪律：审查入口放在对话区顶部、L1 状态行正上方——用户想检查工作成果的时刻
-              就是正在看对话的时刻，入口在视线顶端，空闲与运行时位置不挪地方。 */}
+              就是正在看对话的时刻，入口在视线顶端，空闲与运行时位置不挪地方。
+              P0-9 交付入口随模式换名：NORMA 叫"交付"（文档/结论），EVA 叫"审查"（改动）。 */}
           <button
             type="button"
             className="btn-ghost"
             onClick={() => setInspector(inspector ?? "review")}
-            aria-label={`打开审查${pendingCount > 0 ? `，${pendingCount} 个待审查` : ""}`}
-            title="审查：逐项通过或拒绝诺玛的改动（Cmd+K 也能打开）"
+            aria-label={`打开${settings.mode === "norma" ? "交付" : "审查"}${pendingCount > 0 ? `，${pendingCount} 个待审查` : ""}`}
+            title={
+              settings.mode === "norma"
+                ? "交付：本次任务的文档产出与文件改动汇总（Cmd+K 也能打开）"
+                : "审查：逐项通过或拒绝诺玛的改动（Cmd+K 也能打开）"
+            }
           >
-            审查
+            {settings.mode === "norma" ? "交付" : "审查"}
             {pendingCount > 0 && (
               <span className="w2-review-badge hot">{pendingCount}</span>
             )}
@@ -3038,7 +3245,7 @@ export default function App() {
                   />
                 )
               ) : m.kind === "perm" || m.kind === "ask" ? (
-                <PermCard key={m.id} msg={m} />
+                <PermCard key={m.id} msg={m} onResolve={resolveApproval} />
               ) : m.kind === "error" ? (
                 <ErrorCard
                   key={m.id}
@@ -3104,6 +3311,28 @@ export default function App() {
                         </button>
                       )}
                     </div>
+                    {/* P0-5：计划模式的最新一份方案下方挂"确认执行/修改方案"。
+                        只有最新一份方案有按钮（旧方案是历史记录，不重复挂）。 */}
+                    {m.plan &&
+                      !m.streaming &&
+                      messages.slice(i + 1).every((x) => !x.plan) && (
+                        <div className="plan-actions">
+                          <button
+                            type="button"
+                            className="btn-approve"
+                            onClick={() => handleConfirmPlan(m.text)}
+                          >
+                            确认执行
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-ghost"
+                            onClick={handleModifyPlan}
+                          >
+                            修改方案
+                          </button>
+                        </div>
+                      )}
                   </div>
                 </div>
               ),
@@ -3156,6 +3385,43 @@ export default function App() {
               </button>
             </div>
           )}
+          {/* P0-4 未授权提示：工作区还没授权时文件工具不可用；一键授权当前文件夹。
+              换项目/换目录后也要重新授权（授权只活在本会话里）。 */}
+          {!authorizedDirs.has(settings.workdir) && (
+            <div className="auth-notice" role="alert">
+              <span>
+                {settings.workdir
+                  ? `文件夹「${folderName(settings.workdir)}」还没有授权：诺玛暂时看不到里面的文件。`
+                  : "还没有选择文件夹：诺玛看不到任何文件，先选一个文件夹授权。"}
+              </span>
+              {settings.workdir ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={handleAuthorizeCurrent}
+                  >
+                    授权当前文件夹
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={handleNewProject}
+                  >
+                    换个文件夹
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleNewProject}
+                >
+                  选择文件夹并授权
+                </button>
+              )}
+            </div>
+          )}
           <Composer
             settings={settings}
             onPatch={patchSettings}
@@ -3165,6 +3431,9 @@ export default function App() {
             onModeChange={handleModeChange}
             markState={markState}
             getSlashCommands={(q) => paletteItems(q)}
+            runMode={runMode}
+            onRunModeChange={setRunModeBoth}
+            focusNonce={focusNonce}
           />
         </div>
       </main>
@@ -3200,6 +3469,10 @@ export default function App() {
           terminalLines={terminalLines}
           onRunShell={handleRunShell}
           settings={settings}
+          mode={settings.mode}
+          deliverables={
+            activeTask ? deliverablesByTask[activeTask.id] ?? [] : []
+          }
           onToggleExtension={(id) =>
             patchSettings({
               extensions: settings.extensions.map((e) =>
@@ -3272,6 +3545,51 @@ export default function App() {
           role="status"
         >
           {renderNotice}
+        </div>
+      )}
+      {/* P0-4 删除确认弹窗：审查里拒绝一个会真删文件的新文件时弹出。
+          "删除并不要再问"会把设置改成不再询问（设置页随时能改回来）。 */}
+      {pendingDelete && (
+        <div className="confirm-overlay" role="dialog" aria-modal="true">
+          <div className="confirm-card">
+            <div className="confirm-title">删除这个文件？</div>
+            <div className="confirm-body">
+              {pendingDelete.path} 是新文件，拒绝后会把它从磁盘上删除，
+              删了就找不回来了。
+            </div>
+            <div className="confirm-row">
+              <button
+                type="button"
+                className="btn-reject"
+                onClick={() => {
+                  const path = pendingDelete.path;
+                  setPendingDelete(null);
+                  doRevertFile(path);
+                }}
+              >
+                删除
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setPendingDelete(null)}
+              >
+                取消
+              </button>
+            </div>
+            <button
+              type="button"
+              className="confirm-quiet"
+              onClick={() => {
+                const path = pendingDelete.path;
+                patchSettings({ delete_confirm: "never" });
+                setPendingDelete(null);
+                doRevertFile(path);
+              }}
+            >
+              删除，并以后不再询问
+            </button>
+          </div>
         </div>
       )}
     </div>

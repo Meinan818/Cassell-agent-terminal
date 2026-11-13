@@ -150,6 +150,167 @@ export default function Sidebar({
     },
   ];
 
+  // P0-9 侧栏重点随模式换：NORMA 突出"最近任务/文档"，EVA 突出"项目/代码文件"。
+  // 两组内容不变，只换上下顺序（定义在 return 前，渲染处按 mode 换序）。
+  const projectSection = (
+    <>
+          {/* ③ 项目（P0-1 / 位-17）：独立一组，名册之下、最近之上，不再是
+              “最近”下面的过滤器。一个项目 = 一个文件夹，点即切换；
+              “+ 新建项目”放组顶部——最高频的项目操作，第一眼就能看到。 */}
+          <div className="side-section">
+            <div className="side-section-title">项目</div>
+            <button className="w2-side-action" onClick={onNewProject} type="button">
+              ＋ 新建项目
+              <span className="w2-kbd">选文件夹</span>
+            </button>
+            {projects.map((p) => {
+              const isActive = p.id === activeProjectId;
+              return editingProjectId === p.id ? (
+                <input
+                  key={p.id}
+                  className="field-input w2-task-rename"
+                  value={editProjectName}
+                  autoFocus
+                  onChange={(e) => setEditProjectName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveProjectRename(p);
+                    else if (e.key === "Escape") setEditingProjectId(null);
+                  }}
+                  onBlur={() => saveProjectRename(p)}
+                  aria-label="重命名项目"
+                  autoComplete="off"
+                />
+              ) : (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`side-project ${isActive ? "active" : ""}`}
+                  onClick={() => onSelectProject(p.id)}
+                  onDoubleClick={() => {
+                    setEditingProjectId(p.id);
+                    setEditProjectName(p.name);
+                  }}
+                  aria-pressed={isActive}
+                  title={p.path ? `${p.name}\n${p.path}\n双击重命名` : `${p.name}\n双击重命名`}
+                >
+                  <span className="side-project-name">{p.name}</span>
+                </button>
+              );
+            })}
+            {projects.length === 0 && (
+              <div className="side-empty">
+                还没有项目
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={onNewProject}
+                  >
+                    打开一个项目文件夹
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+    </>
+  );
+  const recentSection = (
+    <>
+          {/* ④ 最近：只列当前项目的任务；切项目后这里跟着换。 */}
+          <div className="side-section side-tasks">
+            <div className="side-section-title">最近</div>
+            {visible.map((t) => {
+              return (
+                <div
+                  key={t.id}
+                  className={`side-task-wrap ${t.id === activeTaskId ? "active" : ""}`}
+                >
+                  {editingId === t.id ? (
+                    <input
+                      className="field-input w2-task-rename"
+                      value={editTitle}
+                      autoFocus
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveRename(t);
+                        else if (e.key === "Escape") setEditingId(null);
+                      }}
+                      onBlur={() => saveRename(t)}
+                      aria-label="重命名任务"
+                      autoComplete="off"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className={`side-task ${t.id === activeTaskId ? "active" : ""}`}
+                      onClick={() => onSelectTask(t.id)}
+                      onDoubleClick={() => {
+                        setEditingId(t.id);
+                        setEditTitle(t.title);
+                      }}
+                      title="双击重命名"
+                    >
+                      <span className="side-task-title">{t.title}</span>
+                    </button>
+                  )}
+                  {/* P2-1：悬停出现重命名与删除（删除两步确认）。 */}
+                  <span className="w2-task-actions">
+                    {confirmDeleteId === t.id ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onDeleteTask(t.id);
+                            setConfirmDeleteId(null);
+                          }}
+                        >
+                          确认删除
+                        </button>
+                        <button type="button" onClick={() => setConfirmDeleteId(null)}>
+                          取消
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          aria-label={`重命名 ${t.title}`}
+                          title="重命名"
+                          onClick={() => {
+                            setEditingId(t.id);
+                            setEditTitle(t.title);
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          className="danger"
+                          aria-label={`删除 ${t.title}`}
+                          title="删除"
+                          onClick={() => setConfirmDeleteId(t.id)}
+                        >
+                          ×
+                        </button>
+                      </>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {visible.length === 0 && (
+              <div className="side-empty">
+                {tasks.length === 0
+                  ? "还没有任务"
+                  : activeProjectId === null
+                    ? "先打开一个项目文件夹"
+                    : "这个项目还没有任务"}
+              </div>
+            )}
+          </div>
+    </>
+  );
+
   return (
     <aside className="sidebar">
       {/* ① 名册：侧栏第一眼是两个 agent，不是任务列表 */}
@@ -213,157 +374,19 @@ export default function Sidebar({
         </button>
       </div>
 
-      {/* ③ 项目（P0-1 / 位-17）：独立一组，名册之下、最近之上，不再是
-          “最近”下面的过滤器。一个项目 = 一个文件夹，点即切换；
-          “+ 新建项目”放组顶部——最高频的项目操作，第一眼就能看到。 */}
-      <div className="side-section">
-        <div className="side-section-title">项目</div>
-        <button className="w2-side-action" onClick={onNewProject} type="button">
-          ＋ 新建项目
-          <span className="w2-kbd">选文件夹</span>
-        </button>
-        {projects.map((p) => {
-          const isActive = p.id === activeProjectId;
-          return editingProjectId === p.id ? (
-            <input
-              key={p.id}
-              className="field-input w2-task-rename"
-              value={editProjectName}
-              autoFocus
-              onChange={(e) => setEditProjectName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveProjectRename(p);
-                else if (e.key === "Escape") setEditingProjectId(null);
-              }}
-              onBlur={() => saveProjectRename(p)}
-              aria-label="重命名项目"
-              autoComplete="off"
-            />
-          ) : (
-            <button
-              key={p.id}
-              type="button"
-              className={`side-project ${isActive ? "active" : ""}`}
-              onClick={() => onSelectProject(p.id)}
-              onDoubleClick={() => {
-                setEditingProjectId(p.id);
-                setEditProjectName(p.name);
-              }}
-              aria-pressed={isActive}
-              title={p.path ? `${p.name}\n${p.path}\n双击重命名` : `${p.name}\n双击重命名`}
-            >
-              <span className="side-project-name">{p.name}</span>
-            </button>
-          );
-        })}
-        {projects.length === 0 && (
-          <div className="side-empty">
-            还没有项目
-            <div style={{ marginTop: 8 }}>
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={onNewProject}
-              >
-                打开一个项目文件夹
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* P0-9：NORMA 下"最近"在上、"项目"在下；EVA 下"项目"在上、"最近"在下。 */}
+      {mode === "norma" ? (
+        <>
+          {recentSection}
+          {projectSection}
+        </>
+      ) : (
+        <>
+          {projectSection}
+          {recentSection}
+        </>
+      )}
 
-      {/* ④ 最近：只列当前项目的任务；切项目后这里跟着换。 */}
-      <div className="side-section side-tasks">
-        <div className="side-section-title">最近</div>
-        {visible.map((t) => {
-          return (
-            <div
-              key={t.id}
-              className={`side-task-wrap ${t.id === activeTaskId ? "active" : ""}`}
-            >
-              {editingId === t.id ? (
-                <input
-                  className="field-input w2-task-rename"
-                  value={editTitle}
-                  autoFocus
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveRename(t);
-                    else if (e.key === "Escape") setEditingId(null);
-                  }}
-                  onBlur={() => saveRename(t)}
-                  aria-label="重命名任务"
-                  autoComplete="off"
-                />
-              ) : (
-                <button
-                  type="button"
-                  className={`side-task ${t.id === activeTaskId ? "active" : ""}`}
-                  onClick={() => onSelectTask(t.id)}
-                  onDoubleClick={() => {
-                    setEditingId(t.id);
-                    setEditTitle(t.title);
-                  }}
-                  title="双击重命名"
-                >
-                  <span className="side-task-title">{t.title}</span>
-                </button>
-              )}
-              {/* P2-1：悬停出现重命名与删除（删除两步确认）。 */}
-              <span className="w2-task-actions">
-                {confirmDeleteId === t.id ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onDeleteTask(t.id);
-                        setConfirmDeleteId(null);
-                      }}
-                    >
-                      确认删除
-                    </button>
-                    <button type="button" onClick={() => setConfirmDeleteId(null)}>
-                      取消
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      aria-label={`重命名 ${t.title}`}
-                      title="重命名"
-                      onClick={() => {
-                        setEditingId(t.id);
-                        setEditTitle(t.title);
-                      }}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      type="button"
-                      className="danger"
-                      aria-label={`删除 ${t.title}`}
-                      title="删除"
-                      onClick={() => setConfirmDeleteId(t.id)}
-                    >
-                      ×
-                    </button>
-                  </>
-                )}
-              </span>
-            </div>
-          );
-        })}
-        {visible.length === 0 && (
-          <div className="side-empty">
-            {tasks.length === 0
-              ? "还没有任务"
-              : activeProjectId === null
-                ? "先打开一个项目文件夹"
-                : "这个项目还没有任务"}
-          </div>
-        )}
-      </div>
 
       {/* ⑤ 段位牌：校徽小印 + 名字 + S 印章 + 等宽编号 + 状态；图标导航 */}
       <div className="side-bottom">

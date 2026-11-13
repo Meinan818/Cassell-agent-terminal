@@ -25,11 +25,13 @@
 use crate::settings::{load_settings, Settings};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::{Mutex, oneshot};
 
 pub struct RunState {
     pub child: tokio::sync::Mutex<Option<tokio::process::Child>>,
@@ -37,6 +39,22 @@ pub struct RunState {
     pub native_cancel: AtomicBool,
     /// True while a native run is in flight.
     pub native_running: AtomicBool,
+    /// Pending interactive approvals: request id -> channel to resolve it.
+    /// The native engine registers here when a write/delete needs the user's
+    /// explicit confirmation; `resolve_approval` (UI) or cancel/timeout
+    /// resolves it. Entries are removed exactly once, by whoever resolves.
+    pub approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+}
+
+impl RunState {
+    /// Deny every pending approval (used by cancel_run so a stopped run
+    /// never hangs waiting for a decision that will never come).
+    pub async fn deny_all_approvals(&self) {
+        let mut map = self.approvals.lock().await;
+        for (_, tx) in map.drain() {
+            let _ = tx.send(false);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,6 +314,9 @@ pub async fn cancel_run(state: State<'_, RunState>) -> Result<bool, String> {
         state.native_cancel.store(true, Ordering::SeqCst);
         stopped = true;
     }
+    // Any write/delete waiting on the user's confirmation is denied, so the
+    // run never hangs on a decision that will never come.
+    state.deny_all_approvals().await;
     // Codex CLI child process, if any.
     let mut slot = state.child.lock().await;
     if let Some(child) = slot.as_mut() {

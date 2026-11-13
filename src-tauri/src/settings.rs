@@ -36,7 +36,8 @@ pub struct ExtensionItem {
 pub struct Settings {
     pub provider_id: String,
     pub model: String,
-    /// 思考强度：low | medium | high | xhigh | max。独立设置，不随模式变化。
+    /// 思考强度：low | medium | high | xhigh | max。切换模式时会带上该模式的
+    /// 默认强度（NORMA medium、EVA high），用户随后可改。
     pub effort: String,
     /// 模式： "norma"（通用工作 / Cowork）| "eva"（工程开发 / Code）。
     /// 与思考强度、Ultracode 各自独立。
@@ -44,8 +45,13 @@ pub struct Settings {
     /// Ultracode：高级工程工作流（多智能体并行、交叉验证、迭代）的独立开关。
     /// 当前引擎还是单智能体循环：开关只透传并记录，不假装已实现并行编排。
     pub ultracode: bool,
-    /// auto | read-only
+    /// auto | ask | read-only
+    /// auto：写文件、执行命令自动进行；ask：写文件前先问你（审批卡确认后才执行）；
+    /// read-only：不写文件、不执行命令，只能读。
     pub approval: String,
+    /// 删除确认： "always"（每次删文件都单独问，默认）| "never"（不再询问，直接执行）。
+    /// 用户可在设置 → 权限里改；持久化在 settings.json。
+    pub delete_confirm: String,
     /// read-only | workspace-write | danger-full-access
     pub sandbox: String,
     /// light | dark
@@ -74,6 +80,7 @@ impl Default for Settings {
             mode: "norma".to_string(),
             ultracode: false,
             approval: "auto".to_string(),
+            delete_confirm: "always".to_string(),
             sandbox: "workspace-write".to_string(),
             theme: "light".to_string(),
             streaming: true,
@@ -226,6 +233,16 @@ pub fn load_settings(app: &AppHandle) -> Settings {
     };
     if settings.mode != "norma" && settings.mode != "eva" {
         settings.mode = "norma".to_string();
+    }
+    // 审批档位归一：未知值回落到 auto；删除确认归一：未知值回落到 always（安全优先）。
+    if settings.approval != "auto"
+        && settings.approval != "ask"
+        && settings.approval != "read-only"
+    {
+        settings.approval = "auto".to_string();
+    }
+    if settings.delete_confirm != "always" && settings.delete_confirm != "never" {
+        settings.delete_confirm = "always".to_string();
     }
     settings
 }

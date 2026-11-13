@@ -2199,3 +2199,136 @@ select {
     transition-duration: 200ms !important;
   }
 }
+
+/* ---------- P0-4 / P0-5 / P0-9（2026-11-13） ---------- */
+
+/* P0-4 未授权提示条（Composer 上方）：与 gate-notice 同一套语言。 */
+.auth-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg-soft);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.auth-notice > span {
+  flex: 1;
+}
+
+/* P0-5 计划/执行切换（Composer 行内小分段控件）。 */
+.w2-runmode {
+  display: inline-flex;
+  background: var(--bg-soft);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+.w2-runmode button {
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: transparent;
+  transition: background 150ms ease, color 150ms ease;
+}
+.w2-runmode button:hover {
+  color: var(--text);
+}
+.w2-runmode button.w2-on {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+/* P0-5 方案下方的确认/修改按钮（在消息气泡文字下方）。 */
+.plan-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* P0-4 删除确认弹窗（居中遮罩 + 软底卡片，与设置 modal 同一套语言）。 */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  animation: confirm-in 180ms ease;
+}
+.confirm-card {
+  background: var(--bg);
+  border-radius: 16px;
+  padding: 20px 22px;
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+}
+.confirm-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.confirm-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+  word-break: break-all;
+}
+.confirm-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.confirm-quiet {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  background: none;
+  padding: 0;
+}
+.confirm-quiet:hover {
+  color: var(--text-2);
+  text-decoration: underline;
+}
+@keyframes confirm-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* P0-9 NORMA 交付：文档产出汇总（审查面板内，diff 列表上方）。 */
+.rp-deliverables {
+  background: var(--bg-soft);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.rp-deliverables-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.rp-deliverable {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.rp-deliverable-time {
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
