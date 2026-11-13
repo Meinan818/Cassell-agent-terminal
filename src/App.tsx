@@ -249,7 +249,7 @@ const WAVE2_CSS = `
 }
 .w2-insp-body { flex: 1; overflow-y: auto; padding: 16px; min-height: 0; }
 /* Inspector 页签切换：200ms 淡入 + 3px 上浮（旧 150ms 纯透明度淡入像“蹦”一下）。 */
-.w2-view { animation: w2-view-in 200ms var(--ease) both; }
+.w2-view { animation: w2-view-in 200ms var(--ease) both; display: flex; flex-direction: column; min-height: 100%; }
 @keyframes w2-view-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 /* Inspector 内容错峰：页签切换时各区块依次轻 rise（容器 key={view} 已重挂载，错峰随切换重播）。 */
 .w2-view > * { animation: live-rise 200ms var(--spring) backwards; }
