@@ -79,6 +79,9 @@ pub struct AgentResult {
     pub total_tokens: Option<u64>,
     /// 本轮实际执行过的工具调用记录
     pub tools_run: Vec<String>,
+    /// 撞到 8 轮工具调用上限、循环耗尽时还没收尾：任务可能没做完，
+    /// 前端据此明确告诉用户，不要显示成一次正常成功的结束。
+    pub round_limit_hit: bool,
 }
 
 /// 显示名取首字 + “专员”（如“路明非”→“路专员”）；没填就用默认“路专员”。
@@ -110,6 +113,7 @@ fn cancelled_result(
         completion_tokens,
         total_tokens,
         tools_run,
+        round_limit_hit: false,
     }
 }
 
@@ -568,6 +572,38 @@ fn effort_temperature(effort: &str) -> f64 {
     }
 }
 
+/// 把一个流式 tool_call 增量合并进累积槽。
+/// 必须带上 `type`：回发给服务商的 assistant 消息里 tool_calls 缺了
+/// `"type": "function"`，DeepSeek 会直接 422（`missing field 'type'`），
+/// MockLocal 从不校验这个字段，所以之前一直没发现。
+/// 增量里没带 type 时（后续分片只带 arguments）就写死 "function"。
+fn merge_tool_call_delta(slot: &mut Value, tc: &Value) {
+    if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
+        slot["id"] = json!(id);
+    }
+    match tc.get("type").and_then(|t| t.as_str()) {
+        Some(t) => slot["type"] = json!(t),
+        None => {
+            if slot.get("type").is_none() {
+                slot["type"] = json!("function");
+            }
+        }
+    }
+    if let Some(name) = tc.pointer("/function/name").and_then(|n| n.as_str()) {
+        slot["function"] = slot.get("function").cloned().unwrap_or(json!({}));
+        slot["function"]["name"] = json!(name);
+    }
+    if let Some(args) = tc.pointer("/function/arguments").and_then(|a| a.as_str()) {
+        let prev = slot
+            .pointer("/function/arguments")
+            .and_then(|a| a.as_str())
+            .unwrap_or("")
+            .to_string();
+        slot["function"] = slot.get("function").cloned().unwrap_or(json!({}));
+        slot["function"]["arguments"] = json!(prev + args);
+    }
+}
+
 #[tauri::command]
 pub async fn run_agent_native(
     app: AppHandle,
@@ -684,7 +720,10 @@ async fn run_agent_native_inner(
     let mut completion_tokens = None;
     let mut total_tokens = None;
 
-    // 最多 8 轮工具调用，避免死循环
+    // 最多 8 轮工具调用，避免死循环。
+    // finished_naturally：某轮模型没再调工具、正常收尾才为 true；
+    // 8 轮全被工具调用占满、循环自然耗尽时为 false，前端据此提示用户。
+    let mut finished_naturally = false;
     for _round in 0..8 {
         // 用户点了停止：立刻收尾，不再发下一轮请求
         if state.native_cancel.load(Ordering::SeqCst) {
@@ -796,24 +835,12 @@ async fn run_agent_native_inner(
                     }
                 }
 
-                // 工具调用增量：按 index 累积
+                // 工具调用增量：按 index 累积（type 也带上，见 merge_tool_call_delta）
                 if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                     for tc in tcs {
                         let idx = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
                         while tool_calls.len() <= idx { tool_calls.push(json!({})); }
-                        let slot = &mut tool_calls[idx];
-                        if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
-                            slot["id"] = json!(id);
-                        }
-                        if let Some(name) = tc.pointer("/function/name").and_then(|n| n.as_str()) {
-                            slot["function"] = slot.get("function").cloned().unwrap_or(json!({}));
-                            slot["function"]["name"] = json!(name);
-                        }
-                        if let Some(args) = tc.pointer("/function/arguments").and_then(|a| a.as_str()) {
-                            let prev = slot.pointer("/function/arguments").and_then(|a| a.as_str()).unwrap_or("").to_string();
-                            slot["function"] = slot.get("function").cloned().unwrap_or(json!({}));
-                            slot["function"]["arguments"] = json!(prev + args);
-                        }
+                        merge_tool_call_delta(&mut tool_calls[idx], tc);
                     }
                 }
             }
@@ -861,7 +888,10 @@ async fn run_agent_native_inner(
                 }
                 continue;
             }
-            _ => break,
+            _ => {
+                finished_naturally = true;
+                break;
+            }
         }
     }
 
@@ -877,6 +907,7 @@ async fn run_agent_native_inner(
         completion_tokens,
         total_tokens,
         tools_run,
+        round_limit_hit: !finished_naturally,
     })
 }
 
@@ -1092,5 +1123,34 @@ mod tests {
         assert!(!catastrophic_command("rm -rf /tmp/foo"));
         assert!(!catastrophic_command("rm -f /tmp/foo.txt"));
         assert!(!catastrophic_command("npm test"));
+    }
+
+    #[test]
+    fn tool_call_delta_carries_type() {
+        // 真 DeepSeek 严格校验：回发的 assistant tool_calls 缺 "type" 就 422。
+        // 首个分片带 type，后续分片只带 arguments，type 不能丢。
+        let mut slot = json!({});
+        merge_tool_call_delta(
+            &mut slot,
+            &json!({"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": ""}}),
+        );
+        assert_eq!(slot.get("type").and_then(|t| t.as_str()), Some("function"));
+        assert_eq!(slot.get("id").and_then(|i| i.as_str()), Some("call_1"));
+        merge_tool_call_delta(
+            &mut slot,
+            &json!({"function": {"arguments": "{\"path\": \"start.txt\"}"}}),
+        );
+        assert_eq!(slot.get("type").and_then(|t| t.as_str()), Some("function"));
+        assert_eq!(
+            slot.pointer("/function/arguments").and_then(|a| a.as_str()),
+            Some("{\"path\": \"start.txt\"}")
+        );
+        // 增量从头到尾都没带 type：也要默认补上，不能留空。
+        let mut slot2 = json!({});
+        merge_tool_call_delta(
+            &mut slot2,
+            &json!({"id": "call_2", "function": {"name": "list_dir", "arguments": "{}"}}),
+        );
+        assert_eq!(slot2.get("type").and_then(|t| t.as_str()), Some("function"));
     }
 }

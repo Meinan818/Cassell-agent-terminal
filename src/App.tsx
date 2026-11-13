@@ -2291,6 +2291,9 @@ export default function App() {
                       ...m,
                       streaming: false,
                       plan: isPlan ? true : undefined,
+                      // 撞到 8 轮上限：任务可能没做完，下方挂提示 +“继续”，
+                      // 不要显示成一次正常成功的结束。
+                      roundLimitHit: result.round_limit_hit ? true : undefined,
                       text:
                         result.text || m.text || "（本轮没有文字输出）",
                       usage,
@@ -3415,6 +3418,28 @@ export default function App() {
                             onClick={handleModifyPlan}
                           >
                             修改方案
+                          </button>
+                        </div>
+                      )}
+                    {/* 撞到 8 轮工具调用上限：任务可能没做完，明确告诉用户，
+                        不要显示成一次正常成功的结束。只在最新一条上限消息上挂。
+                        “继续”走正常发送路径：带上之前的对话历史再跑，模型会
+                        自己重读文件、从做到一半的地方接着做。 */}
+                    {m.roundLimitHit &&
+                      !m.streaming &&
+                      messages.slice(i + 1).every((x) => !x.roundLimitHit) && (
+                        <div className="round-limit-notice">
+                          <span>
+                            这轮到 8 次工具调用上限了，任务可能还没做完——点「继续」，我接着把它做完。
+                          </span>
+                          <button
+                            type="button"
+                            className="btn-approve"
+                            onClick={() =>
+                              handleSend("继续，把上面这个任务做完", [])
+                            }
+                          >
+                            继续
                           </button>
                         </div>
                       )}

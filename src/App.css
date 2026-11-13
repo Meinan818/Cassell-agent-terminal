@@ -2252,6 +2252,23 @@ select {
   margin-top: 10px;
 }
 
+/* 轮次上限提示：无框线、柔和底色、淡入上浮，与计划操作同一套语言。
+   只是一句提醒 + 一个按钮，不抢对话的视觉重心。 */
+.round-limit-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  animation: live-rise 300ms var(--ease) both;
+}
+
 /* P0-4 删除确认弹窗（居中遮罩 + 软底卡片，与设置 modal 同一套语言）。 */
 .confirm-overlay {
   position: fixed;

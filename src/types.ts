@@ -76,6 +76,8 @@ export interface ChatMsg {
   toolLabel?: string;
   /** 服务商回报的真实用量（本轮结束时才有）。 */
   usage?: { prompt: number; completion: number; total: number };
+  /** 本轮撞到 8 轮工具调用上限、任务可能没做完：下方挂提示 +“继续”。 */
+  roundLimitHit?: boolean;
   /** Permission card payload (kind === "perm"). */
   perm?: {
     command: string;
@@ -175,6 +177,8 @@ export interface AgentResult {
   completion_tokens: number | null;
   total_tokens: number | null;
   tools_run: string[];
+  /** 撞到 8 轮工具调用上限、循环耗尽时还没收尾：任务可能没做完。 */
+  round_limit_hit: boolean;
 }
 
 export const EFFORT_LABELS: Record<Effort, string> = {
