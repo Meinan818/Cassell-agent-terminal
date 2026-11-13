@@ -31,6 +31,15 @@ interface MarkProps {
    * 共用同一份；引擎按 ritualEnvelope 算分拍包络（收束/闪烁/展开/呼气）。
    */
   ritual?: ModeRitual | null;
+  /**
+   * 权限核验环与球面的间距（默认 6px）。环的外径 = size + 2*ringGap。
+   * 顶栏的球（36px）装在 40px 高的标题栏里、顶着窗口上沿：6px 间距
+   * 的环是 48px，顶部 4px 会被窗口上沿裁掉（转圈时弧线顶端缺一块，
+   * 用户截图里就是这样）。顶栏传 ringGap={1}，环收成 38px，
+   * 上下各留 1px，整圈完整显示；球本身与 spin 仪式一字不动。
+   * 其他地方的球容器都够高，用默认 6px。
+   */
+  ringGap?: number;
 }
 
 /**
@@ -56,6 +65,7 @@ export default function Mark({
   gaze = 0,
   fast = false,
   ritual = null,
+  ringGap = 6,
 }: MarkProps) {
   // 巡演模式：?ball=tour 固定顺序循环 14 态；?ball=<state> 单状态锁定。
   const tourState = useTourState(state);
@@ -168,10 +178,12 @@ export default function Mark({
 
   const ringSize = size * 0.07;
   const dotSize = Math.max(3, size * 0.04);
-  // 权限核验环（第 3 步第二波 §4）：1.5px 细线，半径 = 球半径 + 6px，
+  // 权限核验环（第 3 步第二波 §4）：1.5px 细线，半径 = 球半径 + ringGap，
   // 颜色走球本体色低透明度（palette.ringColor）；进度按 pose.verifyProgress。
-  const verifyR = R + 6;
+  // ringGap 默认 6px；顶栏传 1px，环才塞得进 40px 的标题栏（见上）。
+  const verifyR = R + ringGap;
   const verifyC = 2 * Math.PI * verifyR;
+  const verifyD = size + ringGap * 2;
 
   return (
     <div
@@ -197,13 +209,13 @@ export default function Mark({
         <svg
           className="mark-verify-ring"
           aria-hidden
-          width={size + 12}
-          height={size + 12}
-          viewBox={`0 0 ${size + 12} ${size + 12}`}
+          width={verifyD}
+          height={verifyD}
+          viewBox={`0 0 ${verifyD} ${verifyD}`}
           style={{
             position: "absolute",
-            left: -6,
-            top: -6,
+            left: -ringGap,
+            top: -ringGap,
             opacity: pose.verifyOpacity,
             animation:
               pose.verifyPulse && !pose.reducedMotion
@@ -213,8 +225,8 @@ export default function Mark({
           }}
         >
           <circle
-            cx={(size + 12) / 2}
-            cy={(size + 12) / 2}
+            cx={verifyD / 2}
+            cy={verifyD / 2}
             r={verifyR}
             fill="none"
             stroke={palette.ringColor}
@@ -222,7 +234,7 @@ export default function Mark({
             strokeLinecap="round"
             strokeDasharray={verifyC}
             strokeDashoffset={verifyC * (1 - pose.verifyProgress)}
-            transform={`rotate(-90 ${(size + 12) / 2} ${(size + 12) / 2})`}
+            transform={`rotate(-90 ${verifyD / 2} ${verifyD / 2})`}
           />
         </svg>
       )}

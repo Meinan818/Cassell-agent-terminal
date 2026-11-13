@@ -9,11 +9,11 @@ import { APP_VERSION } from "../version";
  * → gate（身份认证门）→ finger（指纹）
  * → login（登录表单）→ verify（权限核验环 0→100% 点亮 S）
  * → granted（ACCESS GRANTED）→ welcome（WELCOME + 身份已连接面板）
- * → 300ms 交叉淡化进工作区。
+ * → 600ms 交叉淡化进工作区。
  *
  * 质感约定（frontend-redesign-plan.md §2 / §7.1）：
- * - 阶段切换：交叉淡化 600ms --ease-exp，淡出与淡入重叠 150ms
- *   （淡出 0–600ms，淡入自 450ms 起 600ms）。
+ * - 阶段切换：交叉淡化 950ms --ease-exp，淡出与淡入重叠 600ms
+ *   （淡出 0–950ms，淡入自 350ms 起 950ms）。
  * - 字阶：仪式大标题 32px/600/-0.02em；WELCOME 字距 0.30em；
  *   拉丁铭文衬线体逐行淡入；核验环进度数字等宽字体。
  * - 间距：4px 基数（8 / 12 / 16 / 24 / 32 / 48）。
@@ -58,12 +58,13 @@ const PHASE_MS: Record<Phase, number> = {
   welcome: 2200,
 };
 
-/** 交叉淡化：旧段淡出 600ms，新段 300ms 后淡入 600ms，二者重叠 300ms
+/** 交叉淡化：旧段淡出 950ms，新段 350ms 后淡入 950ms，二者重叠 600ms
  * 才是真的交叉淡化——之前 450ms 延迟只剩 150ms 重叠，旧段快淡没了
- * 新段才出现，中间近半秒空场，看着像硬切。七步每步停留时长不动，
- * 只改淡入提前量。 */
-const STAGE_MS = 600;
-const STAGE_ENTER_DELAY_MS = 300;
+ * 新段才出现，中间近半秒空场，看着像硬切。600ms 一档用户反馈太快、
+ * 不丝滑（粒子卡顿时过渡跟着掉帧发涩），拉到 950ms 才有从容的
+ * 交叉感。七步每步停留时长不动，只改淡入提前量与淡化时长。 */
+const STAGE_MS = 950;
+const STAGE_ENTER_DELAY_MS = 350;
 
 /** 铭文三行（拉丁铭文，衬线体逐行淡入）。 */
 const MOTTO_LINES = [
@@ -121,7 +122,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   const [exitingFading, setExitingFading] = useState(false);
   const [logCount, setLogCount] = useState(0);
   const [leaving, setLeaving] = useState(false);
-  // 跳过退出仪式：点跳过后整屏 600ms 溶解 + 轻微收拢进工作区，不再
+  // 跳过退出仪式：点跳过后整屏 900ms 溶解 + 轻微收拢进工作区，不再
   // 硬切到欢迎段闪一下。skippingRef 是 finish() 定时的依据。
   const [skipping, setSkipping] = useState(false);
   const skippingRef = useRef(false);
@@ -129,6 +130,12 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   // 画布淡出（8.0s）：比铭文晚 1.5s——6.5–8.0s 是校徽散回星野的时间，
   // 散完画布才淡出，不要一边散一边被 CSS 盖掉。
   const [canvasGone, setCanvasGone] = useState(false);
+  // canvasGone 的 ref 版：统一渲染循环每帧读它，决定粒子段画布
+  // 不透明盖住背景时要不要画背景（盖住时不画，省 4500 颗星）。
+  const canvasGoneRef = useRef(false);
+  useEffect(() => {
+    canvasGoneRef.current = canvasGone;
+  }, [canvasGone]);
   const [connected, setConnected] = useState(false);
   const [progress, setProgress] = useState(0);
   const [lit, setLit] = useState(false);
@@ -160,17 +167,19 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     if (doneRef.current) return;
     doneRef.current = true;
     setLeaving(true);
-    // 开机结束交叉淡化交接：正常路径 300ms 淡出（--ease），onDone 在淡出
-    // 中途（150ms）触发，App 随即挂载标题栏 + 三栏壳（300ms 淡入），Boot
-    // 再留 150ms 才卸载——淡出与淡入重叠 150ms，不许硬切（见 App.tsx
-    // 的 handleBootDone）。七步流程与每步时长一律不动。
-    // 跳过路径：整屏 600ms 溶解（--ease-exp）+ 轻微收拢，onDone 放在
-    // 450ms——App 在 600ms 时卸载 Boot，正好是溶解完成的一刻；主界面
-    // 300ms 淡入与溶解最后 150ms 重叠，同样不许硬切。
-    later(onDone, skippingRef.current ? 450 : 150);
+    // 开机结束交叉淡化交接：正常路径 600ms 淡出（--ease），onDone 在淡出
+    // 450ms 时触发（App 随即挂载标题栏 + 三栏壳，500ms 淡入），Boot
+    // 再留 150ms 才卸载（450+150=600，正好是淡出完成的一刻）——淡出
+    // 与淡入重叠 150ms，不许硬切（见 App.tsx 的 handleBootDone）。
+    // 七步流程与每步时长一律不动。300ms 一档用户反馈太快、不丝滑，
+    // 拉到 600ms 才有从容的交接感。
+    // 跳过路径：整屏 900ms 溶解（--ease-exp）+ 轻微收拢，onDone 放在
+    // 750ms——App 在 900ms 时卸载 Boot，正好是溶解完成的一刻；主界面
+    // 500ms 淡入与溶解最后 150ms 重叠，同样不许硬切。
+    later(onDone, skippingRef.current ? 750 : 450);
   };
 
-  /** 切到下一阶段：旧阶段留场淡出 600ms，新阶段 450ms 后淡入。 */
+  /** 切到下一阶段：旧阶段留场淡出 950ms，新阶段 350ms 后淡入。 */
   const goTo = (next: Phase) => {
     const prev = phaseRef.current;
     if (prev === next) return;
@@ -191,8 +200,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
    * 旧路径是 goTo("welcome") + 900ms 后 finish：当前段的动画被半截掐断，
    * 欢迎段刚错峰入场就被打断、一闪而过，整个过程像硬切，很廉价。
    * 新路径不走欢迎段：点下即进退出仪式——按钮与日志先退场（250ms），
-   * 整屏 600ms 溶解 + 轻微收拢（scale 0.99 / 上浮 6px），主界面在溶解
-   * 末段交叉淡入。全程约 750ms，比旧路径（900+300ms）更快，也更克制。
+   * 整屏 900ms 溶解 + 轻微收拢（scale 0.99 / 上浮 6px），主界面在溶解
+   * 末段交叉淡入。全程约 1050ms，比旧路径（900+300ms）更从容，也更克制。
    * 舞台内的入场动画不杀死、不掐断——它在溶解之下继续走完，没有跳变；
    * 七步正常流程与每步时长一字不动，只改跳过这条路径。 */
   const skip = () => {
@@ -246,7 +255,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   }, [logCount]);
 
   // 粒子段：铭文 6500ms 淡出（600ms）；校徽 6.5–8.0s 散回星野，
-  // 画布 8000ms 才淡出（600ms），8500ms 切认证门。
+  // 画布 8000ms 才淡出（900ms，与切门的 950ms 交叉淡化接上），8500ms 切认证门。
   useEffect(() => {
     if (phase !== "particles") return;
     const t1 = window.setTimeout(() => setSealGone(true), 6500);
@@ -295,52 +304,66 @@ export default function Boot({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 常驻纯黑夜空背景（独立于粒子校徽段）：开机七步全程都有的底。
-  // 粒子段的画布只在 particles 阶段挂载，校徽一走背景就空了——这块
-  // 画布从开机挂到结束，画纯黑底 + 清晰可见的星野散在夜空里，
-  // 和粒子段的气质接得上。约 4500 颗星，亮度 0.30–0.95，闪烁 + 极慢漂移；
-  // 只画背景，不碰校徽粒子。背景是纯黑 #000000，不要发蓝。
+  // ---- 统一渲染循环（单 rAF，挂载一次）：背景星野 + 粒子校徽 ----
+  // 之前是两个独立的 rAF 循环：背景 4500 颗星 + 粒子段 30000 校徽粒子
+  // + 4500 颗星，每帧约 39000 次 drawImage（加色混合）+ 两次全屏重绘，
+  // 真机上 WebKit 渲染进程常年占满 1 个核以上，粒子动画肉眼可见地卡。
+  // 现在只用一个 rAF 驱动两块画布，并把每帧工作量砍下来：
+  // - 校徽粒子 30000 → 20000（10000 太淡成不了形、30000 太卡；20000
+  //   这一档之前已验证成型清晰、中心不过曝；布点表是核心/晕染混排，
+  //   切前 20000 颗形状与明暗比例不变，只是每道笔画上的点少了三成）；
+  // - 粒子段星野 4500 → 3000（校徽段本身已够密），背景星野保持 4500；
+  // - DPR 上限 2 → 1.5（高分屏填充量少约一半，100%/125% 缩放不受影响）；
+  // - 核心光晕的 radial gradient 只预渲染一次（离屏精灵），每帧
+  //   drawImage + globalAlpha，不再每帧新建 gradient；
+  // - 粒子段画布不透明、盖住背景时，背景那 4500 颗一律不画（之前白画了）。
+  // 视觉参数（尺寸、亮度、汇聚/散开时间、旋转、缓动）一律不动；
+  // 七步流程与约 20 秒总时长不动。
   useEffect(() => {
-    const canvas = bgCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const S = Math.min(window.devicePixelRatio || 1, 2);
-    let w = 0;
-    let h = 0;
-    let cssW = 0;
-    let cssH = 0;
-    // 柔光点精灵（和粒子段同款做法，drawImage 比逐点 arc 快得多）。
-    const makeDot = () => {
+    const bgCanvas = bgCanvasRef.current;
+    if (!bgCanvas) return;
+    const bgCtx = bgCanvas.getContext("2d");
+    if (!bgCtx) return;
+    const S = Math.min(window.devicePixelRatio || 1, 1.5);
+
+    // ---- 柔光点精灵（两块画布共用；drawImage 比逐点 arc 快得多）----
+    const makeDot = (px: number) => {
       const c = document.createElement("canvas");
-      c.width = 32;
-      c.height = 32;
+      c.width = px;
+      c.height = px;
       const g = c.getContext("2d");
       if (!g) return c;
-      const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+      const grad = g.createRadialGradient(px / 2, px / 2, 0, px / 2, px / 2, px / 2);
       grad.addColorStop(0, "rgba(255,255,255,1)");
-      grad.addColorStop(0.35, "rgba(255,255,255,0.35)");
+      grad.addColorStop(0.35, "rgba(255,255,255,0.55)");
+      grad.addColorStop(0.7, "rgba(255,255,255,0.15)");
       grad.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = grad;
-      g.fillRect(0, 0, 32, 32);
+      g.fillRect(0, 0, px, px);
       return c;
     };
-    const dot = makeDot();
+    const dot = makeDot(64);
+
+    // ---- 背景星野（常驻夜空，开机七步全程的底；4500 颗，亮度 0.30–0.95）----
     type BgStar = { x: number; y: number; size: number; base: number; tw: number; drift: number };
-    let stars: BgStar[] = [];
-    const seed = () => {
-      w = (canvas.width = Math.round(canvas.clientWidth * S));
-      h = (canvas.height = Math.round(canvas.clientHeight * S));
-      cssW = canvas.clientWidth;
-      cssH = canvas.clientHeight;
+    let bgStars: BgStar[] = [];
+    let bgW = 0;
+    let bgH = 0;
+    let bgCssW = 0;
+    let bgCssH = 0;
+    const seedBg = () => {
+      bgW = (bgCanvas.width = Math.round(bgCanvas.clientWidth * S));
+      bgH = (bgCanvas.height = Math.round(bgCanvas.clientHeight * S));
+      bgCssW = bgCanvas.clientWidth;
+      bgCssH = bgCanvas.clientHeight;
       // 约 4500 颗星，夜空要一眼看清密密麻麻的星野，不能黑漆漆一片——
       // 之前 2500 颗、0.08–0.36 太暗太小，截图上几乎看不见。普通星
       // 0.8–2.0px、亮度 0.30–0.80，约 12% 是亮星（2.0–3.0px、0.75–0.95）。
-      stars = Array.from({ length: 4500 }, () => {
+      bgStars = Array.from({ length: 4500 }, () => {
         const hero = Math.random() < 0.12;
         return {
-          x: Math.random() * cssW,
-          y: Math.random() * cssH,
+          x: Math.random() * bgCssW,
+          y: Math.random() * bgCssH,
           size: (hero ? 2.0 + Math.random() * 1.0 : 0.8 + Math.random() * 1.2) * S,
           base: hero ? 0.75 + Math.random() * 0.2 : 0.3 + Math.random() * 0.5,
           tw: Math.random() * Math.PI * 2,
@@ -348,125 +371,104 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         };
       });
     };
-    seed();
-    const onResize = () => seed();
-    window.addEventListener("resize", onResize);
-    let raf = 0;
-    const start = performance.now();
-    const draw = (now: number) => {
-      const t = (now - start) / 1000;
-      // 纯黑夜空（不要发蓝）。
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, w, h);
-      ctx.globalCompositeOperation = "lighter";
-      for (const st of stars) {
-        const x = (st.x + st.drift * t + cssW) % cssW;
-        const a = st.base * (0.7 + 0.3 * Math.sin(t * 0.7 + st.tw));
-        if (a < 0.03) continue;
-        const sz = st.size;
-        ctx.globalAlpha = Math.min(1, a);
-        ctx.drawImage(dot, x * S - sz / 2, st.y * S - sz / 2, sz, sz);
-      }
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = "source-over";
-      raf = requestAnimationFrame(draw);
-    };
-    raf = requestAnimationFrame(draw);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
-    };
-  }, []);
+    seedBg();
+    const bgStart = performance.now();
 
-  // Particle field: the seal IS the particles — a true 3D particle crest.
-  // 参考视频（gemini3 全息粒子演示）式细腻星尘：30000 颗细小白色光点
-  // 从纯黑夜空被引力牵引、沿同一方向的漩涡优雅流进来（远处先出发、
-  // 近处后出发），ease-out 轻柔落位，拼成一个有厚度、有纵深的 3D
-  // 粒子模型（不是平面拼图）；成型后 6.5–8.0s 再沿流入路径散回星野。
-  // 校徽按真校徽照片采样布点（30000 颗，含 1px 晕染层：笔画是粗实
-  // 的发光带，不是单像素细线——视频里的心形就是密不透风的光带）；
-  // 每个粒子带 z 轴深度：前脸 / 后脸 / 侧壁三层构成 0.65R 厚的立体
-  // 校徽；成型后绕 Y 轴缓慢摆动（±22°）+ 透视投影，厚度与视差一眼
-  // 可见。背景是纯黑夜空 #000000 + 4500 颗清晰可见的星野（远近星点
-  // 带视差漂移），不要发蓝。粒子要亮、要密、要看得清（尺寸 1.0–4.0、
-  // base 0.65–1.0），边缘柔和衰减——细腻但不暗，不要粗大糊团、
-  // 不要中心过曝成白团。
-  // 全程只用白色粒子，照片校徽 <img> 已彻底去掉。
-  useEffect(() => {
-    if (phase !== "particles") return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const S = Math.min(window.devicePixelRatio || 1, 2);
-    const w = (canvas.width = Math.round(canvas.clientWidth * S));
-    const h = (canvas.height = Math.round(canvas.clientHeight * S));
-    const cssW = canvas.clientWidth;
-    const cssH = canvas.clientHeight;
-    const cx = w / 2;
-    const cy = h / 2 - 30 * S;
-    const R = Math.min(cssW, cssH) * 0.21 * S; // 校徽半径（设备 px）
-    const DEPTH = R * 0.65; // 校徽立体厚度（前脸到后脸）
-    const FOCAL = Math.min(w, h) * 1.05; // 透视焦距：越短，纵深越夸张
-
-    // ---- 柔光点精灵（预渲染，drawImage 比逐点 arc 快得多）----
-    const makeDot = () => {
-      const c = document.createElement("canvas");
-      c.width = 64;
-      c.height = 64;
-      const g = c.getContext("2d");
-      if (!g) return c;
-      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      // 亮核 + 柔晕：中心亮到 1.0（亮点），0.35 处 0.55、0.7 处 0.15
-      // 拖出柔光晕——亮核比之前更实（0.25→0.35），每颗的发光面积更大，
-      // 30000 颗叠起来才是密实的光带，不是稀疏的虚点；形状靠亮点堆叠
-      // 发光（加色混合），不是靠中心光晕糊成一团。
-      grad.addColorStop(0, "rgba(255,255,255,1)");
-      grad.addColorStop(0.35, "rgba(255,255,255,0.55)");
-      grad.addColorStop(0.7, "rgba(255,255,255,0.15)");
-      grad.addColorStop(1, "rgba(255,255,255,0)");
-      g.fillStyle = grad;
-      g.fillRect(0, 0, 64, 64);
-      return c;
-    };
-    const dot = makeDot();
-
-    // ---- 背景：纯黑夜空 #000000，不要发蓝（用户明确要纯黑夜空 + 星空）。
-
-    // ---- 背景星野：4500 颗细星，布在三维大空间里（z -1400..+250），
-    // 远星小而暗、近星大而亮，随镜头缓慢视差漂移。夜空要一眼看清
-    // 密密麻麻的星野——之前 3000 颗、0.08–0.38 太暗，截图上看不见。
-    type Star = { x: number; y: number; z: number; size: number; base: number; tw: number };
-    const stars: Star[] = Array.from({ length: 4500 }, () => {
-      const hero = Math.random() < 0.12;
-      return {
-        x: (Math.random() * 2 - 1) * cssW * 0.55 * S,
-        y: (Math.random() * 2 - 1) * cssH * 0.55 * S,
-        z: -1400 * S + Math.random() * 1650 * S,
-        size: (hero ? 2.0 + Math.random() * 1.0 : 0.8 + Math.random() * 1.2) * S,
-        base: hero ? 0.75 + Math.random() * 0.2 : 0.3 + Math.random() * 0.5,
-        tw: Math.random() * Math.PI * 2,
-      };
-    });
-
-    // ---- 校徽布点：构建期由真校徽照片采样得到（sealTargets.ts），
-    // x/y 已归一化到 [-1, 1]，直接按 R 缩放。运行时不再加载图片，
-    // 没有竞态、没有兜底双环。----
+    // ---- 粒子校徽系统（懒初始化：画布只在 particles 阶段挂载）----
     type Target = { x: number; y: number; z: number; lum: number };
-    const N_CREST = 30000;
-    const targets: Target[] = [];
-    const buildTargets = () => {
+    type PStar = { x: number; y: number; z: number; size: number; base: number; tw: number };
+    type P = {
+      tx: number; ty: number; tz: number;
+      sx: number; sy: number; sz: number;
+      swirl: number; delay: number; dur: number;
+      size: number; base: number; tw: number; hero: boolean;
+    };
+    const N_CREST = 20000;
+    let pCtx: CanvasRenderingContext2D | null = null;
+    let pW = 0;
+    let pH = 0;
+    let pCssW = 0;
+    let pCssH = 0;
+    let pCx = 0;
+    let pCy = 0;
+    let pR = 0;
+    let pDepth = 0;
+    let pFocal = 0;
+    let pGlowR = 0;
+    let glowSprite: HTMLCanvasElement | null = null;
+    let pStars: PStar[] = [];
+    let parts: P[] = [];
+    let pReady = false;
+    let pStart = 0;
+
+    const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+    const easeOutCubic = (k: number) => 1 - Math.pow(1 - k, 3);
+    const smooth = (a: number, b: number, x: number) => {
+      const k = clamp01((x - a) / (b - a));
+      return k * k * (3 - 2 * k);
+    };
+
+    const initParticles = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return false;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      pCtx = ctx;
+      pW = (canvas.width = Math.round(canvas.clientWidth * S));
+      pH = (canvas.height = Math.round(canvas.clientHeight * S));
+      pCssW = canvas.clientWidth;
+      pCssH = canvas.clientHeight;
+      pCx = pW / 2;
+      pCy = pH / 2 - 30 * S;
+      pR = Math.min(pCssW, pCssH) * 0.21 * S; // 校徽半径（设备 px）
+      pDepth = pR * 0.65; // 校徽立体厚度（前脸到后脸）
+      pFocal = Math.min(pW, pH) * 1.05; // 透视焦距：越短，纵深越夸张
+      pGlowR = pR * 1.6;
+      // 核心光晕精灵：只预渲染一次。原渐变中心与 0.5 处亮度比约 1:0.5
+      //（0.025:0.012、0.045:0.024），烤进精灵、每帧只改 globalAlpha，
+      // 不再每帧新建 radial gradient。锁定时中心一闪、0.5 处不同步
+      // 变亮的细微差别（0.4 秒）肉眼不可辨。
+      const gs = document.createElement("canvas");
+      const gd = Math.max(2, Math.ceil(pGlowR * 2));
+      gs.width = gd;
+      gs.height = gd;
+      const gg = gs.getContext("2d");
+      if (gg) {
+        const grad = gg.createRadialGradient(gd / 2, gd / 2, 0, gd / 2, gd / 2, gd / 2);
+        grad.addColorStop(0, "rgba(255,255,255,1)");
+        grad.addColorStop(0.5, "rgba(255,255,255,0.5)");
+        grad.addColorStop(1, "rgba(255,255,255,0)");
+        gg.fillStyle = grad;
+        gg.fillRect(0, 0, gd, gd);
+      }
+      glowSprite = gs;
+      // 粒子段星野：3000 颗细星，布在三维大空间里（z -1400..+250），
+      // 远星小而暗、近星大而亮，随镜头缓慢视差漂移。校徽段本身已够密，
+      // 星野从 4500 减到 3000 不影响密度感。
+      pStars = Array.from({ length: 3000 }, () => {
+        const hero = Math.random() < 0.12;
+        return {
+          x: (Math.random() * 2 - 1) * pCssW * 0.55 * S,
+          y: (Math.random() * 2 - 1) * pCssH * 0.55 * S,
+          z: -1400 * S + Math.random() * 1650 * S,
+          size: (hero ? 2.0 + Math.random() * 1.0 : 0.8 + Math.random() * 1.2) * S,
+          base: hero ? 0.75 + Math.random() * 0.2 : 0.3 + Math.random() * 0.5,
+          tw: Math.random() * Math.PI * 2,
+        };
+      });
+      // 校徽布点：构建期由真校徽照片采样得到（sealTargets.ts），
+      // x/y 已归一化到 [-1, 1]，直接按 R 缩放。运行时不再加载图片，
+      // 没有竞态、没有兜底双环。
+      const targets: Target[] = [];
       for (const sp of SEAL_TARGETS.slice(0, N_CREST)) {
-        const x = sp.x * R;
-        const y = sp.y * R;
+        const x = sp.x * pR;
+        const y = sp.y * pR;
         // 立体厚度：前脸 40% / 后脸 25% / 侧壁体 35%，亮处微微凸起。
         const roll = Math.random();
         let z: number;
-        if (roll < 0.4) z = DEPTH / 2 + (Math.random() - 0.5) * 10 * S;
-        else if (roll < 0.65) z = -DEPTH / 2 + (Math.random() - 0.5) * 10 * S;
-        else z = (Math.random() * 2 - 1) * (DEPTH / 2);
+        if (roll < 0.4) z = pDepth / 2 + (Math.random() - 0.5) * 10 * S;
+        else if (roll < 0.65) z = -pDepth / 2 + (Math.random() - 0.5) * 10 * S;
+        else z = (Math.random() * 2 - 1) * (pDepth / 2);
         z += (sp.lum / 255) * 10 * S;
         targets.push({ x, y, z, lum: sp.lum });
       }
@@ -477,32 +479,22 @@ export default function Boot({ onDone }: { onDone: () => void }) {
           const ring = Math.random();
           const a = Math.random() * Math.PI * 2;
           const rr =
-            ring < 0.6 ? R : ring < 0.85 ? R * 0.72 : R * (0.2 + Math.random() * 0.4);
+            ring < 0.6 ? pR : ring < 0.85 ? pR * 0.72 : pR * (0.2 + Math.random() * 0.4);
           const roll = Math.random();
           const z =
-            roll < 0.45 ? DEPTH / 2 : roll < 0.7 ? -DEPTH / 2 : (Math.random() * 2 - 1) * (DEPTH / 2);
+            roll < 0.45 ? pDepth / 2 : roll < 0.7 ? -pDepth / 2 : (Math.random() * 2 - 1) * (pDepth / 2);
           targets.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr * 0.96, z, lum: 200 });
         }
       }
-    };
-
-    // ---- 粒子：从三维空间各处螺旋汇聚到目标点 ----
-    type P = {
-      tx: number; ty: number; tz: number;
-      sx: number; sy: number; sz: number;
-      swirl: number; delay: number; dur: number;
-      size: number; base: number; tw: number; hero: boolean;
-    };
-    let parts: P[] = [];
-    const initParticles = () => {
+      // 粒子：从三维空间各处螺旋汇聚到目标点。
       parts = targets.map((tg) => {
         // 起点：校徽外围的球壳，半径 2.0R–4.6R，三维散开。
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(Math.random() * 2 - 1);
-        const rr = R * (2.0 + Math.random() * 2.6);
+        const rr = pR * (2.0 + Math.random() * 2.6);
         // 远处先出发、近处后出发（farK 0 近 → 1 远）：一波接一波地
         // 流进来，不是同时垮塌——汇聚过程本身是一场流动。
-        const farK = (rr / R - 2.0) / 2.6;
+        const farK = (rr / pR - 2.0) / 2.6;
         const sizeRoll = Math.random();
         const hero = sizeRoll > 0.97;
         return {
@@ -516,29 +508,44 @@ export default function Boot({ onDone }: { onDone: () => void }) {
           delay: (1 - farK) * 1.1 + Math.random() * 0.6,
           // 更长的飞行时间 + ease-out 落位：越近越慢，轻柔落位不砸进去。
           dur: 2.2 + Math.random() * 1.0,
-          // 星尘要亮、要密、要看得清（用户：成型后还是太淡，没有视频
-          // 里那种密集感）：小 1.0–1.7、中 1.7–2.6、hero 2.6–4.0；
+          // 星尘要亮、要密、要看得清：小 1.0–1.7、中 1.7–2.6、hero 2.6–4.0；
           // base 0.65–0.9、hero 1.0。中心光晕仍克制，不会过曝成白团
-          // ——亮度靠粒子本身（20000 颗叠出来的实心光带），不靠糊光晕。
+          // ——亮度靠粒子本身叠出来的实心光带，不靠糊光晕。
           size: (hero ? 2.6 + Math.random() * 1.4 : sizeRoll > 0.8 ? 1.7 + Math.random() * 0.9 : 1.0 + Math.random() * 0.7) * S,
           base: hero ? 1.0 : 0.65 + Math.random() * 0.25,
           tw: Math.random() * Math.PI * 2,
           hero,
         };
       });
+      pStart = performance.now();
+      pReady = true;
+      return true;
     };
 
-    const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-    const easeOutCubic = (k: number) => 1 - Math.pow(1 - k, 3);
-    const smooth = (a: number, b: number, x: number) => {
-      const k = clamp01((x - a) / (b - a));
-      return k * k * (3 - 2 * k);
+    const drawBg = (now: number) => {
+      const t = (now - bgStart) / 1000;
+      // 纯黑夜空（不要发蓝）。
+      bgCtx.globalCompositeOperation = "source-over";
+      bgCtx.globalAlpha = 1;
+      bgCtx.fillStyle = "#000000";
+      bgCtx.fillRect(0, 0, bgW, bgH);
+      bgCtx.globalCompositeOperation = "lighter";
+      for (const st of bgStars) {
+        const x = (st.x + st.drift * t + bgCssW) % bgCssW;
+        const a = st.base * (0.7 + 0.3 * Math.sin(t * 0.7 + st.tw));
+        if (a < 0.03) continue;
+        const sz = st.size;
+        bgCtx.globalAlpha = Math.min(1, a);
+        bgCtx.drawImage(dot, x * S - sz / 2, st.y * S - sz / 2, sz, sz);
+      }
+      bgCtx.globalAlpha = 1;
+      bgCtx.globalCompositeOperation = "source-over";
     };
 
-    let raf = 0;
-    const start = performance.now();
-    const draw = (now: number) => {
-      const t = (now - start) / 1000;
+    const drawParticles = (now: number) => {
+      const ctx = pCtx;
+      if (!ctx || !glowSprite) return;
+      const t = (now - pStart) / 1000;
       const fadeIn = Math.min(1, t / 0.5);
       // 成型度：0 = 还在汇聚，1 = 校徽已成型；旋转只在成型后介入。
       const formed = smooth(4.6, 5.8, t);
@@ -555,34 +562,31 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
       ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, w, h);
+      ctx.fillRect(0, 0, pW, pH);
       ctx.globalCompositeOperation = "lighter";
 
       // 核心光晕：随成型变亮，锁定时一闪，之后柔和呼吸。
-      const glowR = R * 1.6;
       // 光晕克制：底亮 0.025、锁定时一闪也只到 0.06——不要中心过曝成白团。
-      // 第二档用纯白，不要发蓝（190,215,255）。
+      // 预渲染精灵 + 每帧 globalAlpha，不再每帧新建 radial gradient。
       const glowA = (0.025 + 0.02 * formK + 0.06 * pulse) * (1 - disp);
-      const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-      gg.addColorStop(0, `rgba(255,255,255,${glowA.toFixed(3)})`);
-      gg.addColorStop(0.5, `rgba(255,255,255,${((0.012 + 0.012 * formK) * (1 - disp)).toFixed(3)})`);
-      gg.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = gg;
-      ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+      if (glowA > 0.001) {
+        ctx.globalAlpha = Math.min(1, glowA);
+        ctx.drawImage(glowSprite, pCx - pGlowR, pCy - pGlowR, pGlowR * 2, pGlowR * 2);
+      }
 
       // 背景星野（远 → 近，带镜头视差）。
       const cY = Math.cos(camY);
       const sY = Math.sin(camY);
-      for (const st of stars) {
+      for (const st of pStars) {
         const x2 = st.x * cY + st.z * sY;
         const z2 = -st.x * sY + st.z * cY;
-        const sc2 = FOCAL / (FOCAL - z2);
+        const sc2 = pFocal / (pFocal - z2);
         const twk = 0.75 + 0.25 * Math.sin(t * 0.9 + st.tw);
         const a = st.base * Math.pow(sc2, 1.5) * twk * fadeIn;
         if (a < 0.02) continue;
         const sz = Math.max(0.6, st.size * sc2);
         ctx.globalAlpha = Math.min(1, a);
-        ctx.drawImage(dot, cx + x2 * sc2 - sz / 2, cy + st.y * sc2 - sz / 2, sz, sz);
+        ctx.drawImage(dot, pCx + x2 * sc2 - sz / 2, pCy + st.y * sc2 - sz / 2, sz, sz);
       }
 
       // 校徽粒子。
@@ -615,10 +619,10 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         // 成型后轻微呼吸。
         const br = 1 + 0.004 * Math.sin(t * 0.9 + p.tw) * formed;
         // 透视：近大亮、远小暗——这是纵深最强的线索。
-        const sc = FOCAL / (FOCAL - z3);
-        const px = cx + x2 * sc * br;
-        const py = cy + y2 * sc * br;
-        if (px < -40 || px > w + 40 || py < -40 || py > h + 40) continue;
+        const sc = pFocal / (pFocal - z3);
+        const px = pCx + x2 * sc * br;
+        const py = pCy + y2 * sc * br;
+        if (px < -40 || px > pW + 40 || py < -40 || py > pH + 40) continue;
         const twk = 1 - 0.12 * formed * (0.5 + 0.5 * Math.sin(t * 2.2 + p.tw * 3));
         // 透视增益压到 1.15：近处粒子不再爆亮，纵深靠大小与位置，不靠亮度炸。
         const a = p.base * Math.pow(sc, 1.15) * fadeIn * (0.55 + 0.45 * e2) * twk;
@@ -635,17 +639,29 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
-      raf = requestAnimationFrame(draw);
     };
 
-    // 布点是构建期预计算的，同步就绪：直接建粒子、开画，没有异步等图。
-    buildTargets();
-    initParticles();
-    raf = requestAnimationFrame(draw);
+    let raf = 0;
+    const loop = (now: number) => {
+      const ph = phaseRef.current;
+      if (ph === "particles") {
+        if (!pReady) initParticles();
+        if (pReady) drawParticles(now);
+        // 粒子段画布不透明、盖住背景时不画背景（8.0s 画布淡出后才画）。
+        if (canvasGoneRef.current) drawBg(now);
+      } else {
+        drawBg(now);
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    const onResize = () => seedBg();
+    window.addEventListener("resize", onResize);
     return () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
     };
-  }, [phase]);
+  }, []);
 
   // ---- 开机全程纯黑夜空（只改 Boot.tsx，不动 App.css）----
   // 之前按主题走：粒子段是 #02070d 深空，切到认证门后浅色主题下
@@ -662,7 +678,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
   } as React.CSSProperties;
 
   const stageIn = (delayMs: number): React.CSSProperties => ({
-    animation: `boot-stage-in 600ms var(--ease-exp) ${delayMs}ms both`,
+    animation: `boot-stage-in 950ms var(--ease-exp) ${delayMs}ms both`,
   });
 
   const renderStage = (p: Phase) => {
@@ -682,7 +698,9 @@ export default function Boot({ onDone }: { onDone: () => void }) {
                 maxWidth: "none",
                 maxHeight: "none",
                 opacity: canvasGone ? 0 : 1,
-                transition: "opacity 600ms var(--ease-exp)",
+                // 画布淡出 900ms：8.0s 开始淡，正好与 8.5s 的切门交叉淡化
+                // 接上，校徽散完、画布溶掉、认证门浮现，一气呵成不硬切。
+                transition: "opacity 900ms var(--ease-exp)",
               }}
             />
             {/* 占位：把铭文顶到成型校徽下方，不与粒子重叠。 */}
@@ -1186,11 +1204,11 @@ export default function Boot({ onDone }: { onDone: () => void }) {
       style={{
         ...bootVars,
         // 背景恒定纯黑，不再有背景色过渡；只剩淡出。
-        // 正常结束：300ms 淡出。跳过：600ms 溶解 + 轻微收拢（见下 .boot-skipping 规则）。
+        // 正常结束：600ms 淡出。跳过：900ms 溶解 + 轻微收拢（见下 .boot-skipping 规则）。
         transition: leaving
           ? skipping
-            ? "opacity 600ms var(--ease-exp), transform 600ms var(--ease-exp)"
-            : "opacity 300ms var(--ease)"
+            ? "opacity 900ms var(--ease-exp), transform 900ms var(--ease-exp)"
+            : "opacity 600ms var(--ease)"
           : undefined,
         // 淡出期间不再挡输入：标题栏已在 Boot 之下淡入，空白处可拖、按钮可点。
         // 跳过开始即不再挡输入：按钮已退场，重复点击由 skip() 的守卫挡住。
@@ -1216,7 +1234,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
         @keyframes boot-s-in { from { transform: scale(0.88); } to { transform: scale(1); } }
         /* 跳过退出仪式：铬件（按钮、日志）先退场 250ms；整屏溶解时轻微收拢，
            像场景向后退一步再化开——克制的退出，不是“啪一下没了”。
-           溶解 600ms + onDone 在 450ms：主界面淡入与溶解末段重叠 150ms，
+           溶解 900ms + onDone 在 750ms：主界面淡入与溶解末段重叠 150ms，
            Boot 在溶解完成一刻卸载，不截断、不闪白。 */
         .boot-skipping .boot-log,
         .boot-skipping .boot-skip {
@@ -1265,7 +1283,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
             bottom: 0,
             pointerEvents: "none",
             opacity: exitingFading ? 0 : 1,
-            transition: "opacity 600ms var(--ease-exp)",
+            transition: "opacity 950ms var(--ease-exp)",
           }}
           aria-hidden="true"
         >
@@ -1331,3 +1349,4 @@ function LoginRow({
     </div>
   );
 }
+

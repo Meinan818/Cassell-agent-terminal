@@ -99,7 +99,7 @@ export default function TitleBar({
       data-tauri-drag-region="deep"
     >
       <style>{`
-        .w6-titlebar { display: flex; align-items: center; gap: 12px; height: 40px; flex-shrink: 0; padding: 0 0 0 12px; background: var(--bg-panel); user-select: none; -webkit-user-select: none; position: relative; z-index: 20; animation: w6-fade-in 300ms var(--ease) both; }
+        .w6-titlebar { display: flex; align-items: center; gap: 12px; height: 40px; flex-shrink: 0; padding: 0 0 0 12px; background: var(--bg-panel); user-select: none; -webkit-user-select: none; position: relative; z-index: 20; animation: w6-fade-in 500ms var(--ease) both; }
         @keyframes w6-fade-in { from { opacity: 0; } to { opacity: 1; } }
         .w6-tb-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
         .w6-tb-title { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; }
@@ -131,6 +131,9 @@ export default function TitleBar({
 
       {/* 左：身份——36px 球（接 markState，与顶栏球同状态）+ 学院名 */}
       <div className="w6-tb-left">
+        {/* ringGap={1}：核验环收成 38px 才塞得进 40px 的标题栏——
+            默认 6px 间距的环是 48px，转圈时顶部 4px 会被窗口上沿裁掉。
+            球本身 36px、白球墨眼、1200ms spin 仪式一字不动。 */}
         <Mark
           size={36}
           eva={mode === "eva"}
@@ -138,6 +141,7 @@ export default function TitleBar({
           gaze={gaze}
           fast={mode === "eva"}
           ritual={ritual}
+          ringGap={1}
         />
         <span className="w6-tb-title">CASSELL COLLEGE</span>
         <span className="w6-tb-sub">卡塞尔专员终端</span>

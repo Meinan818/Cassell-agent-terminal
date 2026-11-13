@@ -334,7 +334,7 @@ const WAVE2_CSS = `
  * margin-right 走 240ms --ease-exp，停靠/脱离不跳变。 */
 .app { flex-direction: column; }
 .w6-shell { display: flex; flex: 1; min-height: 0; }
-.w6-shell-in { animation: w6-shell-fade 300ms var(--ease) both; }
+.w6-shell-in { animation: w6-shell-fade 500ms var(--ease) both; }
 @keyframes w6-shell-fade { from { opacity: 0; } to { opacity: 1; } }
 .app .main { transition: margin-right 240ms var(--ease-exp); }
 .w2-inspector { top: 40px; }
@@ -1199,9 +1199,11 @@ function useOverlayExitValue<T>(
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [boot, setBoot] = useState(true);
-  /** W6 · 开机→标题栏交接：Boot 的 onDone 在它 300ms 淡出的中途（150ms）
-   * 触发，App 随即挂载标题栏 + 三栏壳（300ms 淡入），Boot 再留 150ms 才
-   * 卸载——淡出与淡入重叠 150ms 交叉淡化，不许硬切。 */
+  /** W6 · 开机→标题栏交接：Boot 的 onDone 在它淡出的 450ms 处触发
+   * （正常路径 600ms 淡出；跳过路径 900ms 溶解、onDone 在 750ms），
+   * App 随即挂载标题栏 + 三栏壳（500ms 淡入），Boot 再留 150ms 才
+   * 卸载（450+150=600 / 750+150=900，正好是淡出/溶解完成的一刻）——
+   * 淡出与淡入重叠 150ms 交叉淡化，不许硬切。 */
   const [showShell, setShowShell] = useState(false);
   const bootHideTimer = useRef<number | null>(null);
   const handleBootDone = useCallback(() => {
