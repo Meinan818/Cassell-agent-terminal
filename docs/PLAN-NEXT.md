@@ -24,7 +24,7 @@
 - D4：压缩时使用设置里的 `compression_model` 生成摘要；模型不可用、超时或返回空摘要时先用主模型重试，仍失败再回退到确定性摘要，压缩不会阻塞主任务。压缩前原文仍然先归档。
 - E（基本通过）：Windows 真机启动通过；主界面、设置、模型切换、每模型上下文、`cn:hy4free` 真实对话（返回“正常”）、上下文占比、PTY 终端、内置浏览器页均跑通；0.2.0 安装包静默安装到独立目录、启动、静默卸载均已验证。Plan 模式真机通过：模型未使用固定 Markdown 标题，页面仍出现“确认执行 / 修改方案”；本次真实请求 721 tokens。审查队列真机通过：EVA 真实修改 `notes.txt`，diff 正常显示，未追踪文件拒绝后删除，已通过文件提交为 `8e43587`；期间发现“查看 diff”经 `cmd /C` 取流为空，已改为后端 `get_file_diff` 直接用参数调用 git。压缩摘要真机通过：主模型上下文临时设为 8,000，触发 `23,939 → 7,207 tokens`、移除 6 条消息；`deepseek-flash` 在本机反代返回 400，已加入“压缩模型失败→主模型重试”，最终摘要 86 字由主模型生成，原文归档保留。`cargo test` 100/100 通过。安装包：`D:\卡塞尔学院\windows-build\卡塞尔专员终端_0.2.0_x64-setup.exe`（构建产物在 `app/src-tauri/target/release/bundle/nsis/` 同名文件），11,305,421 字节，SHA-256 `6068EA6C0E3F02668B2F7CD50A8190829A6F1D8ADAF83A4EEEFBF882517FBFBD`，安装器图标已是诺玛球（非 NSIS 默认）；截图/日志证据在 `D:\卡塞尔学院\windows-build\evidence-20261114\`（Plan 修复为 `plan-fixed.png`，审查 diff 修复为 `review-diff-fixed.png`，压缩回退日志为 `compact-fallback-err.log`）。
 
-下一步：整理 0.2.0 发布记录与推送清单，等你决定是否 Push；不擅自推送。
+下一步：0.2.0 已推送（`engine/v2` 与 `master` 均为 `3f4005d`），继续整理发布记录并准备 0.2.0 的合并/发布说明。
 
 ## 0. 总原则
 
@@ -57,7 +57,7 @@ P1 的 18 项功能，0.2.0 之后按第 4 节顺序做。
 
 - 当前 `engine/v2` 作为 0.2.0 开发线，**不再从旧 `p1` cherry-pick**；旧 `p1` 只作参考。
 - 从 `engine/v2` 开 `release/0.2.0`；稳定后合回 `master`。
-- `origin/main` 仍停在 0.1.8，GitHub 默认分支也是 `main`。发布前把默认分支切到 `master` 或把 `main` 快进到 `master`，不能让用户克隆到旧版。
+- `origin/master` 已快进到 `3f4005d`，GitHub 默认分支已切到 `master`；`origin/main` 仍是 0.1.8 旧线，只作为历史参考，不要让用户从它克隆。
 - 每次里程碑：本地 commit；Push 前先 `git ls-remote` 核对远端，再向用户申请。
 
 ### 2.2 版本
