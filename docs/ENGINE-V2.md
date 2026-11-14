@@ -21,6 +21,7 @@ Harness 0.2.1-rc.2 都已经有成熟的运行时边界。只借鉴机制，不�
 engine/
   journal.rs   运行事件 JSONL，记录 run / round / tool / approval / retry
   retry.rs     仅对 408、429、5xx 和连接超时做有上限的重试
+  deepseek.rs  DeepSeek 的 reasoning_effort、参数适配和模型能力判断
 
 agent.rs       对话循环、流式解析、工具调用编排（后续继续拆出）
 sandbox.rs     文件路径边界与审批决策纯函数

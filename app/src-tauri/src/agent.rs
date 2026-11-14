@@ -787,6 +787,7 @@ pub async fn run_agent_native(
 struct TurnCtx {
     model: String,
     effort: String,
+    provider: crate::settings::ProviderConfig,
     run_mode: String,
     mode: String,
     sandbox: String,
@@ -885,6 +886,8 @@ async fn run_inner_turn(
             "stream": true,
             "stream_options": {"include_usage": true}
         });
+        let mut body = body;
+        crate::engine::deepseek::apply_request_fields(&mut body, &ctx.provider, &ctx.effort);
 
         let resp = crate::engine::retry::post_json_with_retry(
             &client,
@@ -1504,6 +1507,7 @@ async fn run_agent_native_inner(
     let turn_ctx = TurnCtx {
         model: wire_model,
         effort: req.effort.clone(),
+        provider: provider.clone(),
         run_mode: req.run_mode.clone(),
         mode: req.mode.clone(),
         sandbox: match eff_sandbox {
