@@ -7,6 +7,8 @@
 3. 哪些值得学、学到什么程度；
 4. 哪些看起来厉害，但不适合卡塞尔。
 
+逐项目源码级底稿见 [`docs/source-analysis/`](./source-analysis/README.md)。
+
 ## 0. 总结论
 
 ### 值得抄的
