@@ -72,6 +72,30 @@
 本地安装和旧研究报告不能代替最新官方事实；后续涉及会变化的接口、模型、套餐
 和文档，要重新查官方页面。超时项明确标为未核实。
 
+### 1.2 社区拆解与 GitHub 讨论
+
+除官方资料外，这次也查了公开社区分析。它们只作为“二手架构参考”，不当作
+官方事实，也不复制其中代码：
+
+| 来源 | 结果 | 可借鉴点 | 边界 |
+|---|---|---|---|
+| [Reverse engineering Claude Code](https://kirshatrov.com/posts/claude-code-internals) | HTTP 200 | 通过抓包观察 Claude Code 的 system prompt、环境上下文、目录快照、git status 和工具循环 | 早期版本，不能代表 2.1.325 全部行为 |
+| [Claude Code Internals](https://victorantos.com/posts/i-pointed-claude-at-its-own-leaked-source-heres-what-it-found/) | HTTP 200 | 社区分析称其有 80+ 工具、StreamingToolExecutor、并发安全标记、大工具结果落盘、三层权限 | 分析对象涉及泄露源码，仅看架构概念，不复制代码/提示词 |
+| [pi-book](https://github.com/ZhangHanDong/pi-book) | HTTP 200 | 32 章拆 pi 的设计决策，基于 pi-mono v0.66.0；重点是多 provider、agent loop、runtime、工具接口 | 社区书籍，不是官方文档 |
+| [DeepSeek Harness teardown](https://github.com/jimy-r/agent-workspace-architecture/blob/main/teardowns/2026-09-05-deepseek-harness.md) | HTTP 200 | 按文档拆 session、compaction、sandbox、approval、credentials、token-meter、hooks、guard、agent instructions | 只读文档，不读包源码；结论是文档层 |
+| GitHub issue 搜索：Codex `Subagent Support` | HTTP 200（API） | 说明子代理是真实需求，但官方实现边界要看当前版本 | 单个 issue 不代表产品全貌 |
+| GitHub issue 搜索：Tianshu 安全 PR | HTTP 200（API） | 社区维护者确实处理过 shell 注入、记忆脱敏等安全问题 | 只作安全清单参考 |
+
+社区分析里最值得注意的工程细节：
+
+- **流式工具执行**：工具不要等整轮模型输出完再执行，能并行的只读工具并行，
+  不能并行的写操作串行。
+- **大工具结果落盘**：超长输出保存为文件，上下文只保留引用和摘要，避免内存
+  和上下文膨胀。
+- **权限分层**：规则快速通道 + 分类审批 + 手动确认，不要把所有判断塞给模型。
+- **文档层拆解**：DeepSeek Harness 的 session/compaction/sandbox/approval/
+  credentials/token-meter 是独立边界，适合我们照模块拆。
+
 ## 2. 功能总表
 
 | 功能 | Codex | Claude Code | 天枢 | DeepSeek Harness | 我们的结论 |
