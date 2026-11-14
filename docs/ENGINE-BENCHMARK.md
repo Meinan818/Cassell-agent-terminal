@@ -5,6 +5,11 @@ agent runtime 的共同骨架、各自独有的硬机制、以及不适合我们
 
 逐项目源码级底稿见 [`docs/source-analysis/`](./source-analysis/README.md)。
 
+> 口径说明（2026-11-14 补）：本文是引擎层对照；产品层的“抄/不抄”决策见
+> [`docs/抄什么不抄什么_Claude-Codex-天枢.md`](./抄什么不抄什么_Claude-Codex-天枢.md)，
+> 天枢 4.0.4 运行时见 [`docs/tianshu-4.0.4-拆包研究报告.md`](./tianshu-4.0.4-拆包研究报告.md)，
+> 旧文档逐份复核见 [`docs/source-analysis/prior-analysis-review.md`](./source-analysis/prior-analysis-review.md)。
+
 ## 0. 结论
 
 四类项目共同证明了一件事：成熟 agent 的差距通常不在“会不会调用模型”，而在

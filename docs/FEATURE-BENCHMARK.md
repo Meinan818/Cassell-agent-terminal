@@ -9,6 +9,13 @@
 
 逐项目源码级底稿见 [`docs/source-analysis/`](./source-analysis/README.md)。
 
+> 口径说明（2026-11-14 补）：功能取舍的旧底稿仍有效；其中 Claude Cowork、
+> Codex 桌面、天枢 4.0.4 的细节见
+> [`docs/抄什么不抄什么_Claude-Codex-天枢.md`](./抄什么不抄什么_Claude-Codex-天枢.md)
+> 与 [`docs/tianshu-4.0.4-拆包研究报告.md`](./tianshu-4.0.4-拆包研究报告.md)。
+> 旧文档与新报告的口径冲突已由
+> [`docs/source-analysis/prior-analysis-review.md`](./source-analysis/prior-analysis-review.md) 定稿。
+
 ## 0. 总结论
 
 ### 值得抄的

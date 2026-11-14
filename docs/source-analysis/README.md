@@ -47,6 +47,15 @@ D:\卡塞尔学院\research-src\
 - [Claude Code 本地黑盒逆向](./claude-code-reverse.md)（含二进制字符串证据、12 态工具结果、6 种权限模式）
 - [Claude Code 工具面全表（44 个工具 / 88 个接口）](./claude-tools.md)
 - [源码覆盖台账（A/B/C/D 四级，防止把目录登记冒充通读）](./coverage.md)
+- [旧分析文档复核（哪些已经写过、哪些这轮才补、哪些口径要改）](./prior-analysis-review.md)
+
+### 旧分析文档（已复核，不要重复造）
+
+- [`docs/抄什么不抄什么_Claude-Codex-天枢.md`](../抄什么不抄什么_Claude-Codex-天枢.md)：产品级“抄/不抄”决策底稿，含 NORMA/EVA 定稿。
+- [`docs/tianshu-4.0.4-拆包研究报告.md`](../tianshu-4.0.4-拆包研究报告.md)：天枢 4.0.4 安装包拆解，4.0 运行时证据以它为准。
+- [`docs/claude-code-cli-teardown.md`](../claude-code-cli-teardown.md)：Claude Code / DeepSeek-TUI / dsh TUI 的 CLI 设计与渲染拆解。
+- [`docs/research/codex-claude-feature-study.md`](../research/codex-claude-feature-study.md)：Claude Code vs Codex 功能总表。
+- [`docs/ENGINE-BENCHMARK.md`](../ENGINE-BENCHMARK.md) / [`docs/FEATURE-BENCHMARK.md`](../FEATURE-BENCHMARK.md)：引擎与功能层对照。
 
 ## 一句话结论
 

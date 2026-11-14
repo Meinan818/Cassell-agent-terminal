@@ -1,6 +1,11 @@
 # Codex（codex-rs）源码级分析
 
 > 快照：`D:\卡塞尔学院\research-src\codex`，分支 `main`，提交 `6ddb87e`（2026-11-14），Apache-2.0
+> 产品层前置：Codex 的四种形态、sandbox × approval 两把 dial、Plan/Goal、
+> Side chat、Queue/Steer、Automations + Triage、14 个 hook 事件，已经在
+> `docs/抄什么不抄什么_Claude-Codex-天枢.md` 和
+> `docs/research/codex-claude-feature-study.md` 里分析过；本报告只补源码实现，
+> 不重复产品层清单。
 > 方法：直接读 `codex-rs/` 的目录、`lib.rs` 导出、类型/枚举、关键函数与测试文件名；不以 README 作为唯一依据
 > 证据等级：**[源码]** 读到实现或导出；**[README]** 仅文档声明；**[未核实]** 未读到实现或未运行验证
 > 实测规模：workspace members **207** 个（`codex-rs/Cargo.toml`）；`codex-rs` 顶层目录 **127** 个；`.rs` 文件 **6,036**；`#[test]`/`#[tokio::test]` 标记 **26,471** 处（正则统计）

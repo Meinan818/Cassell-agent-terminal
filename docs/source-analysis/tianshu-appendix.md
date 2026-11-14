@@ -3,6 +3,8 @@
 > 对象：`D:\卡塞尔学院\research-src\tianshu`，分支 `main`，HEAD `2d0b22e`
 > （提交信息 `sync: from dev repo (v3.37.4 stable rev45)`）。
 > 这是 **v3.37.4 的公开源码快照**，不是本机安装的 4.0.4。
+> 4.0.4 运行时（Tauri 2.12.4 + `rivet-runtime/`）的拆包证据见
+> `docs/tianshu-4.0.4-拆包研究报告.md`；本附录不重复 4.0 闭源机制。
 > 主报告 `docs/source-analysis/tianshu.md` 只覆盖 `src/` 下模块；本附录补 B 面：
 > 编辑器扩展、插件目录、Windows 原生 helper、computer-use 桩、worker 子进程、官网、脚本与安装/更新链路。
 

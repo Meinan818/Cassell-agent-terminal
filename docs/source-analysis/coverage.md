@@ -218,7 +218,7 @@
 
 闭源，没有源码快照。只做：
 
-- 公开 `sdk-tools.d.ts` 的 81 个输入/输出接口；
+- 公开 `sdk-tools.d.ts` 的 88 个输入/输出接口（44 个工具）；
 - CLI `--help`、`--version`、配置目录、会话文件格式等黑盒观察；
 - 官方文档与社区分析交叉核对。
 
@@ -230,3 +230,15 @@
 2. 补读完一块，更新等级和附录链接，不重写主报告全文。
 3. 报告之间的数字冲突以台账的 `git ls-files` 口径为准；行数口径必须注明“含空行/非空行”。
 4. 测试文件、生成物、vendor、快照不逐行读，但要能说清为什么不影响产品结论。
+
+## 9. 旧分析文档
+
+`docs/抄什么不抄什么_Claude-Codex-天枢.md`、`docs/tianshu-4.0.4-拆包研究报告.md`、
+`docs/claude-code-cli-teardown.md`、`docs/research/codex-claude-feature-study.md`、
+`docs/ENGINE-BENCHMARK.md`、`docs/FEATURE-BENCHMARK.md` 已在
+[prior-analysis-review.md](./prior-analysis-review.md) 里逐份复核。
+
+- 产品层结论以旧文档为准，不重复“发现”；
+- 源码层结论以本目录主报告 + 附录为准；
+- 天枢 4.0.4 以拆包报告为准，公开源码报告只覆盖 v3.37.4；
+- 旧文档与新报告的数字冲突已在 `prior-analysis-review.md` §4 列表定稿。
