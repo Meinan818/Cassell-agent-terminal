@@ -3,6 +3,22 @@
 制定日期：2026-11-14。
 依据：[项目审计](./audit/PROJECT-AUDIT.md)、[前端审计](./audit/frontend.md)、[安全审计](./audit/security-data.md)、[构建审计](./audit/build-release.md)。
 
+## 0.1 当前进度（2026-11-14）
+
+已完成并本地提交：
+
+- A4/A5 安全策略：删除命令包装绕过、敏感路径、网络出口审批；`engine/policy.rs` 单测覆盖 `cmd /c`、PowerShell、python、node、git clean/reset 等绕过样例。
+- A1 事件 task_id：后端所有 agent 事件带任务 id，前端按发起任务写消息/工具卡/审批。
+- A2 localStorage 节流：500ms 防抖 + 关闭前 flush + 配额提示。
+- A3 工具卡结构化：事件直接传 `args`，卡片不再反解正文；空结果不再假装“执行中”。
+- A6 进程树：`engine/process.rs` 在 Windows 超时后 `taskkill /F /T /PID`，不再只杀直接子进程。
+- A7 快照安全：快照跳过 `.env`/私钥/凭据/设置文件；任务永久删除时清理检查点与快照。
+- A8 倒带安全：不再删除快照外文件，避免误删用户新建文件。
+- 旧 Codex CLI 引擎已移除（`codex.rs` 删除，`RunState` 独立到 `run_state.rs`）；产品只保留“配 base_url + API Key”的原生 HTTP 引擎。
+- B 的一部分：`engine/session.rs` 目标会话落盘，重启后可继续。
+
+下一步：C1-C3（ToolOutcome + 审批状态机），再做 D1-D5（上下文/压缩），最后 E（Windows 验收/0.2.0）。
+
 ## 0. 总原则
 
 1. **先修地基，再做功能。** 会话、工具结果、审批、上下文、进程树没打牢之前，不加 P1 大功能。
