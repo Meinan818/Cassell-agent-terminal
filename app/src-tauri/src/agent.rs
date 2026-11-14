@@ -191,6 +191,23 @@ fn tool_definitions(run_mode: &str, mode: &str) -> Value {
             }
         }
     }));
+    tools.push(json!({
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "对工作区文件做精确替换：把 old_string 替换成 new_string。适合改代码中的一小段，不要用它重写整个文件。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "相对工作区的文件路径"},
+                    "old_string": {"type": "string", "description": "要替换的原文，必须足够精确"},
+                    "new_string": {"type": "string", "description": "替换后的文本"},
+                    "replace_all": {"type": "boolean", "description": "是否替换全部匹配；默认 false，多处匹配会拒绝"}
+                },
+                "required": ["path", "old_string", "new_string"]
+            }
+        }
+    }));
     if mode == "eva" {
         tools.push(json!({
             "type": "function",
@@ -511,6 +528,82 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                         Err(e) => format!("写入失败：{e}"),
                     }
                 }
+                Err(e) => e,
+            }
+        }
+        "edit_file" => {
+            if ctx.run_mode == "plan" {
+                let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                return format!(
+                    "计划模式：我现在只调查、不写文件。{rel} 的改动已记进方案里，等你点「确认执行」后再动手。"
+                );
+            }
+            if crate::sandbox::parse_sandbox(&ctx.sandbox)
+                == crate::sandbox::SandboxLevel::ReadOnly
+            {
+                return "当前是只读模式，不能改文件。".to_string();
+            }
+            let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let old_string = args
+                .get("old_string")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let new_string = args
+                .get("new_string")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let replace_all = args
+                .get("replace_all")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if crate::sandbox::needs_approval(
+                crate::sandbox::parse_approval(&ctx.approval),
+                "write",
+                false,
+                &ctx.delete_confirm,
+            ) {
+                let ok = request_approval(
+                    &ctx.app,
+                    &ctx.session_id,
+                    ctx.state,
+                    "write",
+                    &format!("编辑文件 {rel}"),
+                    &format!(
+                        "要编辑文件 {rel}：替换 {} 字为 {} 字。",
+                        old_string.chars().count(),
+                        new_string.chars().count()
+                    ),
+                )
+                .await;
+                if !ok {
+                    return format!("用户没有批准这次编辑（{rel} 没动）。");
+                }
+            }
+            match crate::sandbox::join_path(
+                &ctx.workdir,
+                rel,
+                crate::sandbox::parse_sandbox(&ctx.sandbox),
+            ) {
+                Ok(p) => match tokio::fs::read_to_string(&p).await {
+                    Ok(content) => {
+                        match crate::engine::edit::replace_exact(
+                            &content,
+                            old_string,
+                            new_string,
+                            replace_all,
+                        ) {
+                            Ok(next) => match tokio::fs::write(&p, &next).await {
+                                Ok(_) => {
+                                    tools_run.push(format!("编辑 {rel}"));
+                                    format!("已编辑 {rel}（{} 字节）", next.len())
+                                }
+                                Err(e) => format!("编辑写入失败：{e}"),
+                            },
+                            Err(e) => format!("编辑失败：{e}"),
+                        }
+                    }
+                    Err(e) => format!("读取文件失败：{e}"),
+                },
                 Err(e) => e,
             }
         }
@@ -1141,7 +1234,7 @@ async fn run_inner_turn(
                     let args: Value = serde_json::from_str(args_str).unwrap_or(json!({}));
                     let _ = app.emit("agent-tool", json!({"name": name, "args": args}));
                     // P0-7：目标模式下写文件前先备份（版本化），倒带时能恢复。
-                    if name == "write_file" && track_checkpoints {
+                    if matches!(name, "write_file" | "edit_file") && track_checkpoints {
                         let rel = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
                         if !rel.is_empty() {
                             if let Err(e) = crate::goal::backup_before_write(
@@ -1975,6 +2068,7 @@ mod tests {
                 "read_file",
                 "list_dir",
                 "write_file",
+                "edit_file",
                 "run_shell",
                 "open_browser",
                 "read_terminal"

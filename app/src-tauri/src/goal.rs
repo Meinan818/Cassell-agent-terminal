@@ -182,6 +182,7 @@ pub fn is_progress(
 ) -> bool {
     match tool_name {
         "write_file" => result.starts_with("已写入 "),
+        "edit_file" => result.starts_with("已编辑 "),
         "run_shell" => result.contains("[退出码 "),
         "read_file" => {
             if result.starts_with("未授权") || result.starts_with("读取失败") {
@@ -225,8 +226,9 @@ pub fn record_tool_call(
             let p = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
             session.read_paths.insert(format!("dir:{p}"));
         }
-        "write_file" => {
-            if result.starts_with("已写入 ") {
+        "write_file" | "edit_file" => {
+            let ok = result.starts_with("已写入 ") || result.starts_with("已编辑 ");
+            if ok {
                 let p = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
                 if !p.is_empty() && !session.files_changed.contains(&p.to_string()) {
                     session.files_changed.push(p.to_string());
