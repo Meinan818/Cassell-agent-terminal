@@ -87,15 +87,14 @@ npm run tauri build
 
 - 设置保存在应用配置目录的 `settings.json` 里（Key 是明文存的，MVP 阶段如此，
   后续版本会移到系统钥匙串；不要把这个文件发给别人）。
-- 各服务商默认走 `/v1/responses`（Codex 0.164 只支持 Responses 协议），
-  DeepSeek / Kimi / 千问 / OpenAI 都已验证可达。
+- 原生引擎默认走 OpenAI 兼容的 `/chat/completions`；Codex CLI 兼容入口另走
+  Responses 协议。
 - 思考强度映射：低→low，中→medium，高→high，Max→xhigh，EVA→xhigh（+ EVA 人设）。
 
 ## 已知限制（v0.1，老实写在这里）
 
-- **流式输出是“逐条到达”不是“逐字”**：Codex CLI 0.164 的 `--json` 只在每条
-  agent_message 完成时才吐全文，没有逐字 delta 事件，所以界面是整条整条出现，
-  不是逐字打字机效果。等 Codex 提供逐字事件再接。
+- **流式输出以服务商实际返回的 SSE delta 为准**；Codex CLI 兼容入口仍是
+  逐条 JSONL，不等同于原生引擎的流式事件。
 - **EVA 模式 v1 的区分是仪式感 + 提示 + 节奏**：打开 EVA 开关时有启动提示、对话里
   EVA 回合前有一行安静小字（点开看明细）、活标记眨眼与张望更快；真正的多智能体
   并行编排与交叉核查在后续版本接入。
@@ -103,7 +102,7 @@ npm run tauri build
   一步会因中文产品名失败（appimagetool 要求 ASCII 名，Tauri 2 没有 AppImage
   单独改名配置），不影响 Windows 的 NSIS/MSI 打包。
 - **MCP 开关只保存状态**，服务器的实际接线（stdio/远程）下个版本做。
-- **内置浏览器还没做**：浏览器标签现在是邀请码复制 + 在系统浏览器打开网址。
+- **内置浏览器已接入 Inspector 子 webview**；自动截图验证（autoVerify）尚未接线。
 - 任务列表只存在本机浏览器存储（localStorage），换电脑不带走；多设备同步后续做。
 - API Key 目前明文存在本机 `settings.json`，后续移到系统钥匙串。
 
