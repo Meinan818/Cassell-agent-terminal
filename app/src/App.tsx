@@ -5,7 +5,6 @@ import type {
   AgentResult,
   ChatMsg,
   CheckpointInfo,
-  CodexInfo,
   GoalState,
   GoalSummary,
   InspectorView,
@@ -967,10 +966,10 @@ function ToolCard({
   const arrowIdx = text.indexOf("\n→ ");
   const head = arrowIdx >= 0 ? text.slice(0, arrowIdx) : text;
   const result = arrowIdx >= 0 ? text.slice(arrowIdx + 3) : "";
-  const running = result === "";
+  const running = msg.toolStatus ? msg.toolStatus === "running" : result === "";
   const name =
     msg.toolLabel ?? head.replace(/^调用工具：/, "").split("（")[0];
-  const args = parseToolArgs(head);
+  const args = msg.toolArgs ?? parseToolArgs(head);
   const summary = humanToolSummary(name, args);
   const img = name === "read_file" ? imagePath(args) : null;
   // 图片预览：展开时才向后端要 data URL（不走 asset 协议，见 fsutil::read_file_base64）。
@@ -1066,7 +1065,9 @@ function ToolGroup({
   };
   const names = Array.from(new Set(msgs.map((m) => m.toolLabel ?? "工具")));
   const last = msgs[msgs.length - 1];
-  const running = !!last && !last.text.includes("\n→ ");
+  const running = !!last && (last.toolStatus
+    ? last.toolStatus === "running"
+    : !last.text.includes("\n→ "));
   return (
     <div
       className="msg tool-group"
@@ -1165,8 +1166,8 @@ function PermCard({
           {!isAsk && (
             <div style={{ marginTop: 4 }}>
               {requestId
-                ? "此操作会修改工作区，确认后才会执行；决定后不能撤销（这一轮已继续）。"
-                : "此操作会修改工作区，确认后才会执行；随时可以撤销。"}
+                ? "此操作需要你确认后才会执行；决定后不能撤销（这一轮已继续）。"
+                : "此操作需要你确认后才会执行；随时可以撤销。"}
             </div>
           )}
           {decision === null && picked === null ? (
@@ -1352,7 +1353,6 @@ export default function App() {
   const [drawer, setDrawer] = useState<
     "settings" | "archive" | "help" | "usage" | null
   >(null);
-  const [codexInfo, setCodexInfo] = useState<CodexInfo | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
   const [markState, setMarkState] = useState<MarkState>("idle");
@@ -1450,6 +1450,8 @@ export default function App() {
   const settingsRef = useRef<Settings | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
   const runningRef = useRef(false);
+  /** 本轮 run 属于哪个任务；切任务后取消仍要标记原任务。 */
+  const runningTaskIdRef = useRef<string | null>(null);
   /** 审查状态属于哪个工作区：切换项目/目录时不能把旧项目的文件并进新列表。 */
   const reviewWorkdirRef = useRef<string | null>(null);
   /** 只接受最后一次 refreshReview 的响应，避免切换工作区时旧请求后到覆盖新状态。 */
@@ -1459,6 +1461,7 @@ export default function App() {
   const activeProjectIdRef = useRef<string | null>(null);
   const markTimer = useRef<number | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const taskSaveTimer = useRef<number | null>(null);
   /** 主题切换：B 层收尾定时器 / 是否已做过首次静默应用 / 上次点击的按钮中心。 */
   const themeTimer = useRef<number | null>(null);
   const themeAppliedRef = useRef(false);
@@ -1476,6 +1479,7 @@ export default function App() {
   const streamMsgIdRef = useRef<string | null>(null);
   const thinkMsgIdRef = useRef<string | null>(null);
   const lastToolMsgIdRef = useRef<string | null>(null);
+  const lastToolTaskIdRef = useRef<string | null>(null);
 
   settingsRef.current = settings;
   tasksRef.current = tasks;
@@ -1635,11 +1639,6 @@ export default function App() {
           setShowShell(true);
         }
       });
-    invoke<CodexInfo>("check_codex")
-      .then((info) => {
-        if (alive) setCodexInfo(info);
-      })
-      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -1654,12 +1653,35 @@ export default function App() {
 
   // ---- Persist tasks locally ----
   useEffect(() => {
-    try {
-      localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
-    } catch {
-      // Storage full or unavailable — tasks still work in memory.
-    }
+    if (taskSaveTimer.current) window.clearTimeout(taskSaveTimer.current);
+    taskSaveTimer.current = window.setTimeout(() => {
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+      } catch {
+        // 配额满时明确告诉用户，不再静默丢历史。
+        setNotice("本地任务历史已满：新消息可能无法在重启后保留，请归档旧任务或清理历史。");
+      }
+    }, 500);
+    return () => {
+      if (taskSaveTimer.current) window.clearTimeout(taskSaveTimer.current);
+    };
   }, [tasks]);
+
+  // 关闭/刷新前强制落一次盘，避免最后 500ms 的流式增量丢失。
+  useEffect(() => {
+    const flush = () => {
+      try {
+        localStorage.setItem(TASKS_KEY, JSON.stringify(tasksRef.current));
+      } catch {
+        // 页面正在关闭，无法再提示；下一次启动仍会从旧快照恢复。
+      }
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, []);
 
   // ---- Persist projects locally（与任务同一套机制） ----
   useEffect(() => {
@@ -1948,8 +1970,11 @@ export default function App() {
   }, [running, evaMode]);
 
   // ---- Native engine message helpers (id-based, not "last message") ----
-  const updateMsgText = useCallback((id: string, fn: (cur: string) => string) => {
-    const taskId = activeTaskIdRef.current;
+  const updateMsgText = useCallback((
+    id: string,
+    fn: (cur: string) => string,
+    taskId: string | null = activeTaskIdRef.current,
+  ) => {
     if (!id || !taskId) return;
     setTasks((prev) =>
       prev.map((t) =>
@@ -1965,8 +1990,29 @@ export default function App() {
     );
   }, []);
 
-  const pushMsg = useCallback((msg: ChatMsg) => {
-    const id = activeTaskIdRef.current;
+  const updateMsg = useCallback((
+    id: string,
+    fn: (msg: ChatMsg) => ChatMsg,
+    taskId: string | null = activeTaskIdRef.current,
+  ) => {
+    if (!id || !taskId) return;
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              messages: t.messages.map((m) => (m.id === id ? fn(m) : m)),
+            }
+          : t,
+      ),
+    );
+  }, []);
+
+  const pushMsg = useCallback((
+    msg: ChatMsg,
+    taskId: string | null = activeTaskIdRef.current,
+  ) => {
+    const id = taskId;
     if (!id) return;
     setTasks((prev) =>
       prev.map((t) =>
@@ -1976,8 +2022,10 @@ export default function App() {
   }, []);
 
   /** 思考块插到流式气泡前面（思考先于正文）。 */
-  const insertThinkMsg = useCallback((msg: ChatMsg) => {
-    const taskId = activeTaskIdRef.current;
+  const insertThinkMsg = useCallback((
+    msg: ChatMsg,
+    taskId: string | null = activeTaskIdRef.current,
+  ) => {
     const streamId = streamMsgIdRef.current;
     if (!taskId) return;
     setTasks((prev) =>
@@ -2010,42 +2058,46 @@ export default function App() {
       });
     };
 
-    // 正文增量：逐字追加到本轮流式气泡
+    // 正文增量：逐字追加到本轮发起任务的气泡。
     add(
-      listen<{ text: string }>("agent-delta", ({ payload }) => {
+      listen<{ text: string; task_id?: string }>("agent-delta", ({ payload }) => {
         const id = streamMsgIdRef.current;
-        if (id && payload.text) updateMsgText(id, (cur) => cur + payload.text);
+        const taskId = payload.task_id ?? activeTaskIdRef.current;
+        if (id && payload.text) updateMsgText(id, (cur) => cur + payload.text, taskId);
         setMarkState(stateFor("agent-delta"));
       }),
     );
     // 思考增量：单独的思考块（第一段到达时创建，插到气泡前面）
     add(
-      listen<{ text: string }>("agent-thinking", ({ payload }) => {
+      listen<{ text: string; task_id?: string }>("agent-thinking", ({ payload }) => {
         if (!payload.text) return;
+        const taskId = payload.task_id ?? activeTaskIdRef.current;
         setMarkState(stateFor("agent-thinking"));
         let id = thinkMsgIdRef.current;
         if (!id) {
           id = uid();
           thinkMsgIdRef.current = id;
-          insertThinkMsg({
-            id,
-            role: "assistant",
-            text: "",
-            streaming: true,
-            kind: "think",
-          });
+          insertThinkMsg(
+            {
+              id,
+              role: "assistant",
+              text: "",
+              streaming: true,
+              kind: "think",
+            },
+            taskId,
+          );
         }
-        updateMsgText(id, (cur) => cur + payload.text);
+        updateMsgText(id, (cur) => cur + payload.text, taskId);
       }),
     );
     // 工具调用开始
     add(
-      listen<{ name: string; args: Record<string, unknown> }>(
+      listen<{ name: string; args: Record<string, unknown>; task_id?: string }>(
         "agent-tool",
         ({ payload }) => {
           const s = settingsRef.current;
-          const parallel =
-            s?.mode === "eva" && !!s?.ultracode;
+          const parallel = s?.mode === "eva" && !!s?.ultracode;
           setMarkState(
             parallel
               ? stateFor("ultracode-parallel")
@@ -2055,40 +2107,56 @@ export default function App() {
                     : "agent-tool-write",
                 ),
           );
+          const taskId = payload.task_id ?? activeTaskIdRef.current;
           const id = uid();
           lastToolMsgIdRef.current = id;
+          lastToolTaskIdRef.current = taskId;
           const argSummary = JSON.stringify(payload.args ?? {});
-          pushMsg({
-            id,
-            role: "assistant",
-            text:
-              `调用工具：${payload.name}` +
-              (argSummary && argSummary !== "{}"
-                ? `（${argSummary.slice(0, 200)}）`
-                : ""),
-            kind: "tool",
-            toolLabel: payload.name,
-          });
+          pushMsg(
+            {
+              id,
+              role: "assistant",
+              text:
+                `调用工具：${payload.name}` +
+                (argSummary && argSummary !== "{}"
+                  ? `（${argSummary.slice(0, 200)}）`
+                  : ""),
+              kind: "tool",
+              toolLabel: payload.name,
+              toolArgs: payload.args,
+              toolStatus: "running",
+            },
+            taskId,
+          );
         },
       ),
     );
     // 工具调用结果：追加到同一行（截断，避免把文件全文塞进对话）
     add(
-      listen<{ name: string; result: string }>(
+      listen<{ name: string; result: string; task_id?: string }>(
         "agent-tool-result",
         ({ payload }) => {
           const id = lastToolMsgIdRef.current;
           if (!id) return;
+          const taskId =
+            payload.task_id ?? lastToolTaskIdRef.current ?? activeTaskIdRef.current;
           setMarkState(stateFor("agent-tool-result"));
           const r = payload.result ?? "";
           const short = r.length > 400 ? `${r.slice(0, 400)}…（已截断）` : r;
-          updateMsgText(id, (cur) => `${cur}\n→ ${short}`);
+          updateMsg(
+            id,
+            (m) => ({
+              ...m,
+              text: `${m.text}\n→ ${short}`,
+              toolStatus: "done",
+            }),
+            taskId,
+          );
           // P0-9 NORMA 交付：写成功的文件记进本任务的交付物（交付页汇总用）。
           if (payload.name === "write_file") {
             const m = r.match(/^已写入 (.+?)（/);
             if (m) {
               const path = m[1];
-              const taskId = activeTaskIdRef.current;
               if (taskId) {
                 setDeliverablesByTask((prev) => {
                   const cur = prev[taskId] ?? [];
@@ -2107,20 +2175,29 @@ export default function App() {
     // P0-4/P0-9 审批请求：后端写文件/删命令需要用户确认时发来，
     // 在对话里追加一张真审批卡（PermCard，按钮调 resolve_approval）。
     add(
-      listen<{ id: string; kind: string; label: string; detail: string }>(
+      listen<{ id: string; kind: string; label: string; detail: string; task_id?: string }>(
         "agent-approval-request",
         ({ payload }) => {
-          pushMsg({
-            id: uid(),
-            role: "assistant",
-            text: payload.detail,
-            kind: "perm",
-            perm: {
-              command: payload.label,
-              requestId: payload.id,
-              kind: payload.kind === "delete" ? "delete" : "write",
+          pushMsg(
+            {
+              id: uid(),
+              role: "assistant",
+              text: payload.detail,
+              kind: "perm",
+              perm: {
+                command: payload.label,
+                requestId: payload.id,
+                kind:
+                  payload.kind === "delete" ||
+                  payload.kind === "shell" ||
+                  payload.kind === "sensitive" ||
+                  payload.kind === "network"
+                    ? payload.kind
+                    : "write",
+              },
             },
-          });
+            payload.task_id ?? activeTaskIdRef.current,
+          );
         },
       ),
     );
@@ -2129,8 +2206,7 @@ export default function App() {
     // 跑完后 runTurn 会统一拉一次。
     add(
       listen<GoalSummary>("agent-goal-progress", ({ payload }) => {
-        const taskId = activeTaskIdRef.current;
-        if (!taskId || payload.id !== taskId) return;
+        const taskId = payload.id;
         setTasks((prev) =>
           prev.map((t) =>
             t.id === taskId
@@ -2149,8 +2225,9 @@ export default function App() {
     // P0-11③ agent 的 open_browser 工具：切到 Inspector 浏览器页签，
     // BrowserPane 接到请求后在子 webview 里打开。
     add(
-      listen<{ url: string }>("agent-open-browser", ({ payload }) => {
+      listen<{ url: string; task_id?: string }>("agent-open-browser", ({ payload }) => {
         if (!payload.url) return;
+        if (payload.task_id && payload.task_id !== activeTaskIdRef.current) return;
         setBrowserRequest({ url: payload.url, nonce: Date.now() });
         setInspector("browser");
       }),
@@ -2160,7 +2237,7 @@ export default function App() {
       alive = false;
       unlisteners.forEach((u) => u());
     };
-  }, [pushMsg, insertThinkMsg, updateMsgText]);
+  }, [pushMsg, insertThinkMsg, updateMsgText, updateMsg]);
 
   // ---- Review queue ----
   const refreshReview = useCallback(() => {
@@ -2638,6 +2715,8 @@ export default function App() {
       streamMsgIdRef.current = assistantMsg.id;
       thinkMsgIdRef.current = null;
       lastToolMsgIdRef.current = null;
+      lastToolTaskIdRef.current = null;
+      runningTaskIdRef.current = taskId;
       setRunning(true);
       // 球：收到任务 → receiving（点头确认）；cue message-sent。
       setMarkState(stateFor("runStart"));
@@ -2658,7 +2737,7 @@ export default function App() {
       .then(() => {
         setRunning(false);
         setMarkState(stateFor("userStopped"));
-        const id = activeTaskIdRef.current;
+        const id = runningTaskIdRef.current ?? activeTaskIdRef.current;
         if (id) {
           setTasks((prev) =>
             prev.map((t) =>
@@ -3948,7 +4027,6 @@ export default function App() {
           onPatch={patchSettings}
           onClose={() => setDrawer(null)}
           closing={drawerClosing}
-          codexInfo={codexInfo}
           onTestConnection={handleTestConnection}
           testing={testing}
           testResult={testResult}

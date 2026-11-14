@@ -52,7 +52,6 @@ export interface Settings {
   streaming: boolean;
   boot_animation: boolean;
   workdir: string;
-  codex_path: string;
   /** 用户显示名。空 = 界面显示默认“路明非”。 */
   display_name: string;
   providers: ProviderConfig[];
@@ -78,6 +77,10 @@ export interface ChatMsg {
   streaming?: boolean;
   kind?: MsgKind;
   toolLabel?: string;
+  /** 工具调用参数：事件里直接带结构化参数，卡片不再反解正文。 */
+  toolArgs?: Record<string, unknown>;
+  /** 工具调用状态：running / done。 */
+  toolStatus?: "running" | "done";
   /** 服务商回报的真实用量（本轮结束时才有）；cached/costUsd/savedUsd
       是 P0-10：缓存命中 tokens、按官方价目估算的花费与缓存省下的钱。 */
   usage?: {
@@ -97,8 +100,8 @@ export interface ChatMsg {
     decision?: "allow-once" | "allow-session" | "deny" | "批准" | "拒绝" | "稍后处理";
     /** 挂起的后端审批请求 id（有它就是真审批卡，按钮调 resolve_approval）。 */
     requestId?: string;
-    /** 审批种类：写文件 / 删除命令。 */
-    kind?: "write" | "delete";
+    /** 审批种类：写文件 / 删除命令 / 执行命令 / 敏感路径 / 网络出口。 */
+    kind?: "write" | "delete" | "shell" | "sensitive" | "network";
   };
   /** 计划模式产出的完整方案：显示在对话里，下方挂"确认执行/修改方案"。 */
   plan?: boolean;
@@ -208,12 +211,6 @@ export interface FileEntry {
   is_dir: boolean;
   /** 文件字节数；目录为 null（P0-11：list_files 直接返回，列表行不用先预览才知道大小）。 */
   size?: number | null;
-}
-
-export interface CodexInfo {
-  found: boolean;
-  path: string;
-  version: string;
 }
 
 export interface RunResult {

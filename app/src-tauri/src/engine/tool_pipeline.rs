@@ -1,5 +1,8 @@
-use crate::codex::RunState;
-use crate::engine::policy::{catastrophic_command, destructive_command};
+use crate::run_state::RunState;
+use crate::engine::policy::{
+    catastrophic_command, destructive_command, is_local_url, network_egress,
+    sensitive_path_access,
+};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -39,7 +42,13 @@ async fn request_approval(
     );
     let _ = app.emit(
         "agent-approval-request",
-        json!({ "id": id, "kind": kind, "label": label, "detail": detail }),
+        json!({
+            "id": id,
+            "kind": kind,
+            "label": label,
+            "detail": detail,
+            "task_id": task_id
+        }),
     );
     let decided = tokio::time::timeout(Duration::from_secs(180), rx).await;
     // 无论结果如何，清理挂起表（已由 resolve_approval 取走时这里是空操作）。
@@ -296,14 +305,22 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
             // - 从不问：什么卡都不弹。
             let approval = crate::sandbox::parse_approval(&ctx.approval);
             let destructive = destructive_command(cmd);
+            let sensitive = sensitive_path_access(cmd);
+            let network = network_egress(cmd);
             if crate::sandbox::needs_approval(approval, "shell", false, &ctx.delete_confirm) {
+                let extra = match (sensitive, network) {
+                    (Some(s), Some(n)) => format!("\n注意：这条命令涉及敏感路径（{s}）和网络出口（{n}）。"),
+                    (Some(s), None) => format!("\n注意：这条命令涉及敏感路径（{s}）。"),
+                    (None, Some(n)) => format!("\n注意：这条命令涉及网络出口（{n}）。"),
+                    (None, None) => String::new(),
+                };
                 let ok = request_approval(
                     &ctx.app,
                     &ctx.session_id,
                     ctx.state,
                     "shell",
                     "执行命令",
-                    &format!("要执行这条命令：`{cmd}`"),
+                    &format!("要执行这条命令：`{cmd}`{extra}"),
                 )
                 .await;
                 if !ok {
@@ -322,6 +339,48 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     .await;
                     if !ok {
                         return format!("用户没有批准这条删除命令（没执行）：`{cmd}`");
+                    }
+                }
+            } else if let Some(hit) = sensitive {
+                // "从不问"档也不允许静默读取凭据；这是硬边界，避免
+                // settings.json 里的 API Key 被读进上下文发给模型服务商。
+                if approval == crate::sandbox::ApprovalLevel::Never {
+                    return format!(
+                        "这条命令会读取敏感路径（{hit}），当前是「从不问」档，已拒绝。改成按需问/每步问后再试：`{cmd}`"
+                    );
+                }
+                let network_note = network
+                    .map(|n| format!("\n同时涉及网络出口（{n}）。"))
+                    .unwrap_or_default();
+                let ok = request_approval(
+                    &ctx.app,
+                    &ctx.session_id,
+                    ctx.state,
+                    "sensitive",
+                    &format!("访问敏感文件（{hit}）"),
+                    &format!(
+                        "这条命令可能读取凭据、私钥或应用设置：`{cmd}`\n敏感内容会进入模型上下文，确定要执行吗？{network_note}"
+                    ),
+                )
+                .await;
+                if !ok {
+                    return format!("用户没有批准访问敏感路径（没执行）：`{cmd}`");
+                }
+            } else if let Some(hit) = network {
+                if approval != crate::sandbox::ApprovalLevel::Never {
+                    let ok = request_approval(
+                        &ctx.app,
+                        &ctx.session_id,
+                        ctx.state,
+                        "network",
+                        &format!("发起网络请求（{hit}）"),
+                        &format!(
+                            "这条命令可能把数据发送到外部：`{cmd}`\n目标地址和命令输出会进入模型上下文，确定要执行吗？"
+                        ),
+                    )
+                    .await;
+                    if !ok {
+                        return format!("用户没有批准网络请求（没执行）：`{cmd}`");
                     }
                 }
             }
@@ -377,11 +436,31 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
             if url.trim().is_empty() {
                 return "要打开的网址为空。".to_string();
             }
+            let approval = crate::sandbox::parse_approval(&ctx.approval);
+            // Localhost / 127.0.0.1 是开发验收主路径，不打断；外部网址
+            // 可能把数据塞进 URL query 外带，按需问档先确认。
+            if !is_local_url(url) && approval != crate::sandbox::ApprovalLevel::Never {
+                let ok = request_approval(
+                    &ctx.app,
+                    &ctx.session_id,
+                    ctx.state,
+                    "network",
+                    "打开外部网页",
+                    &format!("要在应用内打开外部网页：`{url}`\n网页内容会进入上下文，确定要打开吗？"),
+                )
+                .await;
+                if !ok {
+                    return format!("用户没有批准打开外部网页：`{url}`");
+                }
+            }
             tools_run.push(format!("在内置浏览器打开 {url}"));
             // 前端接这个事件：切到 Inspector 浏览器页签，在子 webview 里打开。
             let _ = ctx
                 .app
-                .emit("agent-open-browser", serde_json::json!({ "url": url }));
+                .emit(
+                    "agent-open-browser",
+                    serde_json::json!({ "url": url, "task_id": ctx.session_id }),
+                );
             format!("已在应用内置浏览器打开 {url}（应用内查看，不用跳系统浏览器）。")
         }
         "read_terminal" => {

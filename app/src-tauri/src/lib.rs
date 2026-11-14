@@ -1,6 +1,6 @@
 mod agent;
 mod browser;
-mod codex;
+mod run_state;
 mod dsml;
 mod engine;
 mod frozen;
@@ -15,7 +15,7 @@ mod shell;
 mod text;
 mod usage;
 
-use codex::RunState;
+use run_state::RunState;
 use settings::Settings;
 use tauri::AppHandle;
 
@@ -48,7 +48,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(RunState {
-            child: tokio::sync::Mutex::new(None),
             native_cancel: std::sync::atomic::AtomicBool::new(false),
             native_running: std::sync::atomic::AtomicBool::new(false),
             approvals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
@@ -60,10 +59,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
-            codex::run_agent,
-            codex::cancel_run,
-            codex::check_codex,
-            codex::test_connection,
+            run_state::cancel_run,
             agent::run_agent_native,
             agent::resolve_approval,
             agent::test_provider,

@@ -74,8 +74,6 @@ pub struct Settings {
     pub boot_animation: bool,
     /// Working directory for agent runs.
     pub workdir: String,
-    /// Codex CLI binary path. Empty = resolve "codex" from PATH.
-    pub codex_path: String,
     /// 用户在「个人资料」里设置的显示名。空 = 界面显示占位称呼"专员"。
     /// 这是用户自己填的真实值，不是预设的人名。
     pub display_name: String,
@@ -101,7 +99,6 @@ impl Default for Settings {
             streaming: true,
             boot_animation: true,
             workdir: String::new(),
-            codex_path: String::new(),
             display_name: String::new(),
             providers: default_providers(),
             api_keys: HashMap::new(),

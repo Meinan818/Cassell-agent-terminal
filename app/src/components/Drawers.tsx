@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   Approval,
-  CodexInfo,
   DeleteConfirm,
   Effort,
   Mode,
@@ -139,7 +138,6 @@ export function SettingsModal({
   onPatch,
   onClose,
   closing = false,
-  codexInfo,
   onTestConnection,
   testing,
   testResult,
@@ -155,7 +153,6 @@ export function SettingsModal({
   onClose: () => void;
   /** 正在退场：先播 180ms 回缩动画再卸载（App 的 useOverlayExitValue）。 */
   closing?: boolean;
-  codexInfo: CodexInfo | null;
   /** 测指定服务商（只看不切换时也测得到）。 */
   onTestConnection: (providerId: string) => void;
   testing: boolean;
@@ -638,30 +635,6 @@ export function SettingsModal({
                   <p className="drawer-note">
                     压缩历史时用的模型，和上面选的主模型分开改；改主模型不会动它。
                   </p>
-                </div>
-                {/* P2-16：高级折叠已删。Codex CLI 路径收进模型组底部一行小字。 */}
-                <div className="s7-group s7-codex-line">
-                  <span className="drawer-note">
-                    备用引擎 Codex CLI：
-                    {codexInfo
-                      ? codexInfo.found
-                        ? ` 已检测到 ${codexInfo.version}`
-                        : ` 未检测到（${codexInfo.version}）`
-                      : " 正在检测…"}
-                  </span>
-                  <input
-                    className="field-input s7-codex-input"
-                    value={settings.codex_path}
-                    onChange={(e) => onPatch({ codex_path: e.target.value })}
-                    placeholder="codex（留空则从 PATH 解析）"
-                    aria-label="Codex 路径"
-                    autoComplete="off"
-                  />
-                  {!codexInfo?.found && (
-                    <span className="drawer-note">
-                      安装：<code>npm install -g @openai/codex</code>
-                    </span>
-                  )}
                 </div>
               </>
             )}

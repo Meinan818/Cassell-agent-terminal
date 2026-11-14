@@ -1101,7 +1101,7 @@ pub fn list_checkpoints_cmd(app: AppHandle, goal_id: String) -> Result<Vec<Check
 #[tauri::command]
 pub async fn rewind_checkpoint_cmd(
     app: AppHandle,
-    state: tauri::State<'_, crate::codex::RunState>,
+    state: tauri::State<'_, crate::run_state::RunState>,
     goal_id: String,
     turn: u32,
     scope: String,
@@ -1187,7 +1187,7 @@ pub async fn rewind_checkpoint_cmd(
 #[tauri::command]
 pub async fn clear_goal_cmd(
     _app: AppHandle,
-    state: tauri::State<'_, crate::codex::RunState>,
+    state: tauri::State<'_, crate::run_state::RunState>,
     goal_id: String,
 ) -> Result<(), String> {
     let mut map = state.goals.lock().await;
