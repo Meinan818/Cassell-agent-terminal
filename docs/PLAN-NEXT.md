@@ -16,8 +16,9 @@
 - A8 倒带安全：不再删除快照外文件，避免误删用户新建文件。
 - 旧 Codex CLI 引擎已移除（`codex.rs` 删除，`RunState` 独立到 `run_state.rs`）；产品只保留“配 base_url + API Key”的原生 HTTP 引擎。
 - B 的一部分：`engine/session.rs` 目标会话落盘，重启后可继续。
+- C1-C3：`ToolOutcome` 结构化结果（状态/错误/耗时进事件和 journal）；工具卡不再反解文本；审批支持“批准一次 / 本次会话允许 / 拒绝”，并按任务缓存会话级批准。
 
-下一步：C1-C3（ToolOutcome + 审批状态机），再做 D1-D5（上下文/压缩），最后 E（Windows 验收/0.2.0）。
+下一步：D1-D5（上下文预算/压缩/归档/上下文仪表），最后 E（Windows 验收/0.2.0）。
 
 ## 0. 总原则
 
