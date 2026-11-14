@@ -12,10 +12,20 @@
 //! - 不问龙族问题时一个字都不喂，正常工作零影响。
 //! - 匹配只看当前用户消息，不看历史，避免旧对话里的龙族词误触发。
 //!
-//! 关键词分两档：强关键词单独触发；弱关键词（任务、细节、课程……这些日常
+//! 关键词分两档 + 加权评分（P0-1，抄 dragonraja-site `eva.js` 的 `entryScore`
+//! 设计，不抄代码原文）：强关键词单独触发；弱关键词（任务、细节、课程……这些日常
 //! 词）只有在问题里同时出现任意强关键词时才算数，避免"帮我整理任务"这种
 //! 正常工作问题误注入。诺玛/EVA 是助手自己的名字，不算关键词——用户叫一声
 //! "诺玛，帮我写文档"不是在问龙族。
+//!
+//! 计分（每组独立算分，≥ 2.5 分才命中，取分最高的两个组；平局按表顺序）：
+//! - 整句恰好等于某个强关键词 → +10（精确）
+//! - 问题包含强关键词 → +3（≥3 字）或 +2（2 字）；关键词反过来包含问题
+//!   （问题 ≥2 字）→ +1.2
+//! - 别名命中 → +1.5（如"时零"是"时间零"的别名）
+//! - 弱关键词命中 → +2（须有任意强信号在先）
+//! - 长度加权：有命中时总分 += 2 × 命中字数 ÷ 问题字数（命中越长、问题越短，分越高）
+//! - 强命中保底 2.5 分：单个短关键词在长问题里也不丢召回；分数仍用于排序。
 
 use std::sync::OnceLock;
 
@@ -82,10 +92,12 @@ pub fn core_quick_ref() -> String {
     }
 }
 
-/// 一组映射：强关键词 / 弱关键词 / 注入的章节号（§40 映射表，顺序即优先级）。
+/// 一组映射：强关键词 / 弱关键词 / 别名 / 注入的章节号（§40 映射表）。
+/// 表顺序只在分相同是平局次序；实际命中按加权分排序。
 struct LoreGroup {
     strong: &'static [&'static str],
     weak: &'static [&'static str],
+    aliases: &'static [&'static str],
     sections: &'static [u32],
 }
 
@@ -97,6 +109,7 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "吸血镰", "阴流", "莱茵", "镜瞳", "血系结罗", "烛龙", "湿婆业舞", "皇帝", "王选之侍", "黑日", "神谕",
         ],
         weak: &[],
+        aliases: &["时零"],
         sections: &[9, 10, 11],
     },
     // 龙族起源 / 世界观 → §1–§4、§19（"龙文""世界树"已移出，见表末尾龙文组 → §5）
@@ -106,6 +119,7 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "奥丁", "尼德霍格", "伊邪那美", "初代种", "龙族",
         ],
         weak: &[],
+        aliases: &["老唐"],
         sections: &[1, 2, 3, 4, 19],
     },
     // 血统 → §6–§8（§5 是"龙文与世界树"，已移出本组）
@@ -115,6 +129,7 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "血统评级",
         ],
         weak: &["S级", "S 级", "A级", "A 级"],
+        aliases: &[],
         sections: &[6, 7, 8],
     },
     // 炼金术 → §12–§18
@@ -123,12 +138,14 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "炼金术", "炼金矩阵", "活灵", "七宗罪", "贤者之石", "炼金领域", "龙骨十字", "炼金武器",
         ],
         weak: &[],
+        aliases: &[],
         sections: &[12, 13, 14, 15, 16, 17, 18],
     },
     // 尼伯龙根 → §19
     LoreGroup {
         strong: &["尼伯龙根", "0号高架路", "0 号高架路", "青铜城", "阿瓦隆"],
         weak: &["地铁站"],
+        aliases: &[],
         sections: &[19],
     },
     // 卡塞尔学院 → §20–§24（诺玛/EVA 是助手自己的名字，不算关键词）
@@ -138,12 +155,14 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "瓦特阿尔海姆", "希尔伯特", "弗拉梅尔",
         ],
         weak: &["图书馆"],
+        aliases: &[],
         sections: &[20, 21, 22, 23, 24],
     },
     // 组织 → §25–§29
     LoreGroup {
         strong: &["秘党", "校董会", "蛇岐八家", "猛鬼众", "猎人网站", "加图索家族"],
         weak: &[],
+        aliases: &[],
         sections: &[25, 26, 27, 28, 29],
     },
     // 人物 → §30–§31、§35
@@ -153,6 +172,7 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "源稚生", "昂热", "路鸣泽", "赫尔佐格",
         ],
         weak: &[],
+        aliases: &["小魔鬼", "酒德麻衣", "薯片妞"],
         sections: &[30, 31, 35],
     },
     // 时间线 / 剧情 → §32–§34
@@ -161,30 +181,35 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "时间线", "大事件", "剧情", "战役", "青铜计划", "龙渊计划", "夏之哀悼", "黑天鹅港",
         ],
         weak: &["任务"],
+        aliases: &[],
         sections: &[32, 33, 34],
     },
     // 名场面 / 名台词 → §36
     LoreGroup {
         strong: &["名场面", "名台词", "小怪兽", "奥特曼"],
         weak: &["台词"],
+        aliases: &[],
         sections: &[36],
     },
     // 课程 / 日常 → §24、§37
     LoreGroup {
         strong: &["自由一日", "学院之星", "守夜人讨论区"],
         weak: &["课程", "社团", "食堂", "校规"],
+        aliases: &[],
         sections: &[24, 37],
     },
     // 冷知识 → §38、§53（§53 同人污染清单：答冷知识时须有"同人剔除"依据）
     LoreGroup {
         strong: &["冷知识"],
         weak: &["细节", "彩蛋"],
+        aliases: &[],
         sections: &[38, 53],
     },
     // 龙文与世界树 → §5（§5 标题就是"龙文与世界树"；从龙族起源组移出）
     LoreGroup {
         strong: &["龙文", "世界树"],
         weak: &[],
+        aliases: &[],
         sections: &[5],
     },
     // 身份与权限 → §43（"切换/权限"放弱档，避免"切换到 EVA 模式"这类工作指令误触发）
@@ -193,6 +218,7 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "黑卡", "白卡", "双黑卡", "权限表", "唤醒", "身份确认", "冒充", "越权",
         ],
         weak: &["切换", "权限"],
+        aliases: &[],
         sections: &[43],
     },
     // Ⅴ/Ⅵ与超级补全 → §30、§33、§41、§47、§50、§53、§54
@@ -207,61 +233,149 @@ const LORE_GROUPS: &[LoreGroup] = &[
             "言灵编号修订", "芬格尔推断",
         ],
         weak: &[],
+        aliases: &[],
         sections: &[30, 33, 41, 47, 50, 53, 54],
     },
     // 梦貘 → §47（梦貘 91 与王权 91 重号的版本冲突说明在 §47；"梦貘"本身也在言灵组，两组并存）
     LoreGroup {
         strong: &["梦貘"],
         weak: &[],
+        aliases: &[],
         sections: &[47],
     },
     // 芬格尔 → §41、§24（"芬格尔"已在人物组，两组同时命中是符合设计的：人物组给摘要、§41 给完整档案）
     LoreGroup {
         strong: &["芬格尔", "改诺玛编码", "炎魔诗人", "守夜人论坛"],
         weak: &[],
+        aliases: &[],
         sections: &[41, 24],
     },
     // 诺玛/EVA 说话方式 → §42、§52（"权限不足/保密"放弱档，避免工作场景误触发）
     LoreGroup {
         strong: &["说话方式", "身份核查", "取信"],
         weak: &["权限不足", "保密"],
+        aliases: &[],
         sections: &[42, 52],
     },
     // 任务流程 → §44
     LoreGroup {
         strong: &["任务流程", "N96", "CC1000", "安全港", "装备箱", "装备部发明"],
         weak: &[],
+        aliases: &[],
         sections: &[44],
     },
-    // 补遗 → §45–§51（"时间线"也会命中剧情组 §32–§34，两组并存是符合设计的）
+    // 补遗 → §45–§51、§55（"时间线"也会命中剧情组 §32–§34，两组并存是符合设计的；
+    // "伏笔"命中 §55 的 FW 表）
     LoreGroup {
-        strong: &["人物全表", "地点", "体系", "组织", "物品", "时间线", "日常"],
+        strong: &["人物全表", "地点", "体系", "组织", "物品", "时间线", "日常", "伏笔"],
         weak: &[],
-        sections: &[45, 46, 47, 48, 49, 50, 51],
+        aliases: &[],
+        sections: &[45, 46, 47, 48, 49, 50, 51, 55],
     },
 ];
 
-/// 命中了哪些映射组（按表顺序，最多取两个）。
-/// 弱关键词只有在问题里同时出现任意强关键词时才算数。
-pub fn matched_groups(prompt: &str) -> Vec<usize> {
-    let lower = prompt.to_lowercase();
-    let any_strong = LORE_GROUPS
-        .iter()
-        .any(|g| g.strong.iter().any(|k| lower.contains(&k.to_lowercase())));
-    let mut out = Vec::new();
-    for (i, g) in LORE_GROUPS.iter().enumerate() {
-        let hit_strong = g.strong.iter().any(|k| lower.contains(&k.to_lowercase()));
-        let hit_weak = !g.weak.is_empty()
-            && any_strong
-            && g.weak.iter().any(|k| lower.contains(&k.to_lowercase()));
-        if hit_strong || hit_weak {
-            out.push(i);
-            if out.len() >= 2 {
-                break;
+/// 归一化：小写 + 去掉全部空白（全角空格也去），与关键词同一口径比较。
+/// 中文通常无空格；"3E 考试"与"3E考试"归一后相同。
+fn norm(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// 命中阈值（P0-1）：一组得分 ≥ 2.5 才注入。
+pub const SCORE_THRESHOLD: f64 = 2.5;
+
+/// 一组对问题的加权分（P0-1，`entryScore` 设计）：精确 +10 / 包含 +3（≥3 字）
+/// 或 +2（2 字）/ 反向包含 +1.2 / 别名 +1.5 / 弱关键词 +2（须有强信号在先）/
+/// 再加长度加权 2 × 命中字数 ÷ 问题字数。返回 (得分, 是否有强信号)。
+fn score_group(prompt_norm: &str, g: &LoreGroup, any_strong: bool) -> (f64, bool) {
+    let q_len = prompt_norm.chars().count() as f64;
+    if q_len == 0.0 {
+        return (0.0, false);
+    }
+    let mut s = 0.0f64;
+    let mut matched = 0usize;
+    let mut strong_hit = false;
+    for kw in g.strong {
+        let k = norm(kw);
+        if k.is_empty() {
+            continue;
+        }
+        let k_len = k.chars().count();
+        if prompt_norm == &k {
+            s += 10.0;
+            matched += k_len;
+            strong_hit = true;
+        } else if prompt_norm.contains(&k) {
+            s += if k_len >= 3 { 3.0 } else { 2.0 };
+            matched += k_len;
+            strong_hit = true;
+        } else if k.contains(prompt_norm) && prompt_norm.chars().count() >= 2 {
+            // 问题是关键词的前缀/子串（如问"青铜"命中"青铜城"）
+            s += 1.2;
+            matched += prompt_norm.chars().count();
+            strong_hit = true;
+        }
+    }
+    for al in g.aliases {
+        let a = norm(al);
+        if !a.is_empty() && prompt_norm.contains(&a) {
+            s += 1.5;
+            matched += a.chars().count();
+            strong_hit = true;
+        }
+    }
+    if any_strong {
+        for kw in g.weak {
+            let k = norm(kw);
+            if !k.is_empty() && prompt_norm.contains(&k) {
+                s += 2.0;
+                matched += k.chars().count();
             }
         }
     }
-    out
+    if s > 0.0 {
+        s += 2.0 * matched as f64 / q_len;
+    }
+    // 强命中保底 2.5 分：单个 2 字关键词放在长问题里时，2 + 长度加权可能
+    // 略低于阈值（如"王权到底有什么用呢"），保底保证强关键词不丢召回；
+    // 分数仍用于两组之间的排序。弱命中（无强信号）没有保底。
+    if strong_hit && s < SCORE_THRESHOLD {
+        s = SCORE_THRESHOLD;
+    }
+    (s, strong_hit)
+}
+
+/// 各组得分（表顺序），供测试与调试用。
+fn group_scores(prompt: &str) -> Vec<(usize, f64)> {
+    let q = norm(prompt);
+    // 先算一遍强信号：弱关键词只有在任意组有强命中时才计分。
+    let any_strong = LORE_GROUPS.iter().any(|g| {
+        g.strong.iter().any(|kw| {
+            let k = norm(kw);
+            !k.is_empty()
+                && (q == k || q.contains(&k) || (k.contains(q.as_str()) && q.chars().count() >= 2))
+        }) || g.aliases.iter().any(|al| {
+            let a = norm(al);
+            !a.is_empty() && q.contains(&a)
+        })
+    });
+    LORE_GROUPS
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (i, score_group(&q, g, any_strong).0))
+        .collect()
+}
+
+/// 命中的映射组：得分 ≥ 2.5 的组，按分从高到低取最多两个；平局按表顺序。
+/// 弱关键词只有在问题里同时出现任意强关键词时才算数。
+pub fn matched_groups(prompt: &str) -> Vec<usize> {
+    let mut scored: Vec<(usize, f64)> = group_scores(prompt)
+        .into_iter()
+        .filter(|(_, s)| *s >= SCORE_THRESHOLD)
+        .collect();
+    // 按分降序；分相同按表顺序（sort_by 是稳定排序，先按表顺序排好）。
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(2);
+    scored.into_iter().map(|(i, _)| i).collect()
 }
 
 /// 命中的章节号（按节号升序、去重），不命中为空。
@@ -303,9 +417,9 @@ mod tests {
     #[test]
     fn parses_all_sections() {
         let s = sections();
-        assert_eq!(s.len(), 55, "应解析出 §0–§54 共 55 节");
+        assert_eq!(s.len(), 56, "应解析出 §0–§55 共 56 节");
         assert_eq!(s.first().unwrap().num, 0);
-        assert_eq!(s.last().unwrap().num, 54);
+        assert_eq!(s.last().unwrap().num, 55);
     }
 
     #[test]
@@ -354,5 +468,53 @@ mod tests {
         assert!(matched_groups("帮我整理一下今天的任务").is_empty());
         assert!(matched_groups("注意一下这些细节").is_empty());
         assert!(!matched_groups("楚子航执行过哪些任务").is_empty());
+    }
+
+    // ---- P0-1 加权评分 ----
+    #[test]
+    fn exact_match_scores_ten_plus_length_bonus() {
+        // 整句恰好等于关键词：精确 +10，长度加权 2×3÷3=2，共 12。
+        let scores = group_scores("时间零");
+        let s0 = scores.iter().find(|(i, _)| *i == 0).unwrap().1;
+        assert!((s0 - 12.0).abs() < 1e-9, "group 0 exact score {s0}");
+        assert_eq!(matched_groups("时间零"), vec![0]);
+    }
+
+    #[test]
+    fn alias_hit_counts() {
+        // "小魔鬼"是路鸣泽的别名：+1.5，长度加权 2×3÷5=1.2，共 2.7 ≥ 2.5。
+        assert!(matched_groups("小魔鬼是谁").contains(&7));
+        // "时零"是时间零的别名：+1.5，长度加权 2×2÷2=2，共 3.5。
+        assert!(matched_groups("时零").contains(&0));
+    }
+
+    #[test]
+    fn weak_only_below_threshold() {
+        // "楚子航执行过哪些任务"：剧情组只有弱关键词"任务" +2，
+        // 长度加权 2×2÷10=0.4，共 2.4 < 2.5，不命中；人物组命中。
+        let groups = matched_groups("楚子航执行过哪些任务");
+        assert_eq!(groups, vec![7]);
+    }
+
+    #[test]
+    fn groups_ranked_by_score_not_table_order() {
+        // "任务流程N96楚子航"：任务流程组（表第 18 组）6 + 2×7÷10 = 7.4，
+        // 人物组（表第 7 组）3 + 0.6 = 3.6；分高的在前，哪怕表顺序在后。
+        assert_eq!(matched_groups("任务流程N96楚子航"), vec![18, 7]);
+    }
+
+    #[test]
+    fn reverse_contains_prefix_query() {
+        // "青铜"是"青铜城"的子串：反向包含 +1.2，长度加权 2×2÷2=2，共 3.2。
+        assert!(matched_groups("青铜").contains(&4));
+    }
+
+    #[test]
+    fn foreshadowing_hits_section_55() {
+        // "伏笔"命中补遗组，注入 §55 的 FW 表。
+        let inj = build_lore_injection("路鸣泽的交易这条伏笔回收了吗？").unwrap();
+        assert!(inj.contains("## §55"));
+        assert!(inj.contains("FW_001"));
+        assert!(inj.contains("CROSS_VOLUME_SETUP"));
     }
 }
