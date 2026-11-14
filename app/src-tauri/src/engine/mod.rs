@@ -1,0 +1,7 @@
+//! Engine infrastructure shared by the native agent runtime.
+//!
+//! Keep this module small and boring: run observability and transport
+//! resilience do not belong inside the conversation loop.
+
+pub mod journal;
+pub mod retry;

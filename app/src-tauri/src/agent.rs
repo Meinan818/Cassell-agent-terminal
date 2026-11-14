@@ -316,6 +316,7 @@ fn catastrophic_command(cmd: &str) -> bool {
 /// 返回 true = 用户批准执行，false = 拒绝/超时/取消。
 async fn request_approval(
     app: &AppHandle,
+    task_id: &str,
     state: &RunState,
     kind: &str,
     label: &str,
@@ -330,6 +331,15 @@ async fn request_approval(
         let mut map = state.approvals.lock().await;
         map.insert(id.clone(), tx);
     }
+    let _ = crate::engine::journal::append(
+        app,
+        task_id,
+        crate::engine::journal::EngineEventKind::ApprovalRequested {
+            id: id.clone(),
+            kind: kind.to_string(),
+            label: label.to_string(),
+        },
+    );
     let _ = app.emit(
         "agent-approval-request",
         json!({ "id": id, "kind": kind, "label": label, "detail": detail }),
@@ -340,10 +350,19 @@ async fn request_approval(
         let mut map = state.approvals.lock().await;
         map.remove(&id);
     }
-    match decided {
+    let allow = match decided {
         Ok(Ok(allow)) => allow,
         _ => false, // 超时，或发送端（取消）被丢弃
-    }
+    };
+    let _ = crate::engine::journal::append(
+        app,
+        task_id,
+        crate::engine::journal::EngineEventKind::ApprovalResolved {
+            id,
+            allow,
+        },
+    );
+    allow
 }
 
 /// 前端审批卡的按钮调用：批准/拒绝一次挂起的审批请求。
@@ -464,6 +483,7 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
             ) {
                 let ok = request_approval(
                     &ctx.app,
+                    &ctx.session_id,
                     ctx.state,
                     "write",
                     &format!("写入文件 {rel}"),
@@ -526,6 +546,7 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
             if crate::sandbox::needs_approval(approval, "shell", false, &ctx.delete_confirm) {
                 let ok = request_approval(
                     &ctx.app,
+                    &ctx.session_id,
                     ctx.state,
                     "shell",
                     "执行命令",
@@ -539,6 +560,7 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                 if crate::sandbox::needs_approval(approval, "shell", true, &ctx.delete_confirm) {
                     let ok = request_approval(
                         &ctx.app,
+                        &ctx.session_id,
                         ctx.state,
                         "delete",
                         &format!("执行删除命令（{hit}）"),
@@ -711,11 +733,50 @@ pub async fn run_agent_native(
     state: State<'_, RunState>,
     req: AgentRequest,
 ) -> Result<AgentResult, String> {
+    let task_id = req
+        .task_id
+        .clone()
+        .or_else(|| req.goal_id.clone())
+        .unwrap_or_else(|| "default".to_string());
+    let _ = crate::engine::journal::append(
+        &app,
+        &task_id,
+        crate::engine::journal::EngineEventKind::RunStarted {
+            model: req.model.clone(),
+            provider_id: req.provider_id.clone(),
+            mode: req.mode.clone(),
+            run_mode: req.run_mode.clone(),
+        },
+    );
     // Reset the cancel flag for this run; clear the running flag on every exit.
     state.native_cancel.store(false, Ordering::SeqCst);
     state.native_running.store(true, Ordering::SeqCst);
-    let result = run_agent_native_inner(app, &state, req).await;
+    let result = run_agent_native_inner(app.clone(), &state, req).await;
     state.native_running.store(false, Ordering::SeqCst);
+    match &result {
+        Ok(r) => {
+            let _ = crate::engine::journal::append(
+                &app,
+                &task_id,
+                crate::engine::journal::EngineEventKind::RunFinished {
+                    success: r.success,
+                    cancelled: r.cancelled,
+                    stop_reason: r.stop_reason.clone(),
+                    prompt_tokens: r.prompt_tokens,
+                    completion_tokens: r.completion_tokens,
+                },
+            );
+        }
+        Err(error) => {
+            let _ = crate::engine::journal::append(
+                &app,
+                &task_id,
+                crate::engine::journal::EngineEventKind::RunFailed {
+                    error: error.clone(),
+                },
+            );
+        }
+    }
     result
 }
 
@@ -786,7 +847,14 @@ async fn run_inner_turn(
     // P0-2：本轮（最多 8 次请求）内 DSML 提醒最多发一次。
     let mut dsml_nudged = false;
 
-    'rounds: for _round in 0..crate::goal::ROUNDS_PER_TURN {
+    'rounds: for round in 0..crate::goal::ROUNDS_PER_TURN {
+        let _ = crate::engine::journal::append(
+            &app,
+            &ctx.session_id,
+            crate::engine::journal::EngineEventKind::RoundStarted {
+                round: round as u32 + 1,
+            },
+        );
         // 用户点了停止：立刻收尾，不再发下一轮请求
         if state.native_cancel.load(Ordering::SeqCst) {
             cancelled = true;
@@ -818,13 +886,25 @@ async fn run_inner_turn(
             "stream_options": {"include_usage": true}
         });
 
-        let resp = client
-            .post(url)
-            .bearer_auth(key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| humanize_net_error(&e, base_url))?;
+        let resp = crate::engine::retry::post_json_with_retry(
+            &client,
+            url,
+            key,
+            &body,
+            |attempt, status, delay| {
+                let _ = crate::engine::journal::append(
+                    &app,
+                    &ctx.session_id,
+                    crate::engine::journal::EngineEventKind::RetryScheduled {
+                        attempt,
+                        status,
+                        delay_ms: delay.as_millis() as u64,
+                    },
+                );
+            },
+        )
+        .await
+        .map_err(|e| humanize_net_error(&e, base_url))?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -1081,7 +1161,25 @@ async fn run_inner_turn(
                         delete_confirm: ctx.delete_confirm.clone(),
                         session_id: ctx.session_id.clone(),
                     };
+                    let tool_started = std::time::Instant::now();
+                    let _ = crate::engine::journal::append(
+                        &app,
+                        &ctx.session_id,
+                        crate::engine::journal::EngineEventKind::ToolStarted {
+                            name: name.to_string(),
+                            args: crate::engine::journal::summarize_args(&args),
+                        },
+                    );
                     let result = exec_tool(&tool_ctx, name, &args, &mut tools_run).await;
+                    let _ = crate::engine::journal::append(
+                        &app,
+                        &ctx.session_id,
+                        crate::engine::journal::EngineEventKind::ToolFinished {
+                            name: name.to_string(),
+                            output_chars: result.chars().count(),
+                            duration_ms: tool_started.elapsed().as_millis() as u64,
+                        },
+                    );
                     let _ = app.emit(
                         "agent-tool-result",
                         json!({"name": name, "result": result}),

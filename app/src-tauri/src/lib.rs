@@ -2,6 +2,7 @@ mod agent;
 mod browser;
 mod codex;
 mod dsml;
+mod engine;
 mod frozen;
 mod fsutil;
 mod goal;
@@ -90,6 +91,7 @@ pub fn run() {
             browser::browser_close,
             browser::browser_current,
             browser::browser_screenshot,
+            engine::journal::read_engine_journal,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
