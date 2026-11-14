@@ -102,7 +102,7 @@ def mockup_mode_switch():
     img, d = R.new_canvas()
 
     # --- before: NORMA ---
-    R.status_a(d, 0)  # ◉ NORMA · S · deepseek-flash · High · 上下文 23% · main ●
+    R.status_a(d, 0)  # ◉ NORMA · Ask · S · deepseek-flash · High · 上下文 23% · main ●
     R.divider(d, 1)
     R.user_msg(d, 2, "帮我整理一下今天的待办")
     R.line(d, 4, [("已按优先级排好：先回导师邮件，再改登录超时。", R.TEXT, False)])

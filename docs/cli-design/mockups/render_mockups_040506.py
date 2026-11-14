@@ -72,7 +72,7 @@ def mockup_splash():
     centered_line(d, 18, [
         ("S2017-0117  ·  ", R.TEXT2, False),
         ("NORMA", R.BLUE, True),
-        ("  ·  deepseek-flash  ·  上下文 0%", R.TEXT2, False),
+        ("  ·  Ask  ·  deepseek-flash  ·  上下文 0%", R.TEXT2, False),
     ])
     # input row, centered: "> " + solid block cursor
     prompt_w = R.seg_width("> ", True)

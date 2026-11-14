@@ -48,8 +48,8 @@ def mockup_narrow():
     R.W = w60
     try:
         img, d = R.new_canvas()
-        # Row 0: status A, only 3 fields (per S11 / task spec)
-        custom_status_bar(d, 0, "\u25c9 NORMA \u00b7 S \u00b7 deepseek-flash", w60)
+        # Row 0: status A, 4 fields (mode · tier · S · model; tier per §7.1)
+        custom_status_bar(d, 0, "\u25c9 NORMA \u00b7 Ask \u00b7 S \u00b7 deepseek-flash", w60)
         R.divider(d, 1)
         _title_band_narrow(img, d, w60)
 
@@ -107,7 +107,7 @@ def mockup_error():
     img, d = R.new_canvas()
     # Row 0: status A, model field reads 'Unconfigured'
     custom_status_bar(d, 0,
-                      "\u25c9 NORMA \u00b7 S \u00b7 \u672a\u914d\u7f6e \u00b7 High \u00b7 \u4e0a\u4e0b\u6587 0% \u00b7 main",
+                      "\u25c9 NORMA \u00b7 Ask \u00b7 S \u00b7 \u672a\u914d\u7f6e \u00b7 High \u00b7 \u4e0a\u4e0b\u6587 0% \u00b7 main",
                       R.W)
     R.divider(d, 1)
 

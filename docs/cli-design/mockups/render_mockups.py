@@ -176,6 +176,7 @@ def status_bar_solid(draw, row, ctx="上下文 0%", branch="main ●", mode="NOR
     parts = [
         ("◉ ", dark, True),
         (mode + "  ·  ", dark, False),
+        ("Ask  ·  ", dark, False),
         ("S", dark, True),
         ("  ·  ", dark, False),
         ("deepseek-flash  ·  High  ·  " + ctx + "  ·  " + branch, dark, False),
@@ -244,8 +245,7 @@ def mockup_welcome(suffix=""):
     f_sub = f_noto
 
     # Status row A on row 0 (design doc §5 S1: top of screen, above the
-    # title band). Content unchanged: no permission tier here (that is a
-    # separate audit item, not this fix).
+    # title band). Permission tier included per §7.1: · Ask after the mode.
     status_a(d, 0, ctx="上下文 0%", branch="main")
 
     # Desktop pet (2026-11-14 §2.4): the mascot is not a parked badge
@@ -334,7 +334,7 @@ def mockup_welcome(suffix=""):
 # ============================================================
 # Mockup 2 — Main chat
 # ============================================================
-def mockup_main():
+def mockup_main(suffix=""):
     img, d = new_canvas()
     status_a(d, 0)
     divider(d, 1)
@@ -364,14 +364,14 @@ def mockup_main():
     divider(d, 21)
     input_row(d, 22)
     status_c_idle(d, 23)
-    img.save(f"{BASE}/mockup-02-main.png")
-    print("saved mockup-02-main.png")
+    img.save(f"{BASE}/mockup-02-main{suffix}.png")
+    print(f"saved mockup-02-main{suffix}.png")
 
 
 # ============================================================
 # Mockup 3 — Approval
 # ============================================================
-def mockup_approval():
+def mockup_approval(suffix=""):
     img, d = new_canvas()
     status_a(d, 0)
     divider(d, 1)
@@ -404,8 +404,8 @@ def mockup_approval():
     divider(d, 21)
     input_row(d, 22)
     status_c_idle(d, 23)
-    img.save(f"{BASE}/mockup-03-approval.png")
-    print("saved mockup-03-approval.png")
+    img.save(f"{BASE}/mockup-03-approval{suffix}.png")
+    print(f"saved mockup-03-approval{suffix}.png")
 
 
 if __name__ == "__main__":
@@ -413,7 +413,8 @@ if __name__ == "__main__":
     mockup_welcome()
     mockup_main()
     mockup_approval()
-    # Light theme: welcome only (02/03 light versions are rendered the
-    # same way by their own runs; keep this file's scope to mockup-01).
+    # Light theme: same set_theme + suffix mechanism as the welcome screen.
     set_theme("light")
     mockup_welcome(suffix="-light")
+    mockup_main(suffix="-light")
+    mockup_approval(suffix="-light")
