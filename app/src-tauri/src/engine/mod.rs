@@ -9,3 +9,5 @@ pub mod deepseek;
 pub mod context;
 pub mod edit;
 pub mod modes;
+pub mod policy;
+pub mod tooling;

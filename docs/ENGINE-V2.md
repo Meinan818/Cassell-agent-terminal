@@ -23,6 +23,9 @@ engine/
   retry.rs     仅对 408、429、5xx 和连接超时做有上限的重试
   deepseek.rs  DeepSeek 的 reasoning_effort、参数适配和模型能力判断
   context.rs   工具结果的头部/尾部裁剪，避免单条命令吃掉上下文
+  modes.rs      NORMA/Cowork 与 EVA/Code 的模式 profile
+  tooling.rs    工具 schema 定义
+  policy.rs     命令风险识别（删除/灾难命令）
 
 agent.rs       对话循环、流式解析、工具调用编排（后续继续拆出）
 sandbox.rs     文件路径边界与审批决策纯函数
