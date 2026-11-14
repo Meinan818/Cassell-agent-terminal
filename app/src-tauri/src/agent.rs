@@ -764,6 +764,9 @@ pub async fn run_agent_native(
                     stop_reason: r.stop_reason.clone(),
                     prompt_tokens: r.prompt_tokens,
                     completion_tokens: r.completion_tokens,
+                    cached_tokens: r.cached_tokens,
+                    cost_usd: r.cost_usd,
+                    saved_usd: r.saved_usd,
                 },
             );
         }
@@ -1187,6 +1190,8 @@ async fn run_inner_turn(
                         "agent-tool-result",
                         json!({"name": name, "result": result}),
                     );
+                    // 给模型的上下文做头尾裁剪；界面仍然看到 exec_tool 的完整结果。
+                    let model_result = crate::engine::context::prune_tool_result(&result);
                     // P0-6：记进展（写文件/跑命令/读新文件才算），供停滞检测与验证门用。
                     if crate::goal::record_tool_call(session, name, &args, &result) {
                         round_progress = true;
@@ -1194,7 +1199,7 @@ async fn run_inner_turn(
                     messages.push(json!({
                         "role": "tool",
                         "tool_call_id": call.get("id").cloned().unwrap_or(json!("")),
-                        "content": result
+                        "content": model_result
                     }));
                 }
                 // 停滞检测：连续多轮无进展，或同一调用反复出现 → 卡住，别闷头烧轮次。

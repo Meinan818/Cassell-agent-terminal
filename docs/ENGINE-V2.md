@@ -22,6 +22,7 @@ engine/
   journal.rs   运行事件 JSONL，记录 run / round / tool / approval / retry
   retry.rs     仅对 408、429、5xx 和连接超时做有上限的重试
   deepseek.rs  DeepSeek 的 reasoning_effort、参数适配和模型能力判断
+  context.rs   工具结果的头部/尾部裁剪，避免单条命令吃掉上下文
 
 agent.rs       对话循环、流式解析、工具调用编排（后续继续拆出）
 sandbox.rs     文件路径边界与审批决策纯函数

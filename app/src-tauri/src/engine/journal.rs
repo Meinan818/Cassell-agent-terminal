@@ -59,6 +59,9 @@ pub enum EngineEventKind {
         stop_reason: String,
         prompt_tokens: Option<u64>,
         completion_tokens: Option<u64>,
+        cached_tokens: Option<u64>,
+        cost_usd: Option<f64>,
+        saved_usd: Option<f64>,
     },
     RunFailed {
         error: String,
