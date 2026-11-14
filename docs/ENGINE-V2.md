@@ -26,6 +26,7 @@ engine/
   modes.rs      NORMA/Cowork 与 EVA/Code 的模式 profile
   tooling.rs    工具 schema 定义
   policy.rs     命令风险识别（删除/灾难命令）
+  tool_pipeline.rs 工具执行、审批卡和命令运行
 
 agent.rs       对话循环、流式解析、工具调用编排（后续继续拆出）
 sandbox.rs     文件路径边界与审批决策纯函数
