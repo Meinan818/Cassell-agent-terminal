@@ -36,6 +36,12 @@
 
 功能对标见 [`docs/research/codex-claude-feature-study.md`](docs/research/codex-claude-feature-study.md)（Codex / Claude Code 功能调研，2026-11-11）。
 
+接手/继续开发先读：
+
+- [`docs/audit/PROJECT-AUDIT.md`](docs/audit/PROJECT-AUDIT.md)：项目现状、代码地图、功能状态、风险总表；
+- [`docs/PLAN-NEXT.md`](docs/PLAN-NEXT.md)：0.2.0 的分阶段计划与第一批任务；
+- [`docs/HANDOFF-2026-11-13.md`](docs/HANDOFF-2026-11-13.md)：上一轮交接（产品定位与铁律）。
+
 ## 仓库结构
 
 ```text
