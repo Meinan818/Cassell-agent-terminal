@@ -50,6 +50,26 @@
 闭源项目的内部实现不臆测；本文只把可验证的 CLI、公开类型、模块名和项目内
 研究报告作为依据。
 
+### 1.1 2026-11-14 外网复核
+
+开启代理后重新做了 live 检查；结果如下：
+
+| 来源 | 结果 | 读到的关键信息 |
+|---|---|---|
+| `https://claude.com/product/cowork` | HTTP 200 | 标题为 “Claude Cowork”，页面写明 Cowork 正在合并进 Claude 产品线；确认它是 Claude 的通用工作面 |
+| `https://code.claude.com/docs/en/overview` | HTTP 200 | Claude Code 官方总览；导航列出 sessions、memory、skills、MCP、code review、workflows、computer use |
+| `https://code.claude.com/docs/en/sessions` | HTTP 200 | 官方 session 文档：resume、branch、session picker、transcript 存储、worktree 会话 |
+| `https://code.claude.com/docs/en/skills` | HTTP 200 | 官方 Skills：目录/名称、按需加载、权限预授权、Cowork/云会话可用 |
+| `https://code.claude.com/docs/en/mcp` | HTTP 200 | 官方 MCP：stdio、HTTP、SSE、WebSocket、工具发现、超时与重连 |
+| `https://code.claude.com/docs/en/code-review` | HTTP 200 | 官方 Code Review：多 agent 读 PR、验证 finding、按严重级别行内评论，不自动 approve/block |
+| `https://code.claude.com/docs/en/memory` | 超时 | 本次未读到正文，不把记忆细节写成一手事实 |
+| `https://github.com/openai/codex` | HTTP 200（GitHub API） | 135,224 stars，Apache-2.0；README 确认 CLI / Web / 桌面是不同入口 |
+| `https://github.com/huiliyi37/Tianshu-harness` | HTTP 200（GitHub API） | 1,342 stars，Apache-2.0；CVM + DeepSeek V4 优化 |
+| `https://github.com/deepseek-ai/deepseek-harness` | HTTP 200（GitHub API） | 280,708 stars，MIT；“Everything is a Plugin” |
+
+本地安装和旧研究报告不能代替最新官方事实；后续涉及会变化的接口、模型、套餐
+和文档，要重新查官方页面。超时项明确标为未核实。
+
 ## 2. 功能总表
 
 | 功能 | Codex | Claude Code | 天枢 | DeepSeek Harness | 我们的结论 |
