@@ -22,7 +22,7 @@
 - 模型能力表：DeepSeek 1M、Kimi 256k、Moonshot 8k/32k/128k、Qwen 128k、未知模型 128k 兜底；模型切换后上下文窗口和压缩阈值跟着换。输入框上方现在显示“上下文 x% / 窗口”。
 - 按天枢 4.0.4 的做法补齐模型配置：每个模型可在设置里单独填写“上下文 / 最大输出”，留空时按模型名后缀（如 `-128k`、`-1m`）推断，再回落到 512K / 64K 默认；请求会带 `max_tokens`。本机 `cn:hy4free` 在 `max_tokens=65536` 下真实返回 `OK`。
 - D4：压缩时使用设置里的 `compression_model` 生成摘要；模型不可用、超时或返回空摘要时自动回退到确定性摘要，压缩不会阻塞主任务。压缩前原文仍然先归档。
-- E（进行中）：Windows 真机启动通过；主界面、设置、模型切换、每模型上下文、`cn:hy4free` 真实对话（返回“正常”）、上下文占比、PTY 终端、内置浏览器页均跑通。已构建 0.2.0 NSIS 安装包：`app/src-tauri/target/release/bundle/nsis/卡塞尔专员终端_0.2.0_x64-setup.exe`，11,303,100 字节，SHA-256 `B9EDFBA78EDD4BB41BE5BFBC70E4BE6A9F9446F997C04A92F65043A82B0CCE9C`，安装器图标已是诺玛球（非 NSIS 默认）。
+- E（进行中）：Windows 真机启动通过；主界面、设置、模型切换、每模型上下文、`cn:hy4free` 真实对话（返回“正常”）、上下文占比、PTY 终端、内置浏览器页均跑通。已构建 0.2.0 NSIS 安装包：`D:\卡塞尔学院\windows-build\卡塞尔专员终端_0.2.0_x64-setup.exe`（构建产物在 `app/src-tauri/target/release/bundle/nsis/` 同名文件），11,303,100 字节，SHA-256 `B9EDFBA78EDD4BB41BE5BFBC70E4BE6A9F9446F997C04A92F65043A82B0CCE9C`，安装器图标已是诺玛球（非 NSIS 默认）；截图证据在 `D:\卡塞尔学院\windows-build\evidence-20261114\`。
 
 下一步：补充 Plan/Goal/审查队列的真机冒烟，安装 0.2.0 做一次安装/卸载验收；压缩摘要的真实模型调用还需要在做目标长任务时观察一次。
 
