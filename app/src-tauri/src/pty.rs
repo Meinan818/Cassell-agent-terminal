@@ -92,19 +92,23 @@ pub async fn pty_spawn(
     if id.is_empty() {
         return Err("会话 id 为空".to_string());
     }
-    {
-        let sessions = state.sessions.lock().map_err(|_| "PTY 状态锁坏了".to_string())?;
-        if let Some(s) = sessions.get(&id) {
-            let alive = {
-                let mut child = s.child.lock().map_err(|_| "PTY 状态锁坏了".to_string())?;
-                match child.as_mut() {
-                    Some(c) => matches!(c.try_wait(), Ok(None)),
-                    None => false,
-                }
-            };
-            if alive {
-                return Ok(PtySpawned { created: false, id });
+    // Hold the sessions lock across the check + spawn + insert. React StrictMode
+    // can call this twice concurrently; a check-then-open-then-insert race
+    // otherwise starts two shells for one task.
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "PTY 状态锁坏了".to_string())?;
+    if let Some(s) = sessions.get(&id) {
+        let alive = {
+            let mut child = s.child.lock().map_err(|_| "PTY 状态锁坏了".to_string())?;
+            match child.as_mut() {
+                Some(c) => matches!(c.try_wait(), Ok(None)),
+                None => false,
             }
+        };
+        if alive {
+            return Ok(PtySpawned { created: false, id });
         }
     }
     let size = PtySize {
@@ -140,13 +144,8 @@ pub async fn pty_spawn(
         child: Mutex::new(Some(child)),
         output: Mutex::new(Vec::new()),
     });
-    {
-        let mut sessions = state
-            .sessions
-            .lock()
-            .map_err(|_| "PTY 状态锁坏了".to_string())?;
-        sessions.insert(id.clone(), session.clone());
-    }
+    sessions.insert(id.clone(), session.clone());
+    drop(sessions);
     // 读线程：把 PTY 输出写进环形缓冲，同时发事件给前端。
     let app2 = app.clone();
     let session2 = session.clone();
