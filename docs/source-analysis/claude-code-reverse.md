@@ -14,7 +14,7 @@
 | SDK 类型文件 | `sdk-tools.d.ts` |
 | SDK 类型行数 | 4,405 |
 | SDK 类型大小 | 179,549 bytes |
-| 公开工具输入/输出接口 | 81 |
+| 公开工具输入/输出接口 | 88（44 个工具输入 + 44 个输出） |
 | 本机数据目录 | `C:\Users\Lqx24\.claude` |
 
 本机 `.claude` 顶层目录（只列结构，不读对话正文）：
@@ -60,7 +60,8 @@ skipWorkflowUsageWarning）；不读取或输出 env 值。
 
 ## 2. 公开工具面
 
-`sdk-tools.d.ts` 的输入接口包括：
+`sdk-tools.d.ts` 的输入接口包括（共 44 个工具；逐项字段见
+[claude-tools.md](./claude-tools.md)）：
 
 ```text
 Agent Bash ExitPlanMode FileEdit FileRead FileWrite Glob Grep TaskStop
@@ -147,3 +148,202 @@ Claude Code 的公开接口已经足够支撑我们做功能对标：
 
 但闭源内部实现、真实提示词和行为细节，只能通过黑盒实验逐步补，不能写成
 “源码级已验证”。
+
+## 7. 内嵌字符串证据（2026-11-14 补）
+
+### 7.1 方法与边界
+
+Claude Code 的 `bin/claude.exe` 是 372,461,728 字节的 Bun 单文件程序。用
+只读方式扫描其可打印字符串，可以读到未压缩的 JS 标识符、枚举、错误消息和
+功能开关名。这一步**只分析程序自身**：
+
+- 不读取 `projects/` 下的用户对话；
+- 不读取 `settings.json` 的 env 值；
+- 不调用模型、不消耗额度；
+- 报告只记录结构、枚举和机制名，不复制代码或提示词原文。
+
+证据等级：**[二进制字符串]**，比社区传闻硬，但仍不是“读到 TypeScript 源码”。
+
+### 7.2 功能面规模
+
+| 指标 | 数量 | 说明 |
+|---|---:|---|
+| `CLAUDE_CODE_*` 环境变量 | 920 | 功能开关、宿主信息、实验开关 |
+| `CLAUDE_CODE_DISABLE_*` | 103 | 可关闭的功能面 |
+| `tengu_*` 遥测事件名 | 3,750 | 含大量 A/B 实验名，不等于 3,750 个功能 |
+| Hook 事件类型 | 18 | 见 7.3 |
+| 权限模式 | 6 | 见 7.4 |
+
+这说明 Claude Code 的真实复杂度不在“一个聊天循环”，而在**大量功能面 +
+统一开关治理**。920 个环境变量里很多是内部实验/宿主适配，不能照搬；但它
+暴露了功能版图：artifact、auto mode、memory、subagent、plugin/skill、
+MCP serve、web、compact、worktree、plan v2、background/cron。
+
+### 7.3 Hook 事件全集
+
+从字符串中可确认的 hook 事件：
+
+```text
+PreToolUse            PostToolUse           PostToolUseFailure
+UserPromptSubmit      SessionStart          SessionEnd
+Stop                  SubagentStop          PreCompact
+PostCompact           Notification          PermissionRequest
+Setup                 TeammateIdle          TaskCompleted
+ConfigChange          WorktreeCreate        WorktreeRemove
+```
+
+其中 `PreToolUse` / `PermissionRequest` 的 hook 加载失败会导致**同一文档里
+相邻的权限声明一起不生效**（字符串原文明确说：不能加载的 guard hook 可能
+正是保护旁边权限声明的，修好或删除前整块不应用）。这是一个重要的安全设计：
+**hook 加载失败必须 fail-closed，而不是跳过。**
+
+### 7.4 权限模式
+
+枚举值：
+
+```text
+default  acceptEdits  plan  auto  bypassPermissions  dontAsk
+```
+
+比公开 `--help` 多出 `auto` 与 `dontAsk` 的准确定位：
+
+- `auto` 不是“无脑放行”，字符串里存在 `AUTO_MODE_CLASSIFIER_*`、
+  `AUTO_MODE_OUTCOME_CODES`、`AUTO_MODE_TIER` 等一整套分类器开关；
+- `dontAsk` 是独立模式，不是 `bypassPermissions` 的别名。
+
+### 7.5 工具调用结果状态机（最值得学）
+
+Claude Code 的远程/本地工具宿主把一次调用归入 12 种结果，而不是简单的
+成功/失败：
+
+```text
+ran                    approved_by_session
+denied_by_rule         denied_by_user
+asked_in_session       denied_by_session
+ask_expired            ask_refused_no_surface
+hook_blocked           validation_failed
+duplicate_call         unrecognized
+```
+
+每态还带三个维度：`kind`（completed/route/error）、`bucket`
+（ok/sad/bad/none）、`sessionDenial`（是否属于会话级拒绝）、`phase`
+（call/route）。这解释了一个成熟引擎为什么要区分：
+
+- 规则拒绝（`denied_by_rule`）和用户拒绝（`denied_by_user`）不是一回事；
+- hook 拦截（`hook_blocked`）要单独记账；
+- 审批过期（`ask_expired`）要能触发重新询问，而不是当成失败；
+- 会话内已批准（`approved_by_session`）要能复用，避免重复弹窗。
+
+审批队列本身也有一组可对账的默认值（字符串常量）：
+
+| 参数 | 默认/范围 | 作用 |
+|---|---|---|
+| `progress_interval_ms` | 20,000（1s–120s） | 等待审批期间的心跳间隔 |
+| `progress_misses` | 2（1–10） | 连续丢心跳几次判定宿主失联 |
+| `max_ask_ms` | 120,000 | 单次审批最长等待 |
+| `reconcile_ms` | 30,000（5s–120s） | 对账周期 |
+| `caller_sessions_max` | 256 | 并发调用方会话上限 |
+| `pending_asks_max` | 64 | 待审批队列上限 |
+| `queue_depth` | 0–256 | 排队深度 |
+
+这套“心跳 + 失联判定 + 超时 + 对账”的结构，比只做一个 `approve/deny`
+弹窗完整得多，直接可用于我们的审批流水线。
+
+### 7.6 上下文压缩
+
+字符串里可确认的压缩相关开关：
+
+```text
+CLAUDE_CODE_AUTO_COMPACT_WINDOW
+CLAUDE_CODE_COLD_COMPACT
+CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS
+CLAUDE_CODE_SLEEP_COMPACT
+CLAUDE_CODE_SLEEP_COMPACT_AFTER_MS
+CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP
+```
+
+还有一条明确的 thrash 检测文案：
+
+> Autocompact is thrashing: the context refilled to the limit within 3 turns
+> of the previous compact, 3 times in a row.
+
+这说明它不只看“超没超限”，还检测**压缩后迅速回涨**的病态循环。我们的
+`compact` 目前只看阈值，缺这一层。
+
+### 7.7 子代理与团队
+
+可确认的开关/上限：
+
+```text
+MAX_CONCURRENT_SUBAGENTS        MAX_SUBAGENTS_PER_SESSION
+MAX_SUBAGENT_SPAWN_DEPTH       SUBAGENT_MODEL / SUBAGENT_EFFORT
+SUBAGENT_HISTORY               SUBAGENT_PROMPT_CACHE_TTL
+EXPERIMENTAL_AGENT_TEAMS       EXPERIMENTAL_OBSERVER_AGENTS
+WORKFLOW_MAX_CONCURRENT_AGENTS WORKFLOW_SIZE_WARNING_AGENTS
+```
+
+结论：子代理在 Claude Code 里是**有并发上限、嵌套深度、独立模型/effort、
+历史与缓存策略**的一等能力，不是“随便 spawn 一个”。
+
+### 7.8 Web 搜索与联网
+
+```text
+WEB_SEARCH_REFILLS_PER_HOUR      MAX_WEB_SEARCHES_PER_SESSION
+WEBSEARCH_CITATIONS              WEB_SEARCH_FAST_ARG
+WEBFETCH_CACHE_TTL_MS            WEBFETCH_DEADLINE_MS
+WEBFETCH_USE_CCR_PROXY           WEB_SEARCH_USE_CCR_PROXY
+DISABLE_WEB_FETCH
+```
+
+说明联网搜索不是“调一个 API”，而是有**每小时配额、会话总量上限、引用、
+缓存 TTL、截止时间、代理路由**的受管能力。天枢的 `tools/browser` 与
+Claude 的 WebSearch/WebFetch 可以对照学，但不要把“能搜索”当成“有搜索
+产品能力”。
+
+### 7.9 Artifact 体系
+
+`CLAUDE_CODE_ARTIFACT_*` 有 40 多个开关，覆盖：发布、预览、分享、评论、
+版本、类型目录、MCP 接入、自动打开、数据库、资源基址。这说明 Artifact
+不是“生成一个 HTML 文件”，而是**带版本、评论、分享和预览宿主的产品级
+发布系统**。
+
+对我们的意义：星域项目如果要做“可视化产物”，可以学它的**版本 + 预览 +
+评论**边界，但不要学它的云端发布链路和几十个内部开关。
+
+### 7.10 Auto Mode
+
+`AUTO_MODE_*` 有 27 个开关，包括分类器重叠、编辑移除、Git 状态、仓库可见性、
+远程浏览器、线程规则、温度、层级。可以判断：Claude Code 的自动模式是
+**“分类器 + 规则 + 上下文分级”**，不是简单的 `--yes`。
+
+### 7.11 记忆
+
+```text
+POST_TURN_MEMORY            POST_TURN_MEMORY_CONFIG
+MEMORY_API_BASE_URL         MEMORY_API_TOKEN
+DISABLE_AUTO_MEMORY         DISABLE_ORG_MEMORY
+```
+
+记忆在 Claude Code 里是**每轮后写入 + 可关闭 + 分组织/个人**的独立服务，
+不是塞进系统提示的一段文本。
+
+### 7.12 对 NORMA / EVA 的取舍
+
+| 机制 | 采用 | 理由 |
+|---|---|---|
+| 12 态工具结果 | **P0 采用** | 我们目前只有成功/失败，无法区分规则拒绝、用户拒绝、hook 拦截、超时 |
+| 审批心跳 + 对账 + 超时 | **P0 采用** | 解决“弹窗一直挂着”“宿主失联不知道” |
+| 6 种权限模式 | P1 采用精简版 | 先做 default/plan/acceptEdits/dontAsk 四档，auto/bypass 不做 |
+| 压缩 thrash 检测 | **P0 采用** | 防止压缩后立刻回涨的死循环 |
+| 子代理并发/深度上限 | P1 采用 | 我们现在是无限 spawn，必须加闸 |
+| Web 配额/缓存/TTL | P1 采用 | 联网搜索必须有预算，否则会话失控 |
+| Artifact 云端发布 | 不采用 | 产品形态不同，且需要云服务 |
+| Auto Mode 分类器 | 不采用 | 成本高、误判风险大，我们用显式审批 |
+| 920 个环境变量式治理 | 不采用 | 内部实验开关，不适合我们的规模 |
+
+### 7.13 证据缺口
+
+- 以上来自二进制字符串，**不能证明运行时一定走这条分支**；
+- 工具 schema 的完整字段仍以 `sdk-tools.d.ts` 为准；
+- 未执行真实 API 黑盒实验（需要预算）；
+- 不声称读过 Claude Code 源码。

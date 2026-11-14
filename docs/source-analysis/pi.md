@@ -43,7 +43,7 @@ Pi 可以一句话概括为：**一个刻意做小的 agent 内核，加一圈�
 
 几个包的要点（都能在源码里对到）：
 
-- **`ai`**：`src/index.ts` 只导出 core，provider 工厂在 `@earendil-works/pi-ai/providers/*`，API 实现在 `api/*`，旧全局 API 在 `compat`。`src/providers/` 下是 **48 个 provider**（97 个 `.ts`，包含 `all.ts` 与 `images/`；openai、anthropic、google、bedrock、mistral、groq、xai、deepseek、moonshot、qwen、zai、github-copilot……），每个都带 `.models.ts` 模型目录。`src/types.ts` 是协议中心：`AssistantMessage`、`ToolResultMessage`、`TranscriptContext`、`AssistantMessageEvent`、`Usage`、`StopReason`。
+- **`ai`**：`src/index.ts` 只导出 core，provider 工厂在 `@earendil-works/pi-ai/providers/*`，API 实现在 `api/*`，旧全局 API 在 `compat`。`src/providers/` 下是 **43 个 provider 实现 + 43 个模型目录**（97 个 `.ts` = 43 实现 + 43 个 `*.models.ts` + `all.ts` + 10 个支撑文件，`images/` 另算；openai、anthropic、google、bedrock、mistral、groq、xai、deepseek、moonshot、qwen、zai、github-copilot……）。`src/types.ts` 是协议中心：`AssistantMessage`、`ToolResultMessage`、`TranscriptContext`、`AssistantMessageEvent`、`Usage`、`StopReason`。口径见 `pi-appendix.md` §1.1。
 - **`agent`**：六个文件——`agent-loop.ts`（循环与工具执行）、`agent.ts`（`Agent` 类：状态、队列、监听器、生命周期）、`types.ts`（全部公开类型与 `AgentEvent`）、`stream-fn.ts`（默认 stream 函数注入）、`proxy.ts`、`index.ts`。
 - **`durable`**：`createSession(storage)` 起一个会话内核（文档 + 事务 + 提交 + watch），`harness/` 是上层（agent 文档、任务调度、工具任务、压缩任务、inbox），`storage/` 有 memory / jsonl / sqlite / indexeddb 四种后端，`env/` 接远程执行，`tools/` 是一套自带的 read/bash/edit/write 实现。
 - **`coding-agent`**：`main.ts`（参数解析 + 模式选择）、`config.ts`（路径与环境变量）、`core/`（会话、设置、模型运行时、扩展、工具、压缩）、`modes/`（interactive / print / json / rpc）。`index.ts` 是 SDK 面，导出 400 多个符号。
@@ -206,7 +206,7 @@ RPC 命令清单在 `modes/rpc/rpc-types.ts:20-74`，可以当“程序化控制
 | 11 | `stopReason === "length"` 全量失败 | `agent-loop.ts:276,488` | 被截断的参数绝不执行，避免半截命令 | 是 | P1 |
 | 12 | 工具装载差量（system 消息 `toolsAdded` / `toolsRemoved`） | `agent-loop.ts:342`、`ai/src/types.ts` 的 `SystemMessage` | 换模式 / 换工具集不用重建上下文 | 学思路 | P2 |
 | 13 | `prepareRequest` / `prepareNextTurn` / `finishTurn` 三钩子 | `types.ts`、`agent-loop.ts:194,228,295` | 压缩、路由、提示刷新、扩展“再来一轮”都挂这里 | 是 | P1 |
-| 14 | 多 provider 统一协议 | `ai/src/providers/*`（48 个 provider）、`api/*`、`types.ts` 的 `KnownApi` | 一套消息 / 事件 / usage，换模型不改上层 | 只学接口 | P2 |
+| 14 | 多 provider 统一协议 | `ai/src/providers/*`（43 个 provider 实现）、`api/*`、`types.ts` 的 `KnownApi` | 一套消息 / 事件 / usage，换模型不改上层 | 只学接口 | P2 |
 | 15 | 模型目录 + 能力元数据 | `ai/src/providers/*.models.ts`、`Model.inputLimits` | 上下文窗口、图片上限、thinking 等级都来自目录 | 学思路 | P2 |
 | 16 | usage / cost 挂在消息上 | `ai/src/types.ts` 的 `AssistantMessage.usage` | 计量不靠旁路日志拼 | 是 | P1 |
 | 17 | `deferred` 停止原因 | `ai/src/types.ts` 的 `DeferredHandle` | 批处理型 provider 异步取结果 | 用不上 | P3 |
@@ -239,7 +239,7 @@ RPC 命令清单在 `modes/rpc/rpc-types.ts:20-74`，可以当“程序化控制
 1. **没有权限系统。** `SECURITY.md` 原文：“It's the responsibility of the user to monitor its operations or to contain it within a container, virtual machine or other Sandbox solution.” `docs/security.md` 更直白：“it does not ask for approval before every tool call.” 这在 CLI 自助工具里是合理取舍（用户自己承担），在桌面应用里不行——我们的用户不会为了改个文件去开容器。我们的 `sandbox.rs` + 审批卡是**必须保留的差异**，不是待补齐的债。
 2. **把“最小功能集”当功能表。** 没有 sub-agents、没有 plan mode、没有 goal、没有 checkpoint 倒带，全靠扩展补。我们的 `goal.rs`、plan 模式、checkpoint 是产品必需，不是“多余复杂度”。
 3. **`chord` 那套跨进程对象运行时。** 设计很讲究（文档、增量、watch、sync、插件热重载），但它是为“同一份会话在终端 / 网页 / 多设备上同构”服务的。我们没有那个场景，抄进来只会变成第二套状态管理。
-4. **48 个 provider 的实现。** 我们只需要接口 + 能力表 + 一两个 adapter。
+4. **43 个 provider 的实现。** 我们只需要接口 + 能力表 + 一两个 adapter。
 5. **同进程 TypeScript 扩展 + 40 个事件。** 它靠“同进程”换来极强可塑性，代价是扩展等于全权限（`SECURITY.md` 自己也认了）。我们要做插件的话，事件面必须小、权限面必须显式。
 6. **`p2` / `p2-mac` / `p3` 与整个交互层。** 前端已定版，不碰。
 

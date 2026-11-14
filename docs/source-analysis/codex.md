@@ -17,7 +17,7 @@
 3. 不值得照抄的：云任务/账号/计费/attestation、远程控制（remote control + 配对码）、realtime 语音链路、V8 Code Mode、Windows 提权沙箱（需要独立服务 + ACL 供给 + WFP 防火墙规则）、guardian 自动审批（需要独立审查模型 + 评分校准）。
 4. 对我们的 `engine/`，P0 只有四条：**压缩生命周期**、**上下文 token 预算与截断分层**、**结构化命令规则（可写回）**、**会话 resume**。其余都是 P1/P2。
 5. 我们已有的 `tool_pipeline.rs`（审批卡 + journal）方向与 Codex 一致，缺的是 **"审批结果缓存 + 沙箱拒绝后只重试一次 + 拒绝原因回给模型"** 这三个具体机制。
-6. 产品级任务层不能漏：`core/src/tasks/` 用 `SessionTask`/`TaskKind` 把 regular、compact、review、user_shell 分开；另有 `codex review` 独立 review 线程（`cli/src/main.rs`、`core/src/session/review.rs`）和会话内 `!` 直跑。这说明 Codex 的 turn 不是一个单循环，而是“任务种类 + 子任务生命周期”的组合。
+6. 产品级任务层不能漏：`core/src/tasks/` 用 `SessionTask`/`TaskKind` 把 regular、review、compact 三类任务分开；`user_shell`（会话内 `!` 直跑）是独立任务实现，但 `kind()` 仍返回 `Regular`，不是第四种 `TaskKind`（详见 `codex-appendix.md` §1.2）。另有 `codex review` 独立 review 线程（`cli/src/main.rs`、`core/src/session/review.rs`）。这说明 Codex 的 turn 不是一个单循环，而是“任务种类 + 子任务生命周期”的组合。
 
 ## 1 全量模块清点
 
