@@ -255,15 +255,16 @@ def mockup_welcome():
 
     # shortcuts strip
     line(d, 14, [("⌘ ", BLUE, True), ("快捷键  ", TEXT, True),
-                 ("Tab", TEXT2, False), (" 切模式  ·  ", TEXT3, False),
-                 ("Shift+Tab", TEXT2, False), (" 切权限  ·  ", TEXT3, False),
+                 ("Shift+Tab", TEXT2, False), (" 切模式  ·  ", TEXT3, False),
+                 ("Tab", TEXT2, False), (" 排队  ·  ", TEXT3, False),
                  ("Ctrl+O", TEXT2, False), (" 转录  ·  ", TEXT3, False),
                  ("?", TEXT2, False), (" 帮助", TEXT3, False)], x=PAD + 20)
     line(d, 15, [("输入问题，诺玛会调阅学院档案帮你处理。按 ", TEXT3, False),
                  ("/", TEXT2, False), (" 查看全部命令。", TEXT3, False)],
          x=PAD + 20)
-    line(d, 17, [("输入框为空时按 ", TEXT3, False), ("Tab", TEXT2, False),
-                 (" 切换 NORMA / EVA，", TEXT3, False),
+    line(d, 17, [("按 ", TEXT3, False), ("Shift+Tab", TEXT2, False),
+                 (" 切换 NORMA / EVA；工作时按 ", TEXT3, False),
+                 ("Tab", TEXT2, False), (" 排队下一条，", TEXT3, False),
                  ("esc", TEXT2, False), (" 随时中断。", TEXT3, False)],
          x=PAD + 20)
 

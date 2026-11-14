@@ -10,7 +10,7 @@
 > **修订（2026-11-14 18:30，龙宝定稿 v9）**：用户说“你没有 get 到 claude 那个小怪兽的设计语言”，要求调研 Clawd 再做。调研结论：Clawd 是像素橙螃蟹，设计语言是“一个融合轮廓 + 2–3 扁平色 + 两个点当脸 + 一次一个说道具 + 像素网格纪律”，没有官方设计博客。按调研给出 A 独角冰龙 / B 长身龙 / C 大头龙宝宝 / D 冰晶三角龙四个方向并全部画出，用户先点 C，又说“几个都弄一下给我看看”，看完四只后最终选了 **C 大头龙宝宝（v9）**。v9 是婴儿图式：头占一半高，头顶一对小蝙蝠翼耳（白尖）是唯一龙标记，圆眼睛（非方形），小身子 + 两只小脚。黑填剪影测试通过（四只剪影一眼能分清）。
 > **修订（2026-11-14 18:32，龙宝 v10 定稿）**：用户看完 v9 后说“3 号的头可以只留头加和手和脚吗，就和 claude 的螃蟹一样”——要 Clawd 的结构：脸就是身体，四肢直接长在脸上。v10 删掉 v9 的小身子，保留大头 + 翼耳，加两只小手（两侧横向伸出，像 Clawd 的侧臂）+ 两只小脚。用户在 v9（头 + 小身子）和 v10（头 + 手 + 脚）里选了 **v10**。v9、v8d（圆身子 + 深蓝翅膀 + 白眼睛）的迭代图仍在 `mascot/` 里备查。
 > **修订（2026-11-14 19:34，龙宝 v11 + 标题英文 + 桌宠动作扩充）**：用户说“就只有走路太单调了吧，还有把两侧的手去掉，还有多加几个啊”——① 两侧小手删掉，龙宝只剩大头 + 翼耳 + 眼睛 + 两只脚（v11），更干净；② 光走路太单调，§2.4 扩充动作库（见下）；③ “卡塞尔学院用英文，中文太 low 了”——标题带主标题改英文 **CASSELL COLLEGE**（大号粗体），副标题改 **COMMISSIONER TERMINAL**，全英文标题像奢侈品 logo，比中文标题高级。
-> **修订（2026-11-14 19:45，操作模式定稿 + §11 全部通过 + 雪花冷却缩短）**：用户说“就按照 code cli 那套操作模式设计就行，我用那个比较多”“Claude 也行，互相借鉴”——操作模式以 **Code CLI 为主、Claude 为辅**：Tab 切模式（NORMA/EVA）+ Shift+Tab 切权限（统一旋钮），正好对上 Code CLI 的 Tab 切模式 + Shift+Tab 切权限；Esc 中断、Ctrl+O 转录、Ctrl+R 反向搜索、`/` 命令、`!` 命令、幽灵文本 + Tab 接受补全、思考指示（动词 + 用时 + token + esc 中断）都按 Code CLI/Claude 的做法。用户对 §11 的 5 个问题说“这个通过”——龙宝 v11、龙族感、开场 1 秒、状态行 A 字段、Tab 键位全部按本文现状通过，不用改。另：用户说雪花“一个小时太慢啦，用户可能有时候都会看不到”，冷却从 1 小时改成 **10 分钟**。
+> **修订（2026-11-14 19:47，用户纠正：是 Codex CLI，不是 Code CLI）**：用户说“Codex cli，我发错了”——上面那条“Code CLI”写错了，真正参照的是 **OpenAI 的 Codex CLI**（用户平时用得最多的那个），Claude 仍为辅、互相借鉴。Codex 和 Claude Code 的按键不一样，**按键跟着改**：Codex 是 **Shift+Tab 切模式**（Plan/Pair/Execute 轮换）、**Tab 排队**（工作时按 Tab 把下一条指令排进下一轮，叫 Steer 模式）、权限用 **`/permissions`** 命令改（Ask / Approve for me / Full Access / Read Only）。所以这里也改成：**Shift+Tab 切 NORMA/EVA**（换工位）、**Tab 排队**（工作时）/ 接受幽灵补全（空闲时）、权限用 `/permissions`、`/plan` 进计划模式、Esc 中断、Esc×2 改上一条。上面 19:45 那条写的“Tab 切模式、Shift+Tab 切权限”作废。
 > 前置文档：`docs/claude-code-cli-teardown.md`（§5 已定技术选型 Rust + Ratatui、三区布局、对照方案——本文是它的**界面落地版**，不重复讲选型，只定界面长什么样、每个屏幕怎么画、每个状态怎么写）。
 > 适用：卡塞尔 CLI v1（M1–M3）。吉祥物与效果图见本文 §2 与附录；效果图 PNG 在 `cli-design/mockups/`。
 
@@ -266,9 +266,9 @@ W = 白 #FFFFFF（翼耳尖）
 │ │ · 登录接口超时调整（2 小时前）  /resume  继续上次会话  /new  新会话     │ │
 │ │ · 毕业设计任务书整理（昨天）    /model   换模型         /help  全部命令  │ │
 │ │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │ │
-│ │ ⌘ 快捷键  Tab 切模式 · Shift+Tab 切权限 · Ctrl+O 转录 · ? 帮助         │ │
+│ │ ⌘ 快捷键  Shift+Tab 切模式 · Tab 排队 · Ctrl+O 转录 · ? 帮助        │ │
 │ │ 输入问题，诺玛会调阅学院档案帮你处理。按 / 查看全部命令。                │ │
-│ │ 输入框为空时按 Tab 切换 NORMA / EVA，esc 随时中断。                     │ │
+│ │ 按 Shift+Tab 切换 NORMA / EVA；工作时按 Tab 排队下一条，esc 随时中断。  │ │
 │ └───────────────────────────────────────────────────────────────────────┘ │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ ████████████ 实色冰蓝状态条（深色文字）：◉ NORMA · S · 模型 · 上下文 ██████ │
@@ -376,7 +376,7 @@ W = 白 #FFFFFF（翼耳尖）
 - **无框**：对话框没有盒子边框，靠背景色阶（面板底）与上下 `─` 分隔线分层。
 - **拟议改动 + Yes/No 选项卡**：Left/Right 切换选项卡，Tab 可在回答上加评论，Enter 确认。
 - **写操作先批后做，读操作直接跑**。审批是信任感的核心，不要为省一次按键而跳过。
-- **权限旋钮**：`Shift+Tab` 在 Ask → Accept Edits → Plan → Full Access 之间切换（一个统一旋钮，不是两个键分开拨）。当前档位常驻状态行 A（见 §7）。
+- **权限**：`/permissions` 改审批策略：Ask → Approve for me → Full Access → Read Only（照抄 Codex 的 `/permissions`，不是一个键拨动的旋钮）。当前档位常驻状态行 A（见 §7）。
 
 ### S7. 首次运行向导（First-run）：四步，只出现一次
 
@@ -390,7 +390,7 @@ W = 白 #FFFFFF（翼耳尖）
   ③ 工作区
      选择一个文件夹作为工作区（文件工具只在这个文件夹里活动）
   ④ 快捷键
-     一张快捷键速查（Tab 切模式、Shift+Tab 切权限、Ctrl+O 转录、? 帮助）
+     一张快捷键速查（Shift+Tab 切模式、Tab 排队、Ctrl+O 转录、? 帮助）
 
   [ 下一步 ]  [ 跳过 ]
 ```
@@ -404,7 +404,7 @@ W = 白 #FFFFFF（翼耳尖）
 - **`/` 命令菜单**：输入 `/` 弹出补全菜单（命令 + skill + 最近会话），幽灵文本 + `+2` 计数，Tab 接受，上下键选择。
 - **`!` shell 模式**：输入 `!` 后整行当 shell 命令跑，显示为 `⌘ <命令>` 工具行。
 - **`@` 文件提及**：输入 `@` 弹出文件补全，选中的文件以芯片形式跟在输入框里。
-- **命令列表**（v1）：`/help` `/model` `/provider` `/new` `/resume` `/status` `/diff` `/undo` `/receipts` `/setup` `/theme` `/clear` `/exit`。其余进 `/help` 详情，不占主界面。
+- **命令列表**（v1）：`/help` `/model` `/provider` `/permissions` `/plan` `/new` `/resume` `/status` `/diff` `/undo` `/receipts` `/setup` `/theme` `/clear` `/exit`。其余进 `/help` 详情，不占主界面。
 
 ### S9. 转录 / 状态 / 回溯（Transcript）：`Ctrl+O`、` /status`、双击 Esc
 
@@ -413,11 +413,12 @@ W = 白 #FFFFFF（翼耳尖）
 - **双击 Esc 回溯（rewind）**：空闲时双击 Esc 打开 rewind 菜单，回到更早的轮次（fork 出新会话，不删旧会话）。
 - **`/undo`**：撤回上一轮请求及其文件改动；**`/receipts`**：列出本会话改了哪些文件、跑了哪些命令、每次审批是谁批的、哪些失败了（抄 Codewhale）。
 
-### S10. 模式切换（Mode）：Tab 切人格，Shift+Tab 切权限
+### S10. 模式切换（Mode）：Shift+Tab 切人格，Tab 排队（Steer）
 
-- **`Tab`（输入框为空时）切换 NORMA / EVA**：球的颜色与名字一起变（白 ↔ 蓝），对话区插一行轻提示：`── EVA 已就位（工程开发）──`（dim 色，一行，不抢戏）。**切换 = 开新任务**：当前任务留在侧栏（桌面端逻辑），CLI 里当前会话保留、切模式后新起一段（见下）。
+- **`Shift+Tab` 切换 NORMA / EVA**（照抄 Codex 的 Shift+Tab 切模式）：球的颜色与名字一起变（白 ↔ 蓝），对话区插一行轻提示：`── EVA 已就位（工程开发）──`（dim 色，一行，不抢戏）。**切换 = 开新任务**：当前任务留在侧栏（桌面端逻辑），CLI 里当前会话保留、切模式后新起一段（见下）。
   - CLI 的会话模型：一个终端会话 = 一个任务。切模式时，当前任务的上下文保留在历史里，但新一轮按新模式的默认思考强度与审批走，并在对话区插一行 `── EVA 已就位（工程开发）──` 作分界。**不要在一个任务里混着两种模式的人设**——分界线就是证据。
-- **`Shift+Tab` 切换权限**：Ask → Accept Edits → Plan → Full Access，一个统一旋钮。当前档位常驻状态行 A（如 `Ask` / `Full Access`）。
+- **`Tab` 排队（Steer，照抄 Codex）**：agent 工作时按 Tab，把下一条指令排进下一轮（agent 先干完手头的活再接新的）；空闲时 Tab 接受幽灵补全。**Enter 是立即发送**——agent 正在干活时按 Enter，指令立刻插进当前轮（中途改主意用这个）。
+- **权限用 `/permissions` 改**（照抄 Codex）：Ask → Approve for me → Full Access → Read Only。当前档位常驻状态行 A（如 `Ask` / `Full Access`）。**Plan 不再是权限档位**：计划模式用 `/plan` 进（只读、不改文件，像 Codex 的 Plan 模式），再按一次 `/plan` 或发一条“动手吧”退出。
 - **状态行 A 的模式字段**：`◉ NORMA` / `◉ EVA` + 权限档位（如 `· Ask`）。模式与权限一眼可见，不用问、不用翻。
 
 ### S11. 窄终端与纯文本模式（Fallback）
@@ -443,18 +444,20 @@ W = 白 #FFFFFF（翼耳尖）
 
 ### 6.1 快捷键（v1 只要这张表，其余进 `/help`）
 
-> **操作模式（2026-11-14 用户定稿）**：以 **Code CLI 为主、Claude 为辅，互相借鉴**——用户说“我用那个（Code CLI）比较多”。对照关系：Code CLI 的 Tab 切模式（Plan/Work/Operate）→ 这里的 Tab 切 NORMA/EVA（换工位）；Code CLI 的 Shift+Tab 切权限（Ask/Auto-Review/Full Access）→ 这里的 Shift+Tab 切权限（Ask → Accept Edits → Plan → Full Access，统一旋钮）；Esc 中断、Esc+Esc rewind、Ctrl+O 转录、Ctrl+R 反向搜索、`/` 命令、`!` shell、幽灵文本 + Tab 接受补全、思考指示（动词 + 用时 + token + esc 中断）都按 Code CLI/Claude 的做法。用户用熟了 Code CLI，上手这里不用重新学。
+> **操作模式（2026-11-14 用户定稿，19:47 纠正）**：以 **Codex CLI 为主、Claude 为辅，互相借鉴**——用户说“我用那个（Codex CLI）比较多”。对照关系：Codex 的 Shift+Tab 切模式（Plan/Pair/Execute 轮换）→ 这里的 Shift+Tab 切 NORMA/EVA（换工位）；Codex 的 Tab 排队（Steer：工作时排下一条、Enter 立即插队）→ 这里一样；Codex 的 `/permissions` 改审批（Ask / Approve for me / Full Access / Read Only）→ 这里一样；Codex 的 `/plan` 进计划模式 → 这里一样；Esc 中断、Esc×2 改上一条、Ctrl+O 转录、Ctrl+R 反向搜索、`/` 命令、`!` shell、幽灵文本 + Tab 接受补全、思考指示（动词 + 用时 + token + esc 中断）都按 Codex/Claude 的做法。用户用熟了 Codex CLI，上手这里不用重新学。
 
 | 按键 | 作用 |
 |---|---|
 | Ctrl+C | 中断 / 清空输入 |
 | Ctrl+D | 退出（第一下提示，第二下退出） |
-| Esc | 中断；Esc+Esc 打开 rewind 菜单 |
-| Tab（输入框为空） | 切换 NORMA / EVA |
-| Shift+Tab | 切换权限模式（Ask → Accept Edits → Plan → Full Access） |
+| Esc | 中断；Esc+Esc 改上一条消息 |
+| Enter | 发送；工作时按 Enter 立即插进当前轮（Steer） |
+| Shift+Tab | 切换 NORMA / EVA（换工位） |
+| Tab | 工作时排队下一条（Steer）；空闲时接受幽灵补全 |
 | Ctrl+O | 转录视图（时间戳、模型、展开折叠行） |
 | Ctrl+R | 反向搜索历史 |
-| Ctrl+L | 重绘 |
+| Ctrl+L | 重绘 / 清屏（保留会话） |
+| Ctrl+G | 在编辑器中打开 |
 | Ctrl+T | 任务清单（本轮 todo） |
 | Ctrl+V | 粘贴图片（终端支持时转为 `[Image #N]` 芯片；不支持时提示） |
 | Up/Down | 历史 |
@@ -472,6 +475,8 @@ W = 白 #FFFFFF（翼耳尖）
 |---|---|
 | `/help` | 全部命令与快捷键 |
 | `/model` | 换模型（列表选择） |
+| `/permissions` | 改审批策略（Ask / Approve for me / Full Access / Read Only） |
+| `/plan` | 进 / 出计划模式（只读、不改文件） |
 | `/provider` | 换服务商 / 配 Key |
 | `/new` | 新会话 |
 | `/resume` | 继续最近的会话（列表选择） |
@@ -503,7 +508,7 @@ W = 白 #FFFFFF（翼耳尖）
 | `上下文 23%` | 用量百分比 | < 80% 正常色，80–95% 提醒黄，> 95% 红 |
 | `main ●` | git 分支 + 是否干净 | `●` = 有未提交改动；干净不显示 |
 | `◆ ULTRA` | ULTRACODE 开关 | 亮起时才显示，关掉时不显示 |
-| `Ask` | 权限档位 | Ask / Accept Edits / Plan / Full Access，常驻 |
+| `Ask` | 权限档位 | Ask / Approve for me / Full Access / Read Only，常驻 |
 
 - **字段上限 6 个**：人格、血统 S、模型、思考强度、上下文、Git、权限（ULTRA 有才算，S 不占“字段数”——它是身份徽章，不是信息字段）。TPS、缓存命中率、subagent 数进 `/status`，**不要塞进状态行**。
 - **窄终端**：< 80 列只留 `◉ NORMA · S · 模型`，其余进 `/status`。
@@ -572,13 +577,13 @@ W = 白 #FFFFFF（翼耳尖）
 
 ## 11. 待用户定（2026-11-14 19:45 全部通过）
 
-用户 2026-11-14 19:45 说“这个通过”——以下 5 项全部按本文现状通过，不用改。操作模式另按用户要求定为 **Code CLI 为主、Claude 为辅**（见 §6.1 末尾）。
+用户 2026-11-14 19:45 说“这个通过”——以下 5 项全部按本文现状通过，不用改。操作模式另按用户要求定为 **Codex CLI 为主、Claude 为辅**（见 §6.1 末尾；19:47 用户纠正：是 Codex CLI，不是 Code CLI）。
 
 1. **龙宝的长相**：✅ 通过——v11（大圆头 + 翼耳 + 眼睛 + 两只脚，没手）。
 2. **龙族感够不够**：✅ 通过——英文标题“CASSELL COLLEGE”、S 徽章、今日言灵、龙族味动词，现状就够。
 3. **开场 1 秒会不会太短**：✅ 通过——1 秒三帧正好。
 4. **状态行 A 的字段**：✅ 通过——现状字段（人格、血统 S、模型、思考强度、上下文、Git、权限）不多不少。
-5. **Tab 切模式**：✅ 通过——按 Code CLI 的做法，输入框为空时按 Tab 切 NORMA/EVA，Shift+Tab 切权限；不用换成 Ctrl+Tab。
+5. **Tab 切模式**：✅ 通过（2026-11-14 19:47 按 Codex CLI 纠正）——**Shift+Tab 切 NORMA/EVA**（Codex 就是 Shift+Tab 切模式），Tab 改成工作时排队下一条（Steer），权限用 `/permissions`；不用换成 Ctrl+Tab。
 
 ---
 
