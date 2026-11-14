@@ -199,6 +199,13 @@ W = 白 #FFFFFF（翼耳尖）
   - 特殊形象：`christmas-hat`（圣诞帽：红帽 + 白毛边 + 白绒球）。
   - 圣诞版常驻动作：`christmas-walk`（走路）、`christmas-blink`（眨眼）、`christmas-sleep`（睡觉，带小 `Z`），都戴着圣诞帽。
   - 圣诞专属特殊动作：`christmas-gift`（拆礼物：红盒白丝带，盖子飞起，眼睛瞟向礼物）、`christmas-lights`（挂彩灯：头顶一串彩灯，眼睛上移盯着灯）。
+- **创意页全部画完（2026-11-15，用户拍板“我都要”）**：创意页「龙宝新创意：螃蟹调研启发」上的 56 项（11 状态 + 15 新动作 + 12 表情 + 8 顶职业帽 + 10 节日）一个不漏全画出来。圣诞已批，按圣诞模板做其余 9 个节日。脚本 `render_dragon_v11_batch2.py`（表情 / 新帽子 / 新动作）、`render_dragon_v11_festivals.py`（9 套节日）；拼图 `contact-sheet-expressions.png`（12 张表情）、`contact-sheet-batch2.png`（28 张新帽子 + 新动作）、`contact-sheet-<节日>.png`（每节日 6 张）。新画 92 帧（表情 10 + 帽子 4 + 动作 24 + 节日 54）。
+  - **新表情（12 张，`expr-*`，只改眼睛，身体 / 翼耳 / 脚不动）**：`expr-blush`（脸红开心：∩∩ 眼 + 两点腮红）、`expr-happy`（开心：∩∩ 眼）、`expr-wink`（眨单眼：左眼一条缝 + 右眼正常）、`expr-surprise`（惊讶：眼变小圆点 + 上移）、`expr-star`（星星眼：眼变五角星）、`expr-love`（爱心眼：眼变爱心）、`expr-sleepy`（困倦：眼变一条缝）、`expr-sad`（委屈：眼下移 + 眉毛下垂）、`expr-swirl`（蚊香眼：暗环白心 ◎）、`expr-focus`（专注眯眼：眼变一条细缝）；平常复用 `dragon-v11-open`，晕复用 `react-dizzy`（× × 眼）。
+  - **新帽子（4 顶，`hat-*`，卡在两翼耳中间，白尖不盖）**：`hat-glasses`（小圆眼镜：读长文档）、`hat-pompom`（拉拉队绒球：跑测试通过）、`hat-mode-norma`（白色小帽：NORMA 模式）、`hat-mode-eva`（深蓝小帽：EVA 模式）。帽子 = 职业对照表 8 行至此全部画完（侦探 / 巫师 / 厨师 / 安全帽 / 耳机见第一批）。
+  - **新动作（24 帧，`action-*`）**：`action-juggle`（杂耍：抛接 3 光点）、`action-conduct`（指挥：排成一列指挥光点）、`action-sprint-r/l`（冲刺搬运：快跑 + 身后小灰尘）、`action-point`（举牌 / 指向：歪头用翼耳指向）、`action-prop-stamp/lantern/snowpile`（常驻小道具：印章台 / 灯笼 / 雪堆）、`action-stamp-down/up`（压缩盖印：用头当印章往纸堆上盖）、`action-hug-me`（求抱抱：两耳张开眼巴巴望着）、`action-picked-up`（被抱起：拎起晃两下、爱心飘）、`action-thrown`（被扔：倾斜 + 晕眼 + 速度线）、`action-parachute`（耳朵降落伞：翼耳张开当伞、∩∩ 开心眼）、`action-squash`（被戳压扁）、`action-bounce`（压扁回弹 + 一颗心）、`action-sneeze`（打喷嚏：闭眼 + 喷嚏气团）、`action-flip-1/2`（整点后空翻：倒立翻转 + 落地晕）、`action-star-medal`（升级星星 + 奖牌）、`action-slide-leaf/cloud`（踩叶 / 踩云滑行）、`action-sun/moon`（接物小任务：接满 5 片升起小太阳，夜里小月亮）。15 个新动作至此全部画完（流汗升级梯 / 翻肚皮 + 灵魂出窍 / 举牌 / 天降礼盒见第一批）。
+  - **节日（9 套 × 6 帧 = 54 帧，每套：特殊形象 1 + 节日版常驻动作 3（走路 / 眨眼 / 睡觉）+ 节日专属特殊动作 2）**：万圣节 `halloween-*`（南瓜帽 + 糖果桶 / 小幽灵，橙 + 绿）、新年 `newyear-*`（条纹派对帽 + 五彩纸屑 / 烟花，红 + 白）、春节 `springfest-*`（红帽白毛边 + 红包 / 红灯笼，红 + 白）、情人节 `valentine-*`（粉爱心发箍 + 飘爱心 / 玫瑰，粉 + 红）、复活节 `easter-*`（白兔耳 + 彩蛋 / 兔子跳，粉 + 白）、中秋 `midautumn-*`（白月牙发箍 + 月饼 / 小白兔，白 + 棕）、生日 `birthday-*`（粉蓝条纹派对帽 + 生日蛋糕 / 气球，粉 + 蓝）、周五傍晚 `friday-*`（墨镜造型 + 饮料杯 / 葛优躺）、天气联动 `weather-*`（以雨天为代表：蓝雨帽 + 雨伞 / 雨滴）。
+  - **11 个可点试演状态全部有帧（复用，不重画）**：待机 `dragon-v11-open`、流汗升级 `sweat-1/2/3`、换职业帽（连点）9 顶帽子轮换、举牌确认 `sign-yes/no`、求抱抱 `action-hug-me`、晕乎乎 `react-dizzy`、翻肚皮 `belly-up`、耳朵降落伞 `action-parachute`、天降礼盒 `gift-box-falling/open/jack`、升级星星 `action-star-medal`、踩叶滑行 `action-slide-leaf/cloud`。
+  - **未决（需用户 / 父代理确认）**：节日规则说“常驻动作节日那天照样做，一个不少”——本批按圣诞模板执行为每节日 3 个代表性常驻动作（走路 / 眨眼 / 睡觉）。若按字面指 10 种常驻动作每节日全重画，则是 90 多帧的大活，需另行确认。
 
 ---
 
