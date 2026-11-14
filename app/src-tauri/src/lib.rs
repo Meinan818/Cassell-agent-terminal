@@ -51,6 +51,7 @@ pub fn run() {
             native_cancel: std::sync::atomic::AtomicBool::new(false),
             native_running: std::sync::atomic::AtomicBool::new(false),
             approvals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            session_approvals: tokio::sync::Mutex::new(std::collections::HashSet::new()),
             goals: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             session_usage: tokio::sync::Mutex::new(crate::usage::UsageStats::default()),
         })

@@ -1,8 +1,9 @@
-use crate::run_state::RunState;
+﻿use crate::run_state::{ApprovalDecision, RunState};
 use crate::engine::policy::{
     catastrophic_command, destructive_command, is_local_url, network_egress,
     sensitive_path_access,
 };
+use crate::engine::outcome::ToolOutcome;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -11,9 +12,8 @@ use tokio::sync::oneshot;
 
 static APPROVAL_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// 向界面发一次审批请求（审批卡），等用户点"批准"或"拒绝"。
+/// 向界面发一次审批请求（审批卡），等用户选择"批准一次/本次会话允许/拒绝"。
 /// 180 秒无人决定按拒绝处理（不挂住这一轮）；用户取消任务时也按拒绝处理。
-/// 返回 true = 用户批准执行，false = 拒绝/超时/取消。
 async fn request_approval(
     app: &AppHandle,
     task_id: &str,
@@ -21,12 +21,15 @@ async fn request_approval(
     kind: &str,
     label: &str,
     detail: &str,
-) -> bool {
+) -> ApprovalDecision {
+    if state.has_session_approval(task_id, kind).await {
+        return ApprovalDecision::AllowOnce;
+    }
     let id = format!(
         "appr-{}",
         APPROVAL_SEQ.fetch_add(1, Ordering::SeqCst)
     );
-    let (tx, rx) = oneshot::channel::<bool>();
+    let (tx, rx) = oneshot::channel::<ApprovalDecision>();
     {
         let mut map = state.approvals.lock().await;
         map.insert(id.clone(), tx);
@@ -56,10 +59,14 @@ async fn request_approval(
         let mut map = state.approvals.lock().await;
         map.remove(&id);
     }
-    let allow = match decided {
-        Ok(Ok(allow)) => allow,
-        _ => false, // 超时，或发送端（取消）被丢弃
+    let decision = match decided {
+        Ok(Ok(decision)) => decision,
+        _ => ApprovalDecision::Deny, // 超时，或发送端（取消）被丢弃
     };
+    if decision == ApprovalDecision::AllowSession {
+        state.remember_session_approval(task_id, kind).await;
+    }
+    let allow = decision.is_allowed();
     let _ = crate::engine::journal::append(
         app,
         task_id,
@@ -68,7 +75,7 @@ async fn request_approval(
             allow,
         },
     );
-    allow
+    decision
 }
 
 
@@ -87,7 +94,7 @@ pub(crate) struct ToolCtx<'a> {
     pub(crate) session_id: String,
 }
 
-pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut Vec<String>) -> String {
+async fn exec_tool_text(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut Vec<String>) -> String {
     // P0-4 授权闸：本会话未授权时，所有文件工具一律拒绝，绝不读盘、
     // 绝不编造内容。前端收到这条文本后会提示用户先选文件夹。
     if !ctx.authorized {
@@ -167,7 +174,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                 false,
                 &ctx.delete_confirm,
             ) {
-                let ok = request_approval(
+                let decision = request_approval(
                     &ctx.app,
                     &ctx.session_id,
                     ctx.state,
@@ -176,7 +183,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     &format!("要写入文件 {rel}，内容约 {} 字。", content.chars().count()),
                 )
                 .await;
-                if !ok {
+                if !decision.is_allowed() {
                     return format!("用户没有批准这次写入（{rel} 没动）。");
                 }
             }
@@ -231,7 +238,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                 false,
                 &ctx.delete_confirm,
             ) {
-                let ok = request_approval(
+                let decision = request_approval(
                     &ctx.app,
                     &ctx.session_id,
                     ctx.state,
@@ -244,7 +251,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     ),
                 )
                 .await;
-                if !ok {
+                if !decision.is_allowed() {
                     return format!("用户没有批准这次编辑（{rel} 没动）。");
                 }
             }
@@ -314,7 +321,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     (None, Some(n)) => format!("\n注意：这条命令涉及网络出口（{n}）。"),
                     (None, None) => String::new(),
                 };
-                let ok = request_approval(
+                let decision = request_approval(
                     &ctx.app,
                     &ctx.session_id,
                     ctx.state,
@@ -323,12 +330,12 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     &format!("要执行这条命令：`{cmd}`{extra}"),
                 )
                 .await;
-                if !ok {
+                if !decision.is_allowed() {
                     return format!("用户没有批准这条命令（没执行）：`{cmd}`");
                 }
             } else if let Some(hit) = destructive {
                 if crate::sandbox::needs_approval(approval, "shell", true, &ctx.delete_confirm) {
-                    let ok = request_approval(
+                    let decision = request_approval(
                         &ctx.app,
                         &ctx.session_id,
                         ctx.state,
@@ -337,7 +344,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                         &format!("要执行这条删除命令：`{cmd}`\n删除后文件无法直接恢复，确定要执行吗？"),
                     )
                     .await;
-                    if !ok {
+                    if !decision.is_allowed() {
                         return format!("用户没有批准这条删除命令（没执行）：`{cmd}`");
                     }
                 }
@@ -352,7 +359,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                 let network_note = network
                     .map(|n| format!("\n同时涉及网络出口（{n}）。"))
                     .unwrap_or_default();
-                let ok = request_approval(
+                let decision = request_approval(
                     &ctx.app,
                     &ctx.session_id,
                     ctx.state,
@@ -363,12 +370,12 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     ),
                 )
                 .await;
-                if !ok {
+                if !decision.is_allowed() {
                     return format!("用户没有批准访问敏感路径（没执行）：`{cmd}`");
                 }
             } else if let Some(hit) = network {
                 if approval != crate::sandbox::ApprovalLevel::Never {
-                    let ok = request_approval(
+                    let decision = request_approval(
                         &ctx.app,
                         &ctx.session_id,
                         ctx.state,
@@ -379,7 +386,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                         ),
                     )
                     .await;
-                    if !ok {
+                    if !decision.is_allowed() {
                         return format!("用户没有批准网络请求（没执行）：`{cmd}`");
                     }
                 }
@@ -441,7 +448,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
             // Localhost / 127.0.0.1 是开发验收主路径，不打断；外部网址
             // 可能把数据塞进 URL query 外带，按需问档先确认。
             if !is_local_url(url) && approval != crate::sandbox::ApprovalLevel::Never {
-                let ok = request_approval(
+                let decision = request_approval(
                     &ctx.app,
                     &ctx.session_id,
                     ctx.state,
@@ -450,7 +457,7 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     &format!("要在应用内打开外部网页：`{url}`\n网页内容会进入上下文，确定要打开吗？"),
                 )
                 .await;
-                if !ok {
+                if !decision.is_allowed() {
                     return format!("用户没有批准打开外部网页：`{url}`");
                 }
             }
@@ -484,5 +491,18 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
         }
         _ => format!("未知工具：{name}"),
     }
+}
+
+/// Public entry point: keep the existing display text, but attach an explicit
+/// status/error/timing record for the event stream and journal.
+pub(crate) async fn exec_tool(
+    ctx: &ToolCtx<'_>,
+    name: &str,
+    args: &Value,
+    tools_run: &mut Vec<String>,
+) -> ToolOutcome {
+    let started = std::time::Instant::now();
+    let content = exec_tool_text(ctx, name, args, tools_run).await;
+    ToolOutcome::classify(content, started.elapsed())
 }
 

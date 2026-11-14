@@ -157,7 +157,7 @@ fn catastrophic_command(cmd: &str) -> bool {
 pub async fn resolve_approval(
     state: State<'_, RunState>,
     id: String,
-    allow: bool,
+    decision: String,
 ) -> Result<bool, String> {
     let tx = {
         let mut map = state.approvals.lock().await;
@@ -165,7 +165,12 @@ pub async fn resolve_approval(
     };
     match tx {
         Some(tx) => {
-            let _ = tx.send(allow);
+            let decision = match decision.as_str() {
+                "allow-session" => crate::run_state::ApprovalDecision::AllowSession,
+                "allow-once" | "approve" | "批准" => crate::run_state::ApprovalDecision::AllowOnce,
+                _ => crate::run_state::ApprovalDecision::Deny,
+            };
+            let _ = tx.send(decision);
             Ok(true)
         }
         None => Ok(false),
@@ -695,7 +700,6 @@ async fn run_inner_turn(
                         delete_confirm: ctx.delete_confirm.clone(),
                         session_id: ctx.session_id.clone(),
                     };
-                    let tool_started = std::time::Instant::now();
                     let _ = crate::engine::journal::append(
                         &app,
                         &ctx.session_id,
@@ -704,24 +708,32 @@ async fn run_inner_turn(
                             args: crate::engine::journal::summarize_args(&args),
                         },
                     );
-                    let result = exec_tool(&tool_ctx, name, &args, &mut tools_run).await;
+                    let outcome = exec_tool(&tool_ctx, name, &args, &mut tools_run).await;
                     let _ = crate::engine::journal::append(
                         &app,
                         &ctx.session_id,
                         crate::engine::journal::EngineEventKind::ToolFinished {
                             name: name.to_string(),
-                            output_chars: result.chars().count(),
-                            duration_ms: tool_started.elapsed().as_millis() as u64,
+                            output_chars: outcome.content.chars().count(),
+                            duration_ms: outcome.duration_ms,
+                            status: outcome.status.as_str().to_string(),
+                            is_error: outcome.is_error,
                         },
                     );
                     let _ = app.emit(
                         "agent-tool-result",
-                        json!({"name": name, "result": result, "task_id": ctx.session_id}),
+                        json!({
+                            "name": name,
+                            "result": outcome.content.clone(),
+                            "task_id": ctx.session_id,
+                            "status": outcome.status.as_str(),
+                            "is_error": outcome.is_error
+                        }),
                     );
                     // 给模型的上下文做头尾裁剪；界面仍然看到 exec_tool 的完整结果。
-                    let model_result = crate::engine::context::prune_tool_result(&result);
+                    let model_result = crate::engine::context::prune_tool_result(&outcome.content);
                     // P0-6：记进展（写文件/跑命令/读新文件才算），供停滞检测与验证门用。
-                    if crate::goal::record_tool_call(session, name, &args, &result) {
+                    if crate::goal::record_tool_call(session, name, &args, &outcome.content) {
                         round_progress = true;
                     }
                     messages.push(json!({

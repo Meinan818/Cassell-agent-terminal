@@ -38,6 +38,8 @@ pub enum EngineEventKind {
         name: String,
         output_chars: usize,
         duration_ms: u64,
+        status: String,
+        is_error: bool,
     },
     ApprovalRequested {
         id: String,

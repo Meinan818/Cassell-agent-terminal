@@ -79,8 +79,8 @@ export interface ChatMsg {
   toolLabel?: string;
   /** 工具调用参数：事件里直接带结构化参数，卡片不再反解正文。 */
   toolArgs?: Record<string, unknown>;
-  /** 工具调用状态：running / done。 */
-  toolStatus?: "running" | "done";
+  /** 工具调用状态：running / done / error。 */
+  toolStatus?: "running" | "done" | "error";
   /** 服务商回报的真实用量（本轮结束时才有）；cached/costUsd/savedUsd
       是 P0-10：缓存命中 tokens、按官方价目估算的花费与缓存省下的钱。 */
   usage?: {

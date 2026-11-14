@@ -207,6 +207,7 @@ const WAVE2_CSS = `
 @keyframes tool-breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.06); opacity: 0.85; } }
 .tool-status { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; flex-shrink: 0; color: var(--accent); transition: color 300ms var(--ease); }
 .tool-status.done { color: var(--text-2); }
+.tool-status.bad { color: var(--danger); }
 .tool-status-ico { position: relative; width: 14px; height: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
 .tool-code { font-family: var(--mono); font-size: 12px; line-height: 1.6; background: var(--bg-soft); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; color: var(--text-2); max-height: 180px; overflow-y: auto; }
 .tool-code .tok-cmd { color: var(--accent); font-weight: 600; }
@@ -966,7 +967,10 @@ function ToolCard({
   const arrowIdx = text.indexOf("\n→ ");
   const head = arrowIdx >= 0 ? text.slice(0, arrowIdx) : text;
   const result = arrowIdx >= 0 ? text.slice(arrowIdx + 3) : "";
-  const running = msg.toolStatus ? msg.toolStatus === "running" : result === "";
+  const running = msg.toolStatus
+    ? msg.toolStatus === "running"
+    : result === "";
+  const failed = msg.toolStatus === "error";
   const name =
     msg.toolLabel ?? head.replace(/^调用工具：/, "").split("（")[0];
   const args = msg.toolArgs ?? parseToolArgs(head);
@@ -1002,9 +1006,9 @@ function ToolCard({
             <ToolIcon kind={summary.icon} />
           </span>
           <span className="w2-card-sum">{summary.text}</span>
-          <span className={`tool-status ${running ? "run" : "done"}`}>
+          <span className={`tool-status ${running ? "run" : failed ? "bad" : "done"}`}>
             <StatusMark running={running} shape={toolMorphShape(summary.icon)} />
-            {running ? "执行中" : "完成"}
+            {running ? "执行中" : failed ? "失败" : "完成"}
           </span>
           <span>{open ? "▾" : "▸"}</span>
         </button>
@@ -1125,7 +1129,7 @@ function PermCard({
   onResolve,
 }: {
   msg: ChatMsg;
-  onResolve?: (requestId: string, allow: boolean) => void;
+  onResolve?: (requestId: string, decision: string) => void;
 }) {
   const [decision, setDecision] = useState<string | null>(
     msg.perm?.decision ?? null,
@@ -1139,9 +1143,9 @@ function PermCard({
   const body = isAsk
     ? (msg.ask?.question ?? msg.text)
     : (msg.perm?.command ?? msg.text);
-  const decide = (label: string, allow: boolean) => {
+  const decide = (label: string, decision: string) => {
     setDecision(label);
-    if (requestId) onResolve?.(requestId, allow);
+    if (requestId) onResolve?.(requestId, decision);
   };
   return (
     <div className="msg">
@@ -1190,21 +1194,31 @@ function PermCard({
                   <button
                     type="button"
                     className="btn-approve"
-                    onClick={() => decide("批准", true)}
+                    onClick={() => decide("批准", "allow-once")}
                   >
                     批准
                   </button>
+                  {requestId &&
+                    (msg.perm?.kind === "write" || msg.perm?.kind === "shell") && (
+                      <button
+                        type="button"
+                        className="btn-approve"
+                        onClick={() => decide("本次会话允许", "allow-session")}
+                      >
+                        本次会话允许
+                      </button>
+                    )}
                   <button
                     type="button"
                     className="btn-reject"
-                    onClick={() => decide("拒绝", false)}
+                    onClick={() => decide("拒绝", "deny")}
                   >
                     拒绝
                   </button>
                   <button
                     type="button"
                     className="btn-ghost"
-                    onClick={() => decide("稍后处理", false)}
+                    onClick={() => decide("稍后处理", "deny")}
                   >
                     稍后处理
                   </button>
@@ -2133,7 +2147,7 @@ export default function App() {
     );
     // 工具调用结果：追加到同一行（截断，避免把文件全文塞进对话）
     add(
-      listen<{ name: string; result: string; task_id?: string }>(
+      listen<{ name: string; result: string; task_id?: string; is_error?: boolean }>(
         "agent-tool-result",
         ({ payload }) => {
           const id = lastToolMsgIdRef.current;
@@ -2148,7 +2162,7 @@ export default function App() {
             (m) => ({
               ...m,
               text: `${m.text}\n→ ${short}`,
-              toolStatus: "done",
+              toolStatus: payload.is_error ? "error" : "done",
             }),
             taskId,
           );
@@ -3278,8 +3292,8 @@ export default function App() {
   }, []);
 
   // ---- P0-4/P0-9 审批卡：把用户的决定解析给后端挂起的审批请求 ----
-  const resolveApproval = useCallback((requestId: string, allow: boolean) => {
-    invoke("resolve_approval", { id: requestId, allow }).catch(
+  const resolveApproval = useCallback((requestId: string, decision: string) => {
+    invoke("resolve_approval", { id: requestId, decision }).catch(
       () => undefined,
     );
   }, []);
