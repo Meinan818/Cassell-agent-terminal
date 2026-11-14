@@ -27,6 +27,7 @@ agent runtime 的共同骨架、各自独有的硬机制、以及不适合我们
 | Claude Code | `2.1.325`，`E:\nodejs\node_modules\@anthropic-ai\claude-code` | 原生 CLI，提供 `--permission-mode`、`--autocompact`、`--max-budget-usd`、`--resume`、`--fork-session`、`--worktree`、`--agents`、`--bg` 等入口 | 闭源；只参考公开 CLI 和 `sdk-tools.d.ts`，不复制内部代码 |
 | 天枢 | `4.0.4`，`E:\Tianshu\rivet-runtime` | 模块化 runtime；可见 `AgentLoop`、`tool-pipeline`、`path-grants`、`project-trust`、`plan-approval`、`goal-tracker`、`checkpoint`、`session-persist`、`prefix-budget`、`provider-health` 等模块 | 闭源分发；只借鉴公开模块边界和已有研究报告 |
 | DeepSeek Harness | `0.2.1-rc.2`，`E:\dsh` | 官方 DeepSeek agent 参考实现；重点是可观察到的缓存优先和压缩思路 | 以公开资料和本机安装为准，未把内部代码当成本项目源码 |
+| Pi | GitHub `earendil-works/pi` | 最小可扩展 harness；`pi-ai`、`pi-agent-core`、`pi-durable`、`pi-coding-agent`、`pi-tui` 分层 | MIT；本机没有安装，参考 GitHub README |
 | Pi | 本机未找到 `pi` 命令或安装目录 | — | 暂不纳入，不凭空猜功能 |
 
 说明：本报告基于本机 CLI 帮助、Claude 公开类型定义、天枢 runtime 的模块清单、
@@ -113,6 +114,16 @@ usage 账本、DeepSeek wire adapter。
 
 可学：工具结果裁剪、80% 阈值、压缩替换而非叠加、原始日志保留。
 暂不学：完整插件/Cordis 体系、官方 UI 细节。
+
+### 3.5 Pi 独有或领先
+
+- 最小核心，`pi-ai`、`pi-agent-core`、`pi-durable`、`pi-coding-agent`、
+  `pi-tui` 分层清楚。
+- `print`、JSON、RPC、SDK 多种入口，说明引擎和 UI 分离。
+- 明确不自带权限系统，需要容器或外部沙箱；这一点不能照搬。
+
+可学：包边界、agent core 与 TUI 分离、durable runtime。
+不学：默认无权限边界、让用户自己组装基础能力。
 
 ## 4. 应该抄的机制与不该抄的机制
 

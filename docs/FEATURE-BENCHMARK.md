@@ -45,7 +45,7 @@
 | Claude Code | 2.1.325 | `claude --help`、`sdk-tools.d.ts` |
 | 天枢 | 4.0.4 | `E:\Tianshu\rivet-runtime`、插件与公开报告 |
 | DeepSeek Harness | 0.2.1-rc.2 | 本机安装、项目研究报告 |
-| Pi | 未找到 | 本机没有命令或安装目录 |
+| Pi | GitHub `earendil-works/pi` | 本机没有命令；GitHub README 可读，约 12 万 stars，MIT |
 
 闭源项目的内部实现不臆测；本文只把可验证的 CLI、公开类型、模块名和项目内
 研究报告作为依据。
@@ -66,6 +66,8 @@
 | `https://github.com/openai/codex` | HTTP 200（GitHub API） | 135,224 stars，Apache-2.0；README 确认 CLI / Web / 桌面是不同入口 |
 | `https://github.com/huiliyi37/Tianshu-harness` | HTTP 200（GitHub API） | 1,342 stars，Apache-2.0；CVM + DeepSeek V4 优化 |
 | `https://github.com/deepseek-ai/deepseek-harness` | HTTP 200（GitHub API） | 280,708 stars，MIT；“Everything is a Plugin” |
+| `https://github.com/huiliyi37/Tianshu-harness/releases/latest` | HTTP 200 | 跳转到 `v4.0.4`，与本机 `4.0.4` 一致 |
+| `https://github.com/earendil-works/pi` | HTTP 200 | 约 12 万 stars，MIT；README 说明它是 minimal/extensible harness |
 
 本地安装和旧研究报告不能代替最新官方事实；后续涉及会变化的接口、模型、套餐
 和文档，要重新查官方页面。超时项明确标为未核实。
@@ -203,9 +205,9 @@ UI persona。本机的 `trace-lab` 真实试验也说明：星域能提供不同
 
 **该学什么**
 
-- 把“探索 / 实现 / 验证”三种认知姿态做成可选角色；
-- 验证角色只读、不能改代码、不能自己给自己盖章；
-- 角色输出要带证据路径和“不能推出什么”。
+- 只学“独立验证”这个流程：验证者只读、不能改代码、不能自己给自己盖章；
+- 验证输出要带证据路径和“不能推出什么”；
+- 但不要把验证流程包装成星域、人格或角色系统。
 
 **不要学什么**
 
@@ -228,7 +230,33 @@ UI persona。本机的 `trace-lab` 真实试验也说明：星域能提供不同
 复杂任务只在工具权限和流程上区分“只读检查 / 执行修改 / 验收”；不再新增
 星域 UI、星域提示词或议会。
 
-### 3.4 记忆
+### 3.4 Pi
+
+GitHub `earendil-works/pi` README 明确写它自己是 **minimal, extensible agent
+harness**，默认跳过 sub-agents 和 plan mode，让用户通过 extensions、skills、
+prompt templates、packages 自己组装。
+
+它的 monorepo 边界：
+
+- `pi-ai`：统一多 provider LLM API；
+- `pi-agent-core`：agent runtime + tool calling + state；
+- `pi-durable`：持久化 conversation/task/document；
+- `pi-coding-agent`：交互式 coding CLI；
+- `pi-tui`：差分渲染终端 UI；
+- `chord`：跨进程对象/插件运行时；
+- `pi-telemetry`：厂商无关遥测契约。
+
+**值得学：** 核心小、包边界清楚、agent core 与 UI 分离、`print`/JSON/RPC/SDK
+多入口、可扩展但不把扩展塞进核心。
+
+**不能直接学：** README 明确说 Pi 不自带文件系统/进程/网络/凭据权限系统，
+默认继承启动用户的权限；需要容器或外部沙箱。我们的 Windows 桌面必须保留
+自己的权限、审批和路径边界。
+
+**我们的决定：** 学 Pi 的分层和小核心；不学它“默认不管权限”和“用户自己装
+一堆扩展才算完整”的产品体验。
+
+### 3.5 记忆
 
 **成熟项目**
 
@@ -254,7 +282,7 @@ UI persona。本机的 `trace-lab` 真实试验也说明：星域能提供不同
 
 P1 先做项目级约束；跨会话记忆 P2。
 
-### 3.5 Skills / MCP / 插件 / Hooks
+### 3.6 Skills / MCP / 插件 / Hooks
 
 **共同规律**
 
@@ -280,7 +308,7 @@ P1 先做项目级约束；跨会话记忆 P2。
 
 MCP 和 Skills 在 P2；先完成工具协议和会话存储。
 
-### 3.6 子代理 / 议会 / Galaxy
+### 3.7 子代理 / 议会 / Galaxy
 
 **成熟项目**
 
@@ -306,7 +334,7 @@ MCP 和 Skills 在 P2；先完成工具协议和会话存储。
 
 等单 agent 稳定后再做；先做只读 verifier。
 
-### 3.7 定时任务 / 后台任务 / Worktree
+### 3.8 定时任务 / 后台任务 / Worktree
 
 - 定时任务适合日报、巡检、依赖检查，但要求电脑开机、应用运行；
 - 后台任务适合长命令，但必须能停、能看输出、能杀进程树；
@@ -315,7 +343,7 @@ MCP 和 Skills 在 P2；先完成工具协议和会话存储。
 我们的顺序：先做后台任务和可停止的子进程，再考虑 worktree，最后才做定时
 任务。不要在没解决进程管理前做“无人值守自动改代码”。
 
-### 3.8 Office / Artifacts / 图片 / 语音
+### 3.9 Office / Artifacts / 图片 / 语音
 
 - Office 插件适合文档处理，但依赖重、格式兼容复杂，不是引擎核心；
 - Artifacts 适合把长输出变成可查看文件，但要版本、来源、下载；
@@ -324,7 +352,7 @@ MCP 和 Skills 在 P2；先完成工具协议和会话存储。
 
 这些功能可以学交互和产物管理，但不建议现在做。
 
-### 3.9 审查 / Diff / 检查点
+### 3.10 审查 / Diff / 检查点
 
 这是我们已经领先的部分，不应为了“像 Codex”而推倒：
 
