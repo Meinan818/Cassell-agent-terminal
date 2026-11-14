@@ -1,17 +1,17 @@
-# 卡塞尔专员终端 (Cassell Agent Terminal) — v0.1.0 MVP
+# 卡塞尔专员终端 (Cassell Agent Terminal) — v0.1.9 稳定线
 
 卡塞尔学院配发给专员的日常执行终端。AI 是诺玛；打开 EVA 开关后，诺玛切换为
 EVA 模式（并行编排 + 交叉核查）。对标 Codex / Claude Code 的产品级 AI agent
 桌面端，龙族只留身份与语境，功能全部叫本名。
 
-**这是一个能用的版本，不是模型稿。** 发消息会真的跑 Codex CLI 做事，改文件、
+**这是一个能用的版本，不是模型稿。** 发消息会真的跑原生 Rust agent 做事，改文件、
 跑命令、审查变更都接在真实的 Git 状态上。
 
 ## 技术栈
 
 - **Tauri 2 + React 19 + TypeScript**（桌面壳）
-- **执行引擎：开源 Codex CLI**（`openai/codex`，Apache 2.0），后端直接驱动
-  `codex exec --json`，逐行解析 JSONL 事件流回聊天界面
+- **执行引擎：原生 Rust agent**，后端直接调用 OpenAI 兼容的
+  `/chat/completions`；Codex CLI 入口保留作兼容，不再依赖它跑默认对话
 - **模型路线：BYOK** — 你自己在设置里填各家 API Key（DeepSeek / Kimi / 千问 /
   OpenAI），Key 只保存在本机设置文件，不上传
 
@@ -48,7 +48,7 @@ EVA 模式（并行编排 + 交叉核查）。对标 Codex / Claude Code 的产�
    `node --version` / `npm --version`
 2. **Rust（stable）**：去 [rustup.rs](https://rustup.rs) 下 `rustup-init.exe`，
    一路默认装完，**关掉重开命令行**，确认：`cargo --version`
-3. **Codex CLI**（执行引擎）：
+3. **可选：Codex CLI**（兼容入口，不是默认执行引擎）：
    `npm install -g @openai/codex`，确认：`codex --version`
 4. **WebView2**：Windows 10/11 自带，一般不用装；没有的话去微软官网装
    WebView2 Runtime。
@@ -141,4 +141,5 @@ npm run tauri build  # 打包
 
 ## 许可证
 
-应用本身随仓库协议；执行引擎 Codex CLI 为 Apache 2.0（openai/codex）。
+应用默认执行引擎为原生 Rust agent；Codex CLI 兼容入口遵循 Apache 2.0
+（openai/codex）。

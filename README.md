@@ -43,4 +43,4 @@ docs/
   research/   功能调研与对标
 ```
 
-应用脚手架（Tauri 2 + React + TS）待接入。
+应用代码在 `app/`；当前稳定线为 0.1.9（Tauri 2 + React + TS + 原生 Rust agent）。
