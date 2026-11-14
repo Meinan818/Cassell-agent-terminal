@@ -326,6 +326,7 @@ struct TurnCtx {
     session_id: String,
     tools: Value,
     system_with_appendix: String,
+    context_window: usize,
 }
 
 /// 单回合的产出（交给目标循环汇总）。
@@ -387,6 +388,33 @@ async fn run_inner_turn(
         if state.native_cancel.load(Ordering::SeqCst) {
             cancelled = true;
             break 'rounds;
+        }
+        // D1/D2：超过窗口 80% 时先把旧消息归档，再用确定性摘要替换。
+        // 原文写入 sessions/archive/，活动上下文只保留最近一段。
+        if let Some(compacted) =
+            crate::engine::compact::compact_messages(messages, ctx.context_window)
+        {
+            let _ = crate::engine::session::archive_messages(
+                &app,
+                &ctx.session_id,
+                &compacted.removed,
+            );
+            let _ = crate::engine::journal::append(
+                &app,
+                &ctx.session_id,
+                crate::engine::journal::EngineEventKind::ContextCompacted {
+                    before_tokens: compacted.before_tokens,
+                    after_tokens: compacted.after_tokens,
+                    removed_messages: compacted.removed.len(),
+                    summary_chars: compacted.summary.chars().count(),
+                },
+            );
+            eprintln!(
+                "[compact] {} → {} tokens, removed {} messages",
+                compacted.before_tokens,
+                compacted.after_tokens,
+                compacted.removed.len()
+            );
         }
         session.rounds_used += 1;
         // P0-1：发请求时只发“冻结前缀 + 附录”的 system 正文。
@@ -1068,6 +1096,7 @@ async fn run_agent_native_inner(
             provider.kind, req.model, wire_model
         );
     }
+    let context_window = crate::engine::context::context_window_tokens(&wire_model);
     // P0-8：turn_ctx 用上面已定好的生效档位（NORMA 收紧过的），不再重算。
     let turn_ctx = TurnCtx {
         model: wire_model,
@@ -1095,6 +1124,7 @@ async fn run_agent_native_inner(
             .unwrap_or_else(|| "default".to_string()),
         tools: frozen.tools.clone(),
         system_with_appendix: frozen.with_appendix(&appendix),
+        context_window,
     };
 
     let mut final_text = String::new();

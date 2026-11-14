@@ -50,6 +50,12 @@ pub enum EngineEventKind {
         id: String,
         allow: bool,
     },
+    ContextCompacted {
+        before_tokens: usize,
+        after_tokens: usize,
+        removed_messages: usize,
+        summary_chars: usize,
+    },
     RetryScheduled {
         attempt: u32,
         status: Option<u16>,
