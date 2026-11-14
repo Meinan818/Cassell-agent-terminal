@@ -17,8 +17,10 @@
 - 旧 Codex CLI 引擎已移除（`codex.rs` 删除，`RunState` 独立到 `run_state.rs`）；产品只保留“配 base_url + API Key”的原生 HTTP 引擎。
 - B 的一部分：`engine/session.rs` 目标会话落盘，重启后可继续。
 - C1-C3：`ToolOutcome` 结构化结果（状态/错误/耗时进事件和 journal）；工具卡不再反解文本；审批支持“批准一次 / 本次会话允许 / 拒绝”，并按任务缓存会话级批准。
+- D1/D2 第一版：上下文 token 估算 + 80% 触发；超预算时把旧消息归档到 `sessions/archive/`，活动上下文保留最近一段并插入确定性归档摘要。D3 的 CacheAdvisor 公式已落地并带单测，尚未接真实命中率遥测。
+- 真实反代冒烟：本机 `127.0.0.1:7863/v1` + `cn:hy4free` 成功返回；中文请求解码后为“正常”，prompt 78 / completion 37 tokens，新请求 cached 0。密钥未写入仓库或日志。
 
-下一步：D1-D5（上下文预算/压缩/归档/上下文仪表），最后 E（Windows 验收/0.2.0）。
+下一步：D4/D5（压缩模型、上下文仪表），最后 E（Windows 验收/0.2.0）。
 
 ## 0. 总原则
 
