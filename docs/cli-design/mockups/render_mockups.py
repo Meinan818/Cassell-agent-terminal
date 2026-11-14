@@ -14,20 +14,67 @@ BASE = "/home/hatch/workspace/cassell-agent/cli-design/mockups"
 # The user called the old look "a plain black terminal". So the base is
 # no longer near-black: a deep navy with layered panels, an ice-blue
 # accent, and a solid status bar. No gold anywhere (iron rule).
-BG = (11, 18, 32)          # deep navy #0b1220 (was #141413 near-black)
-BG_SOFT = (20, 29, 51)     # panel #141d33
-BG_PANEL = (26, 39, 69)     # header band #1a2745
-BORDER = (42, 58, 95)       # panel border #2a3a5f
-TEXT = (232, 230, 220)
-TEXT2 = (168, 180, 200)     # blue-gray (was plain gray)
-TEXT3 = (90, 106, 133)      # muted blue-gray
-BLUE = (96, 165, 250)
-CYAN = (103, 232, 249)      # secondary accent #67e8f9
-GREEN = (120, 140, 93)
-RED = (196, 84, 74)
-YELLOW = (184, 154, 74)
-DIFF_ADD_BG = (34, 48, 32)
-DIFF_DEL_BG = (52, 32, 30)
+# Two palettes (design doc §4 dark/light). set_theme() swaps the globals
+# so every helper below works for both themes unchanged.
+DARK = {
+    "BG": (11, 18, 32),          # deep navy #0b1220
+    "BG_SOFT": (20, 29, 51),     # panel #141d33
+    "BG_PANEL": (26, 39, 69),    # header band #1a2745
+    "BORDER": (42, 58, 95),      # panel border #2a3a5f
+    "TEXT": (232, 230, 220),
+    "TEXT2": (168, 180, 200),    # blue-gray
+    "TEXT3": (90, 106, 133),     # muted blue-gray
+    "BLUE": (96, 165, 250),
+    "CYAN": (103, 232, 249),     # secondary accent #67e8f9
+    "GREEN": (120, 140, 93),
+    "RED": (196, 84, 74),
+    "YELLOW": (184, 154, 74),
+    "DIFF_ADD_BG": (34, 48, 32),
+    "DIFF_DEL_BG": (52, 32, 30),
+}
+LIGHT = {
+    "BG": (250, 249, 245),       # #faf9f5
+    "BG_SOFT": (232, 230, 220),  # #e8e6dc
+    "BG_PANEL": (255, 255, 255), # #ffffff
+    "BORDER": (216, 213, 204),   # #d8d5cc
+    "TEXT": (20, 20, 19),        # #141413
+    "TEXT2": (107, 104, 98),     # #6b6862
+    "TEXT3": (163, 158, 147),    # #a39e93
+    "BLUE": (37, 99, 235),       # #2563eb
+    "CYAN": (8, 145, 178),       # #0891b2
+    "GREEN": (92, 114, 71),      # #5c7247
+    "RED": (168, 62, 53),        # #a83e35
+    "YELLOW": (138, 109, 31),    # #8a6d1f
+    "DIFF_ADD_BG": (232, 240, 232),  # light green tint
+    "DIFF_DEL_BG": (248, 232, 230),  # light red tint
+}
+
+
+def set_theme(name):
+    """Switch the active palette ('dark' default, 'light'). All helpers
+    read the module globals, so a swap here re-themes every mockup.
+    The status bar keeps working in both: its text color is BG, which is
+    dark-on-blue in dark theme and near-white-on-blue in light theme."""
+    global BG, BG_SOFT, BG_PANEL, BORDER, TEXT, TEXT2, TEXT3
+    global BLUE, CYAN, GREEN, RED, YELLOW, DIFF_ADD_BG, DIFF_DEL_BG
+    pal = LIGHT if name == "light" else DARK
+    BG = pal["BG"]
+    BG_SOFT = pal["BG_SOFT"]
+    BG_PANEL = pal["BG_PANEL"]
+    BORDER = pal["BORDER"]
+    TEXT = pal["TEXT"]
+    TEXT2 = pal["TEXT2"]
+    TEXT3 = pal["TEXT3"]
+    BLUE = pal["BLUE"]
+    CYAN = pal["CYAN"]
+    GREEN = pal["GREEN"]
+    RED = pal["RED"]
+    YELLOW = pal["YELLOW"]
+    DIFF_ADD_BG = pal["DIFF_ADD_BG"]
+    DIFF_DEL_BG = pal["DIFF_DEL_BG"]
+
+
+set_theme("dark")
 
 # ---- fonts ----
 FS = 17
@@ -179,20 +226,27 @@ def result_row(draw, row, text, color=TEXT3):
 # ============================================================
 # Mockup 1 — Welcome
 # ============================================================
-def mockup_welcome():
+def mockup_welcome(suffix=""):
     # Beautified welcome (2026-11-14): the user called the old welcome
     # "a plain black terminal, an ugly blue mascot, a pile of text".
     # So this is a real beautification, not another layout tweak:
     #   - deep navy background (not black) + layered panels = depth
-    #   - a big title band up top (the academy, not a text line)
+    #   - a solid ice-blue status bar anchoring the TOP (row 0, per
+    #     design doc §3/§5 S1: status row A is unified at the top of
+    #     every screen, 2026-11-15 user decision)
+    #   - a big title band below it (the academy, not a text line)
     #   - the welcome content on ONE rounded panel (fill + border),
     #     sections marked with icons and accent colours, not bare text
     #   - the mascot shrunk to a small badge in the header (it is an
     #     accent now, not the centrepiece)
-    #   - a solid ice-blue status bar anchoring the bottom
     img, d = new_canvas()
     f_title = ImageFont.truetype(NOTO_B, 32, index=IDX)
     f_sub = f_noto
+
+    # Status row A on row 0 (design doc §5 S1: top of screen, above the
+    # title band). Content unchanged: no permission tier here (that is a
+    # separate audit item, not this fix).
+    status_a(d, 0, ctx="上下文 0%", branch="main")
 
     # Desktop pet (2026-11-14 §2.4): the mascot is not a parked badge
     # any more — it lives on the top layer and wanders back and forth.
@@ -206,7 +260,8 @@ def mockup_welcome():
     mascot = mascot.resize((mw, mh), Image.NEAREST)
 
     # --- header band: big title + subtitle + small mascot badge ---
-    hb_y0, hb_y1 = y_of(0), y_of(2) + ROW_H
+    # Starts on row 1 now (status row A took row 0); still 3 rows tall.
+    hb_y0, hb_y1 = y_of(1), y_of(3) + ROW_H
     d.rectangle([PAD, hb_y0, W - PAD, hb_y1], fill=BG_PANEL)
     # thin ice accent line under the band
     d.line([(PAD, hb_y1), (W - PAD, hb_y1)], fill=BLUE, width=2)
@@ -218,62 +273,62 @@ def mockup_welcome():
     img.paste(mascot, (int(W * 0.62), hb_y0 + 6), mascot)
 
     # --- welcome card: one rounded panel holding everything ---
+    # Shifted down 1 row (status row A took row 0); content unchanged,
+    # every interior row number +1.
     cx0, cx1 = PAD, W - PAD
-    cy0, cy1 = y_of(4), y_of(18) + ROW_H
+    cy0, cy1 = y_of(5), y_of(19) + ROW_H
     d.rounded_rectangle([cx0, cy0, cx1, cy1], radius=10,
                         fill=BG_SOFT, outline=BORDER, width=1)
 
     # greeting
-    line(d, 5, [("欢迎你，路专员", TEXT, True)], x=PAD + 20)
-    line(d, 6, [("S2017-0117  ·  ", TEXT2, False),
-                ("血统 S", BLUE, True),
-                ("  ·  学院唯一的 S 级学生", TEXT3, False)], x=PAD + 20)
+    line(d, 6, [("欢迎你，路专员", TEXT, True)], x=PAD + 20)
+    line(d, 7, [("S2017-0117  ·  ", TEXT2, False),
+                ("学院唯一的 S 级学生", TEXT3, False)], x=PAD + 20)
     # today spirit (accent row)
-    line(d, 8, [("◆ ", CYAN, True),
+    line(d, 9, [("◆ ", CYAN, True),
                 ("今日言灵  ", TEXT, True),
                 ("时间零 (84)  ·  昂热  ·  延缓时间", TEXT2, False)], x=PAD + 20)
     # divider inside the card
-    d.line([(cx0 + 20, y_of(9) + ROW_H // 2),
-            (cx1 - 20, y_of(9) + ROW_H // 2)], fill=BORDER, width=1)
+    d.line([(cx0 + 20, y_of(10) + ROW_H // 2),
+            (cx1 - 20, y_of(10) + ROW_H // 2)], fill=BORDER, width=1)
 
     # two columns: recent sessions | quick entries
     mid_x = PAD + 40 * CJK_W
     lx, rx = PAD + 20, int(mid_x) + 20
-    line(d, 10, [("◈ ", BLUE, True), ("最近的会话", TEXT, True)], x=lx)
-    line(d, 11, [("·  ", TEXT3, False), ("登录接口超时调整", TEXT2, False),
+    line(d, 11, [("◈ ", BLUE, True), ("最近的会话", TEXT, True)], x=lx)
+    line(d, 12, [("·  ", TEXT3, False), ("登录接口超时调整", TEXT2, False),
                  ("（2 小时前）", TEXT3, False)], x=lx)
-    line(d, 12, [("·  ", TEXT3, False), ("毕业设计任务书整理", TEXT2, False),
+    line(d, 13, [("·  ", TEXT3, False), ("毕业设计任务书整理", TEXT2, False),
                  ("（昨天）", TEXT3, False)], x=lx)
-    line(d, 10, [("▶ ", CYAN, True), ("常用入口", TEXT, True)], x=rx)
-    line(d, 11, [("/resume", BLUE, False), ("  继续上次会话   ", TEXT2, False),
+    line(d, 11, [("▶ ", CYAN, True), ("常用入口", TEXT, True)], x=rx)
+    line(d, 12, [("/resume", BLUE, False), ("  继续上次会话   ", TEXT2, False),
                  ("/new", BLUE, False), ("  新会话", TEXT2, False)], x=rx)
-    line(d, 12, [("/model", BLUE, False), ("   换模型          ", TEXT2, False),
+    line(d, 13, [("/model", BLUE, False), ("   换模型          ", TEXT2, False),
                  ("/help", BLUE, False), ("  全部命令", TEXT2, False)], x=rx)
     # divider inside the card
-    d.line([(cx0 + 20, y_of(13) + ROW_H // 2),
-            (cx1 - 20, y_of(13) + ROW_H // 2)], fill=BORDER, width=1)
+    d.line([(cx0 + 20, y_of(14) + ROW_H // 2),
+            (cx1 - 20, y_of(14) + ROW_H // 2)], fill=BORDER, width=1)
 
     # shortcuts strip
-    line(d, 14, [("⌘ ", BLUE, True), ("快捷键  ", TEXT, True),
+    line(d, 15, [("⌘ ", BLUE, True), ("快捷键  ", TEXT, True),
                  ("Shift+Tab", TEXT2, False), (" 切模式  ·  ", TEXT3, False),
                  ("Tab", TEXT2, False), (" 排队  ·  ", TEXT3, False),
                  ("Ctrl+O", TEXT2, False), (" 转录  ·  ", TEXT3, False),
                  ("?", TEXT2, False), (" 帮助", TEXT3, False)], x=PAD + 20)
-    line(d, 15, [("输入问题，诺玛会调阅学院档案帮你处理。按 ", TEXT3, False),
+    line(d, 16, [("输入问题，诺玛会调阅学院档案帮你处理。按 ", TEXT3, False),
                  ("/", TEXT2, False), (" 查看全部命令。", TEXT3, False)],
          x=PAD + 20)
-    line(d, 17, [("按 ", TEXT3, False), ("Shift+Tab", TEXT2, False),
+    line(d, 18, [("按 ", TEXT3, False), ("Shift+Tab", TEXT2, False),
                  (" 切换 NORMA / EVA；工作时按 ", TEXT3, False),
                  ("Tab", TEXT2, False), (" 排队下一条，", TEXT3, False),
                  ("esc", TEXT2, False), (" 随时中断。", TEXT3, False)],
          x=PAD + 20)
 
-    status_a(d, 20, ctx="上下文 0%", branch="main")
     divider(d, 21)
     input_row(d, 22)
     status_c_idle(d, 23)
-    img.save(f"{BASE}/mockup-01-welcome.png")
-    print("saved mockup-01-welcome.png")
+    img.save(f"{BASE}/mockup-01-welcome{suffix}.png")
+    print(f"saved mockup-01-welcome{suffix}.png")
 
 
 # ============================================================
@@ -358,3 +413,7 @@ if __name__ == "__main__":
     mockup_welcome()
     mockup_main()
     mockup_approval()
+    # Light theme: welcome only (02/03 light versions are rendered the
+    # same way by their own runs; keep this file's scope to mockup-01).
+    set_theme("light")
+    mockup_welcome(suffix="-light")
