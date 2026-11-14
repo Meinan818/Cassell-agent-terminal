@@ -385,23 +385,24 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                 }
             }
             tools_run.push(format!("执行 `{cmd}`"));
-            #[cfg(windows)]
-            let out = {
+            let mut c = if cfg!(windows) {
                 let mut c = tokio::process::Command::new("cmd");
-                c.args(["/C", cmd]).current_dir(&ctx.workdir);
-                crate::hide_console(&mut c);
-                c.kill_on_drop(true);
-                tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await
-            };
-            #[cfg(not(windows))]
-            let out = {
+                c.args(["/C", cmd]);
+                c
+            } else {
                 let mut c = tokio::process::Command::new("sh");
-                c.args(["-c", cmd]).current_dir(&ctx.workdir);
-                c.kill_on_drop(true);
-                tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await
+                c.args(["-c", cmd]);
+                c
             };
+            c.current_dir(&ctx.workdir);
+            crate::hide_console(&mut c);
+            let out = crate::engine::process::output_with_timeout(
+                c,
+                std::time::Duration::from_secs(120),
+            )
+            .await;
             match out {
-                Ok(Ok(o)) => {
+                Ok(crate::engine::process::RunOutput::Completed(o)) => {
                     let mut s = String::from_utf8_lossy(&o.stdout).to_string();
                     let err = String::from_utf8_lossy(&o.stderr).to_string();
                     if !err.trim().is_empty() {
@@ -415,10 +416,10 @@ pub(crate) async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools
                     }
                     s
                 }
-                Ok(Err(e)) => format!("执行失败：{e}"),
-                Err(_) => format!(
-                    "命令超时（120 秒），已终止直接子进程（孙进程可能仍在运行）：`{cmd}`"
+                Ok(crate::engine::process::RunOutput::TimedOut) => format!(
+                    "命令超时（120 秒），已尝试终止整棵进程树：`{cmd}`"
                 ),
+                Err(e) => format!("执行失败：{e}"),
             }
         }
         "open_browser" => {

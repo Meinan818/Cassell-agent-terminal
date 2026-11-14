@@ -560,6 +560,24 @@ const SNAP_SKIP_DIRS: &[&str] = &[
 /// 这条相对路径要不要进快照：跳过重型目录与隐藏目录（.cache 这类），
 /// 隐藏文件本身（如 .gitignore）照常进。
 fn snap_wanted(rel: &Path, is_dir: bool) -> bool {
+    let name = rel
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !is_dir
+        && (name == ".env"
+            || name.starts_with(".env.")
+            || name.ends_with(".pem")
+            || name.ends_with(".key")
+            || name == "id_rsa"
+            || name == "id_ed25519"
+            || name == ".git-credentials"
+            || name == ".npmrc"
+            || name == "settings.json")
+    {
+        // 目标快照不是备份工具：凭据、私钥、应用设置一律不进快照。
+        return false;
+    }
     for c in rel.components() {
         let s = c.as_os_str().to_string_lossy();
         if SNAP_SKIP_DIRS.contains(&s.as_ref()) {
@@ -978,9 +996,11 @@ pub fn rewind_code(app: &AppHandle, goal_id: &str, workdir: &str, turn: u32) -> 
     Ok(restored)
 }
 
-/// 用快照倒带：先把快照里的文件逐个恢复，再删掉快照里没有、工作区里
-/// 有的文件（第 N 回合之后新建的）。快照不完整时（超上限被截断）只
-/// 恢复、不删——宁可少删一个，不误删。
+/// 用快照倒带：只恢复快照里存在的文件，不删除快照外的文件。
+///
+/// 旧实现会删“快照里没有、工作区里有”的文件，包括用户在执行期间自己
+/// 新建的文件。没有可靠的“谁创建了这个文件”记录之前，倒带绝不删除任何
+/// 文件；宁可留下 agent 新建的文件让用户自己处理，也不误删用户数据。
 fn rewind_code_from_snapshot(
     app: &AppHandle,
     goal_id: &str,
@@ -1000,51 +1020,6 @@ fn rewind_code_from_snapshot(
         }
         std::fs::write(&target, bytes).map_err(|e| format!("恢复文件失败 {}：{e}", f.path))?;
         restored.push(format!("{}（恢复到第 {turn} 回合）", f.path));
-    }
-    if snap.complete {
-        // 删第 N 回合之后新建的文件：现在工作区里有、快照里没有的。
-        // 只对快照规则内的文件动手（重型目录、大文件本来就不进快照，不碰）。
-        let in_snap: std::collections::HashSet<&str> =
-            snap.files.iter().map(|f| f.path.as_str()).collect();
-        let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            let rd = match std::fs::read_dir(&dir) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-            for entry in rd.flatten() {
-                let path = entry.path();
-                let rel = match path.strip_prefix(root) {
-                    Ok(r) => r.to_path_buf(),
-                    Err(_) => continue,
-                };
-                let md = match std::fs::symlink_metadata(&path) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                if md.file_type().is_symlink() {
-                    continue;
-                }
-                if md.is_dir() {
-                    if snap_wanted(&rel, true) {
-                        stack.push(path);
-                    }
-                    continue;
-                }
-                if !md.is_file() || !snap_wanted(&rel, false) {
-                    continue;
-                }
-                if md.len() > SNAP_MAX_FILE_BYTES {
-                    continue;
-                }
-                let rel_str = rel.to_string_lossy().replace('\\', "/");
-                if !in_snap.contains(rel_str.as_str()) {
-                    if std::fs::remove_file(&path).is_ok() {
-                        restored.push(format!("{rel_str}（第 {turn} 回合后新建的，已删除）"));
-                    }
-                }
-            }
-        }
     }
     restored.sort();
     Ok(restored)
@@ -1192,6 +1167,20 @@ pub async fn clear_goal_cmd(
 ) -> Result<(), String> {
     let mut map = state.goals.lock().await;
     map.remove(&goal_id);
+    Ok(())
+}
+
+/// 任务被永久删除时调用：同时清掉内存会话和磁盘检查点/快照。
+#[tauri::command]
+pub async fn purge_goal_data_cmd(
+    app: AppHandle,
+    state: tauri::State<'_, crate::run_state::RunState>,
+    goal_id: String,
+) -> Result<(), String> {
+    let mut map = state.goals.lock().await;
+    map.remove(&goal_id);
+    drop(map);
+    clear_checkpoints(&app, &goal_id);
     Ok(())
 }
 
@@ -1435,6 +1424,11 @@ mod tests {
         assert!(!snap_wanted(Path::new("node_modules/x.js"), false));
         assert!(!snap_wanted(Path::new(".git/config"), false));
         assert!(!snap_wanted(Path::new("target"), true));
+        assert!(!snap_wanted(Path::new(".env"), false));
+        assert!(!snap_wanted(Path::new(".env.local"), false));
+        assert!(!snap_wanted(Path::new("certs/private.pem"), false));
+        assert!(!snap_wanted(Path::new("id_rsa"), false));
+        assert!(!snap_wanted(Path::new("settings.json"), false));
         assert!(snap_wanted(Path::new("src/main.rs"), false));
         assert!(snap_wanted(Path::new(".gitignore"), false));
     }

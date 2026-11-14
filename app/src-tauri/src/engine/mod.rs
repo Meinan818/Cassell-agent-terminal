@@ -10,5 +10,6 @@ pub mod context;
 pub mod edit;
 pub mod modes;
 pub mod policy;
+pub mod process;
 pub mod tooling;
 pub mod tool_pipeline;

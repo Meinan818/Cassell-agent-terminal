@@ -3044,10 +3044,12 @@ export default function App() {
   const handleDeleteTask = (id: string) => {
     setTasks((prev) => prev.filter((x) => x.id !== id));
     if (activeTaskIdRef.current === id) setActiveTaskId(null);
+    invoke("purge_goal_data_cmd", { goalId: id }).catch(() => undefined);
     showNotice("任务已删除。");
   };
   const handleDeleteArchivedTask = (id: string) => {
     setTasks((prev) => prev.filter((x) => x.id !== id));
+    invoke("purge_goal_data_cmd", { goalId: id }).catch(() => undefined);
     showNotice("已彻底删除。");
   };
 

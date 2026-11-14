@@ -69,6 +69,7 @@ pub fn run() {
             goal::list_checkpoints_cmd,
             goal::rewind_checkpoint_cmd,
             goal::clear_goal_cmd,
+            goal::purge_goal_data_cmd,
             fsutil::list_files,
             fsutil::read_file,
             fsutil::read_file_base64,
