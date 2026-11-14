@@ -90,6 +90,9 @@ export interface ChatMsg {
     cached?: number;
     costUsd?: number;
     savedUsd?: number;
+    /** 本轮结束时的估算上下文占用 / 当前模型的上下文窗口。 */
+    contextUsed?: number;
+    contextWindow?: number;
   };
   /** 本轮撞到总预算上限或卡住：下方挂一句说明（没有“继续”按钮——
       8 轮只是内部单回合单位，普通对话也会自动续跑到预算；想继续直接发消息）。 */
@@ -230,6 +233,8 @@ export interface AgentResult {
   /** P0-10：缓存命中 tokens（服务商没报时为 null）；花费与节省是按 DeepSeek
       官方价目估算的 USD，模型没收录价目时为 null（面板显示“—”）。 */
   cached_tokens?: number | null;
+  context_tokens?: number;
+  context_window?: number;
   cost_usd?: number | null;
   saved_usd?: number | null;
   tools_run: string[];

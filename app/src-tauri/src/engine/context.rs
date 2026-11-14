@@ -7,17 +7,6 @@
 pub const TOOL_RESULT_HEAD_CHARS: usize = 4096;
 pub const TOOL_RESULT_TAIL_CHARS: usize = 1024;
 
-/// Conservative context windows. DeepSeek V4.1 exposes 1M; other BYOK
-/// providers get a safer 128k default until the model catalog carries a
-/// per-model window.
-pub fn context_window_tokens(model: &str) -> usize {
-    if model.to_ascii_lowercase().contains("deepseek") {
-        1_000_000
-    } else {
-        128_000
-    }
-}
-
 /// Rough token estimate: CJK characters count as one token, other printable
 /// characters as roughly four per token. It is only used for budget decisions,
 /// never for billing or display of "real" usage.
@@ -91,7 +80,7 @@ mod tests {
     fn token_estimate_is_conservative_for_chinese() {
         assert!(estimate_tokens("你好世界") >= 4);
         assert!(estimate_tokens("hello world") >= 2);
-        assert_eq!(context_window_tokens("deepseek-flash"), 1_000_000);
-        assert_eq!(context_window_tokens("gpt-6.1"), 128_000);
+        assert_eq!(crate::models::context_window("direct", "deepseek-flash"), 1_000_000);
+        assert_eq!(crate::models::context_window("direct", "gpt-6.1"), 131_072);
     }
 }

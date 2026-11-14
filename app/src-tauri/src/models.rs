@@ -100,6 +100,80 @@ pub fn default_compression_model() -> String {
     "deepseek-flash".to_string()
 }
 
+/// Per-model runtime capabilities. This is intentionally a small, explicit
+/// table: context window and cache behavior must follow the selected model,
+/// not one global constant. Unknown models get a safe 128k fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelCaps {
+    pub context_window: usize,
+    pub max_output: usize,
+    /// "exact_prefix" for DeepSeek-style prefix caching, "none" otherwise.
+    pub cache: &'static str,
+    pub reasoning_effort: bool,
+}
+
+pub fn capabilities(model: &str) -> ModelCaps {
+    let m = model.trim().to_ascii_lowercase();
+    if m.contains("deepseek") {
+        return ModelCaps {
+            context_window: 1_000_000,
+            max_output: 384_000,
+            cache: "exact_prefix",
+            reasoning_effort: true,
+        };
+    }
+    if m.starts_with("moonshot-v1-8k") {
+        return ModelCaps {
+            context_window: 8_192,
+            max_output: 8_192,
+            cache: "none",
+            reasoning_effort: false,
+        };
+    }
+    if m.starts_with("moonshot-v1-32k") {
+        return ModelCaps {
+            context_window: 32_768,
+            max_output: 32_768,
+            cache: "none",
+            reasoning_effort: false,
+        };
+    }
+    if m.starts_with("moonshot-v1-128k") {
+        return ModelCaps {
+            context_window: 131_072,
+            max_output: 131_072,
+            cache: "none",
+            reasoning_effort: false,
+        };
+    }
+    if m.contains("kimi") {
+        return ModelCaps {
+            context_window: 262_144,
+            max_output: 262_144,
+            cache: "none",
+            reasoning_effort: false,
+        };
+    }
+    if m.contains("qwen") {
+        return ModelCaps {
+            context_window: 131_072,
+            max_output: 65_536,
+            cache: "none",
+            reasoning_effort: false,
+        };
+    }
+    ModelCaps {
+        context_window: 131_072,
+        max_output: 65_536,
+        cache: "none",
+        reasoning_effort: false,
+    }
+}
+
+pub fn context_window(kind: &str, model: &str) -> usize {
+    capabilities(&resolve_model(kind, model)).context_window
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,5 +214,15 @@ mod tests {
         let (same, none) = migrate_model_id("deepseek-flash");
         assert_eq!(same, "deepseek-flash");
         assert!(none.is_none());
+    }
+
+    #[test]
+    fn context_window_follows_model() {
+        assert_eq!(context_window("direct", "deepseek-flash"), 1_000_000);
+        assert_eq!(context_window("direct", "kimi-k2"), 262_144);
+        assert_eq!(context_window("direct", "moonshot-v1-8k"), 8_192);
+        assert_eq!(context_window("direct", "unknown-model"), 131_072);
+        // Relay maps the alias first, then reads the same capability table.
+        assert_eq!(context_window("relay", "deepseek-flash"), 1_000_000);
     }
 }

@@ -49,6 +49,7 @@ import {
   SettingsModal,
   UsageDrawer,
   fmtHitRate,
+  fmtTokens,
   fmtUsd,
 } from "./components/Drawers";
 import { getCommands, type SettingsNav } from "./components/commands";
@@ -2536,6 +2537,8 @@ export default function App() {
                             cached: result.cached_tokens ?? undefined,
                             costUsd: result.cost_usd ?? undefined,
                             savedUsd: result.saved_usd ?? undefined,
+                            contextUsed: result.context_tokens,
+                            contextWindow: result.context_window,
                           }
                         : undefined;
                     if (result.cancelled) {
@@ -3387,6 +3390,13 @@ export default function App() {
   const usageCost = usageMessages.reduce((a, m) => a + (m.usage?.costUsd ?? 0), 0);
   const usageCostKnown = usageMessages.some((m) => m.usage?.costUsd != null);
   const usageSaved = usageMessages.reduce((a, m) => a + (m.usage?.savedUsd ?? 0), 0);
+  const lastUsage = usageMessages[usageMessages.length - 1]?.usage;
+  const contextWindow = lastUsage?.contextWindow ?? 0;
+  const contextUsed = lastUsage?.contextUsed ?? lastUsage?.prompt ?? 0;
+  const contextPct =
+    contextWindow > 0
+      ? Math.min(100, Math.round((contextUsed / contextWindow) * 100))
+      : null;
   // S9：工作流页要的本轮工具调用（从 kind:"tool" 的消息汇总；消息没有
   // 时间戳，故每步耗时仍显示“未接入”，不现凑）。
   const toolCallItems = messages
@@ -3889,7 +3899,7 @@ export default function App() {
 
         <div className="composer-slot">
           {/* P0-10：用量常驻行（输入框上方，一直可见；点开用量面板）。
-              上下文占比不显示：没有上下文窗口配置，百分比算不出来，不编一个假的。 */}
+              上下文占比按当前模型的窗口算；模型切换后窗口跟着换。 */}
           <button
             type="button"
             className="w2-usage"
@@ -3902,6 +3912,9 @@ export default function App() {
               <span>
                 本对话累计 ↑ {usagePrompt} · ↓ {usageCompletion} · 共 {usageTotal}{" "}
                 tokens（{usageMessages.length} 条回复）
+                {contextPct != null
+                  ? ` · 上下文 ${contextPct}% / ${fmtTokens(contextWindow)}`
+                  : ""}
                 {usagePrompt > 0
                   ? ` · 缓存 ${fmtHitRate(usagePrompt, usageCached)}`
                   : ""}

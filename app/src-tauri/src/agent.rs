@@ -94,6 +94,11 @@ pub struct AgentResult {
     /// P0-10：缓存命中 tokens（整轮累计求和；服务商没报时为 None）。
     /// 花费与节省是按 DeepSeek 官方价目估算的（USD），模型没收录价目时为 None。
     pub cached_tokens: Option<u64>,
+    /// Estimated final context size and the selected model's window.
+    #[serde(default)]
+    pub context_tokens: u64,
+    #[serde(default)]
+    pub context_window: u64,
     pub cost_usd: Option<f64>,
     pub saved_usd: Option<f64>,
     /// 本轮实际执行过的工具调用记录
@@ -1096,7 +1101,7 @@ async fn run_agent_native_inner(
             provider.kind, req.model, wire_model
         );
     }
-    let context_window = crate::engine::context::context_window_tokens(&wire_model);
+    let context_window = crate::models::context_window(&provider.kind, &wire_model);
     // P0-8：turn_ctx 用上面已定好的生效档位（NORMA 收紧过的），不再重算。
     let turn_ctx = TurnCtx {
         model: wire_model,
@@ -1272,6 +1277,9 @@ async fn run_agent_native_inner(
     if final_text.trim().is_empty() {
         final_text = "（模型没有返回文字内容）".to_string();
     }
+    let context_tokens =
+        crate::engine::context::estimate_messages_tokens(&session.messages) as u64;
+    let context_window = turn_ctx.context_window as u64;
     let goal_summary = if goal_mode {
         Some(session.summary())
     } else {
@@ -1343,6 +1351,8 @@ async fn run_agent_native_inner(
         } else {
             None
         },
+        context_tokens,
+        context_window,
         cost_usd,
         saved_usd,
         tools_run,
