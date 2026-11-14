@@ -416,9 +416,37 @@ async fn run_inner_turn(
                 .await
                 {
                     Ok(summary) => summary,
-                    Err(e) => {
-                        eprintln!("[compact] 压缩模型不可用，回退确定性摘要：{e}");
-                        crate::engine::compact::extractive_summary(&preview)
+                    Err(first_error) => {
+                        // 反代/自定义服务商常把压缩模型的 ID 映射错；这时
+                        // 不直接退回确定性摘要，先用当前主模型再试一次。
+                        if ctx.model.trim() != ctx.compression_model.trim() {
+                            eprintln!(
+                                "[compact] 压缩模型不可用，改用主模型重试：{first_error}"
+                            );
+                            match crate::engine::compact::summarize_with_model(
+                                &client,
+                                url,
+                                key,
+                                &ctx.provider,
+                                &ctx.model,
+                                &preview,
+                            )
+                            .await
+                            {
+                                Ok(summary) => summary,
+                                Err(second_error) => {
+                                    eprintln!(
+                                        "[compact] 主模型摘要也不可用，回退确定性摘要：{second_error}"
+                                    );
+                                    crate::engine::compact::extractive_summary(&preview)
+                                }
+                            }
+                        } else {
+                            eprintln!(
+                                "[compact] 压缩模型不可用，回退确定性摘要：{first_error}"
+                            );
+                            crate::engine::compact::extractive_summary(&preview)
+                        }
                     }
                 }
             };

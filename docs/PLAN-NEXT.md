@@ -21,10 +21,10 @@
 - 真实反代冒烟：本机 `127.0.0.1:7863/v1` + `cn:hy4free` 成功返回；中文请求解码后为“正常”，prompt 78 / completion 37 tokens，新请求 cached 0。密钥未写入仓库或日志。
 - 模型能力表：DeepSeek 1M、Kimi 256k、Moonshot 8k/32k/128k、Qwen 128k、未知模型 128k 兜底；模型切换后上下文窗口和压缩阈值跟着换。输入框上方现在显示“上下文 x% / 窗口”。
 - 按天枢 4.0.4 的做法补齐模型配置：每个模型可在设置里单独填写“上下文 / 最大输出”，留空时按模型名后缀（如 `-128k`、`-1m`）推断，再回落到 512K / 64K 默认；请求会带 `max_tokens`。本机 `cn:hy4free` 在 `max_tokens=65536` 下真实返回 `OK`。
-- D4：压缩时使用设置里的 `compression_model` 生成摘要；模型不可用、超时或返回空摘要时自动回退到确定性摘要，压缩不会阻塞主任务。压缩前原文仍然先归档。
-- E（基本通过）：Windows 真机启动通过；主界面、设置、模型切换、每模型上下文、`cn:hy4free` 真实对话（返回“正常”）、上下文占比、PTY 终端、内置浏览器页均跑通；0.2.0 安装包静默安装到独立目录、启动、静默卸载均已验证。Plan 模式真机通过：模型未使用固定 Markdown 标题，页面仍出现“确认执行 / 修改方案”；本次真实请求 721 tokens。审查队列真机通过：EVA 真实修改 `notes.txt`，diff 正常显示，未追踪文件拒绝后删除，已通过文件提交为 `8e43587`；期间发现“查看 diff”经 `cmd /C` 取流为空，已改为后端 `get_file_diff` 直接用参数调用 git。`cargo test` 100/100 通过。安装包：`D:\卡塞尔学院\windows-build\卡塞尔专员终端_0.2.0_x64-setup.exe`（构建产物在 `app/src-tauri/target/release/bundle/nsis/` 同名文件），11,306,557 字节，SHA-256 `9A17EEC852980D529D48836E31629C76B1C9248BDEDD99BC7B80B0E6DF9326E5`，安装器图标已是诺玛球（非 NSIS 默认）；截图证据在 `D:\卡塞尔学院\windows-build\evidence-20261114\`（Plan 修复为 `plan-fixed.png`，审查 diff 修复为 `review-diff-fixed.png`）。
+- D4：压缩时使用设置里的 `compression_model` 生成摘要；模型不可用、超时或返回空摘要时先用主模型重试，仍失败再回退到确定性摘要，压缩不会阻塞主任务。压缩前原文仍然先归档。
+- E（基本通过）：Windows 真机启动通过；主界面、设置、模型切换、每模型上下文、`cn:hy4free` 真实对话（返回“正常”）、上下文占比、PTY 终端、内置浏览器页均跑通；0.2.0 安装包静默安装到独立目录、启动、静默卸载均已验证。Plan 模式真机通过：模型未使用固定 Markdown 标题，页面仍出现“确认执行 / 修改方案”；本次真实请求 721 tokens。审查队列真机通过：EVA 真实修改 `notes.txt`，diff 正常显示，未追踪文件拒绝后删除，已通过文件提交为 `8e43587`；期间发现“查看 diff”经 `cmd /C` 取流为空，已改为后端 `get_file_diff` 直接用参数调用 git。压缩摘要真机通过：主模型上下文临时设为 8,000，触发 `23,939 → 7,207 tokens`、移除 6 条消息；`deepseek-flash` 在本机反代返回 400，已加入“压缩模型失败→主模型重试”，最终摘要 86 字由主模型生成，原文归档保留。`cargo test` 100/100 通过。安装包：`D:\卡塞尔学院\windows-build\卡塞尔专员终端_0.2.0_x64-setup.exe`（构建产物在 `app/src-tauri/target/release/bundle/nsis/` 同名文件），11,305,421 字节，SHA-256 `6068EA6C0E3F02668B2F7CD50A8190829A6F1D8ADAF83A4EEEFBF882517FBFBD`，安装器图标已是诺玛球（非 NSIS 默认）；截图/日志证据在 `D:\卡塞尔学院\windows-build\evidence-20261114\`（Plan 修复为 `plan-fixed.png`，审查 diff 修复为 `review-diff-fixed.png`，压缩回退日志为 `compact-fallback-err.log`）。
 
-下一步：补压缩摘要的真实模型触发，再做 0.2.0 完整验收收口。
+下一步：整理 0.2.0 发布记录与推送清单，等你决定是否 Push；不擅自推送。
 
 ## 0. 总原则
 
