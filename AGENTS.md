@@ -21,4 +21,5 @@
 
 - 保留现有 NORMA / EVA 双模式：NORMA 对标 Claude Cowork，EVA 对标 Claude Code。
 - 不采用天枢星域、星域投票、角色分层或额外人格层。
+- 不采用 DeepSeek Harness 的“一切皆插件”架构；核心模块保持明确，插件只做边缘扩展。
 - 不擅自改 UI、权限边界、凭据处理和生产数据规则。

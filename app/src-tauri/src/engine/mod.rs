@@ -8,3 +8,4 @@ pub mod retry;
 pub mod deepseek;
 pub mod context;
 pub mod edit;
+pub mod modes;

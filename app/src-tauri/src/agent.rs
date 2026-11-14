@@ -140,6 +140,7 @@ fn default_delete_confirm() -> String {
 /// - NORMA：读 + 写文档，没有 run_shell（办公不跑终端，见调研 §4.1 硬禁）；
 /// - EVA 执行模式：六项全有（读 / 写 / 命令 / 开浏览器 / 读终端）。
 fn tool_definitions(run_mode: &str, mode: &str) -> Value {
+    let mode_profile = crate::engine::modes::profile(mode);
     let mut tools = vec![
         json!({
             "type": "function",
@@ -176,7 +177,7 @@ fn tool_definitions(run_mode: &str, mode: &str) -> Value {
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": if mode == "eva" {
+            "description": if mode_profile.is_code {
                 "向工作区写入/覆盖一个文件。用于改代码。"
             } else {
                 "向工作区写入/覆盖一个办公文档（Markdown/纯文本等）。"
@@ -208,7 +209,7 @@ fn tool_definitions(run_mode: &str, mode: &str) -> Value {
             }
         }
     }));
-    if mode == "eva" {
+    if mode_profile.can_run_shell {
         tools.push(json!({
             "type": "function",
             "function": {
@@ -616,7 +617,7 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                 );
             }
             // P0-9 NORMA 硬禁：办公不跑终端。
-            if ctx.mode == "norma" {
+            if !crate::engine::modes::profile(&ctx.mode).can_run_shell {
                 return format!(
                     "我是诺玛，办公模式不跑终端命令。`{cmd}` 需要切到 EVA（工程模式）再跑。"
                 );
@@ -709,7 +710,7 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                     "计划模式：我现在只调查、不打开浏览器。`{url}` 已记进方案里，等你点「确认执行」后再打开。"
                 );
             }
-            if ctx.mode == "norma" {
+            if !crate::engine::modes::profile(&ctx.mode).can_use_browser {
                 return format!(
                     "我是诺玛，办公模式不在内置浏览器里开页面。`{url}` 需要切到 EVA（工程模式）再开。"
                 );
@@ -728,7 +729,7 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
             if ctx.run_mode == "plan" {
                 return "计划模式：我现在只调查、不读终端。".to_string();
             }
-            if ctx.mode == "norma" {
+            if !crate::engine::modes::profile(&ctx.mode).can_read_terminal {
                 return "我是诺玛，办公模式不读终端。需要切到 EVA（工程模式）再读。".to_string();
             }
             tools_run.push("读取终端输出".to_string());
