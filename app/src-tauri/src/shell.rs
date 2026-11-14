@@ -32,7 +32,10 @@ pub async fn run_shell(command: String, workdir: String) -> Result<ShellResult, 
     crate::hide_console(&mut cmd);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        // 超时后丢弃 output future 时，连带结束子进程，避免 git 等命令
+        // 卡住后在后端留下孤儿进程。
+        .kill_on_drop(true);
 
     let run = cmd.output();
     match tokio::time::timeout(std::time::Duration::from_secs(30), run).await {

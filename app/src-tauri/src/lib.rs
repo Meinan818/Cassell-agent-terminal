@@ -11,6 +11,7 @@ mod pty;
 mod sandbox;
 mod settings;
 mod shell;
+mod text;
 mod usage;
 
 use codex::RunState;
@@ -88,6 +89,7 @@ pub fn run() {
             browser::browser_hide,
             browser::browser_close,
             browser::browser_current,
+            browser::browser_screenshot,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

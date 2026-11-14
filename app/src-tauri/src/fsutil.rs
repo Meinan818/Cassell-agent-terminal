@@ -64,9 +64,12 @@ pub async fn read_file(path: String) -> Result<String, String> {
         return Err("二进制文件，无法预览".to_string());
     }
     let text = String::from_utf8_lossy(&bytes).to_string();
-    // Cap preview size.
+    // Cap preview size. 按字符边界截断：固定字节下标可能落在汉字中间。
     if text.len() > 200_000 {
-        Ok(format!("{}…\n（仅预览前 200KB）", &text[..200_000]))
+        Ok(format!(
+            "{}…\n（仅预览前 200KB）",
+            crate::text::truncate(&text, 200_000)
+        ))
     } else {
         Ok(text)
     }
@@ -180,41 +183,89 @@ pub async fn get_review(workdir: String) -> Result<ReviewState, String> {
         });
     }
 
-    // numstat: "<add>\t<del>\t<path>" (binary files use "-").
-    // HEAD includes both staged and unstaged changes so the review panel does
-    // not silently omit files already added to the index.
-    let numstat = git(&workdir, &["diff", "HEAD", "--numstat"])
-        .await
-        .unwrap_or_default();
+    // numstat: "<add>\t<del>\t<path>"（二进制用 "-"）。用 -z + quotePath=false
+    // 避免 Git 把中文/空格路径做 C 风格引号转义；rename 记录形如
+    // "add\tdel\t\0old\0new\0"。
+    let numstat = git(
+        &workdir,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "HEAD",
+            "--numstat",
+            "-z",
+        ],
+    )
+    .await
+    .unwrap_or_default();
     let mut stats: std::collections::HashMap<String, (u32, u32)> =
         std::collections::HashMap::new();
     let mut stats_known = std::collections::HashSet::new();
-    for line in numstat.lines() {
-        let mut parts = line.split('\t');
-        if let (Some(a), Some(d), Some(p)) = (parts.next(), parts.next(), parts.next()) {
-            let add = a.parse::<u32>().unwrap_or(0);
-            let del = d.parse::<u32>().unwrap_or(0);
-            stats.insert(p.to_string(), (add, del));
-            if a.parse::<u32>().is_ok() && d.parse::<u32>().is_ok() {
-                stats_known.insert(p.to_string());
-            }
-        }
-    }
-    // status --porcelain: "XY <path>" (untracked "??", staged "A ", etc.)
-    let status = git(&workdir, &["status", "--porcelain"]).await.unwrap_or_default();
-    let mut files: Vec<ReviewFile> = vec![];
-    for line in status.lines() {
-        if line.len() < 4 {
+    let records: Vec<&str> = numstat.split('\0').collect();
+    let mut i = 0;
+    while i < records.len() {
+        let rec = records[i];
+        i += 1;
+        if rec.is_empty() {
             continue;
         }
-        let code = &line[0..2];
-        let raw_path = line[3..].trim().to_string();
-        // Renames look like "R  old -> new".
-        let path = raw_path
-            .split(" -> ")
-            .last()
-            .unwrap_or(&raw_path)
-            .to_string();
+        let mut parts = rec.splitn(3, '\t');
+        let (Some(a), Some(d), Some(p)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        let add = a.parse::<u32>().unwrap_or(0);
+        let del = d.parse::<u32>().unwrap_or(0);
+        let path = if p.is_empty() {
+            // rename/copy：下一条是 old，再下一条是 new。
+            let _old = records.get(i).copied().unwrap_or("");
+            i += 1;
+            let new = records.get(i).copied().unwrap_or("");
+            i += 1;
+            new.to_string()
+        } else {
+            p.to_string()
+        };
+        if path.is_empty() {
+            continue;
+        }
+        stats.insert(path.clone(), (add, del));
+        if a.parse::<u32>().is_ok() && d.parse::<u32>().is_ok() {
+            stats_known.insert(path);
+        }
+    }
+    // status --porcelain -z: "XY <path>\0"；rename 记录后面还有一条 old path。
+    let status = git(
+        &workdir,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+        ],
+    )
+    .await
+    .unwrap_or_default();
+    let mut files: Vec<ReviewFile> = vec![];
+    let records: Vec<&str> = status.split('\0').collect();
+    let mut i = 0;
+    while i < records.len() {
+        let record = records[i];
+        i += 1;
+        if record.len() < 4 {
+            continue;
+        }
+        let code = &record[0..2];
+        let path = record[3..].to_string();
+        if path.is_empty() {
+            continue;
+        }
+        if code.contains('R') || code.contains('C') {
+            // rename/copy 的旧路径单独占下一条记录，显示只用新路径。
+            i += 1;
+        }
         let status_str = if code.contains('?') {
             "untracked"
         } else if code.contains('A') {
@@ -251,6 +302,7 @@ pub async fn revert_file(workdir: String, path: String) -> Result<String, String
     if workdir.trim().is_empty() || path.trim().is_empty() {
         return Err("参数不完整".to_string());
     }
+    validate_worktree_relative_path(&path)?;
     // Tracked changes restore from HEAD. Untracked and staged new files have
     // no HEAD version, so remove them only after the UI's explicit confirmation.
     let status = git(&workdir, &["status", "--porcelain", "--", &path])
@@ -274,23 +326,118 @@ pub async fn revert_file(workdir: String, path: String) -> Result<String, String
 /// 只接受工作区内的相对路径；用 `git add -- <paths>` + `git commit -m`
 /// 分两步走，不拼 shell 字符串，避免注入。这是用户在界面上点的显式
 /// 操作（和“拒绝→还原”一样），不是 agent 的写操作，不走审批。
+fn validate_worktree_relative_path(p: &str) -> Result<(), String> {
+    if p.trim().is_empty() {
+        return Err("文件路径不能为空".to_string());
+    }
+    let path = Path::new(p);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, std::path::Component::Prefix(_) | std::path::Component::RootDir))
+    {
+        return Err(format!("只接受工作区内的相对路径：{p}"));
+    }
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(format!("路径不能越出工作区：{p}"));
+    }
+    Ok(())
+}
+
 fn validate_commit_paths(paths: &[String]) -> Result<(), String> {
     if paths.is_empty() {
         return Err("没有要提交的文件".to_string());
     }
     for p in paths {
-        let path = Path::new(p);
-        if path.is_absolute() {
-            return Err(format!("只接受工作区内的相对路径：{p}"));
-        }
-        if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-            return Err(format!("路径不能越出工作区：{p}"));
-        }
-        if p.trim().is_empty() {
-            return Err("文件路径不能为空".to_string());
-        }
+        validate_worktree_relative_path(p)?;
     }
     Ok(())
+}
+
+/// 已暂存的 rename 映射：new path -> old path。
+/// `git commit --only` 只认命令行里列出的路径；如果只提交新路径，旧路径的
+/// 删除会被留在暂存区，导致 HEAD 里旧文件复活。
+async fn staged_rename_map(workdir: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    let out = git(
+        workdir,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--cached",
+            "--name-status",
+            "-z",
+        ],
+    )
+    .await
+    .unwrap_or_default();
+    let records: Vec<&str> = out.split('\0').collect();
+    let mut i = 0;
+    while i < records.len() {
+        let rec = records[i];
+        i += 1;
+        if !rec.starts_with('R') && !rec.starts_with('C') {
+            continue;
+        }
+        let old = records.get(i).copied().unwrap_or("");
+        i += 1;
+        let new = records.get(i).copied().unwrap_or("");
+        i += 1;
+        if !new.is_empty() && !old.is_empty() {
+            map.insert(new.to_string(), old.to_string());
+        }
+    }
+    map
+}
+
+/// 暂存区里所有路径（rename 同时算 old 和 new）。
+async fn staged_paths(workdir: &str) -> Vec<String> {
+    let out = git(
+        workdir,
+        &[
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--cached",
+            "--name-status",
+            "-z",
+        ],
+    )
+    .await
+    .unwrap_or_default();
+    let records: Vec<&str> = out.split('\0').collect();
+    let mut paths = Vec::new();
+    let mut i = 0;
+    while i < records.len() {
+        let rec = records[i];
+        i += 1;
+        if rec.is_empty() {
+            continue;
+        }
+        if rec.starts_with('R') || rec.starts_with('C') {
+            let old = records.get(i).copied().unwrap_or("");
+            i += 1;
+            let new = records.get(i).copied().unwrap_or("");
+            i += 1;
+            if !old.is_empty() {
+                paths.push(old.to_string());
+            }
+            if !new.is_empty() {
+                paths.push(new.to_string());
+            }
+        } else {
+            let path = records.get(i).copied().unwrap_or("");
+            i += 1;
+            if !path.is_empty() {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths
 }
 
 #[tauri::command]
@@ -310,16 +457,44 @@ pub async fn commit_files(
         return Err("提交信息太长（最多 500 字符）".to_string());
     }
     validate_commit_paths(&paths)?;
+    let approved_count = paths.len();
+    // rename 的旧路径删除也属于这次提交；先记下映射。
+    let renames = staged_rename_map(&workdir).await;
+    let mut approved: std::collections::HashSet<String> = paths.iter().cloned().collect();
+    for p in &paths {
+        if let Some(old) = renames.get(p) {
+            approved.insert(old.clone());
+        }
+    }
     let args: Vec<&str> = paths.iter().map(|p| p.as_str()).collect();
     let mut add_args = vec!["add", "--"];
     add_args.extend(args.iter().copied());
     git(&workdir, &add_args).await?;
-    let out = git(&workdir, &["commit", "-m", &message]).await?;
+
+    // `git commit --only` 对 rename 的旧路径（工作区已不存在）无法匹配。
+    // 改为：确认暂存区里的每一条都属于“已通过的文件 + rename 旧路径”，
+    // 然后提交整个暂存区；有其它暂存改动就拒绝并提示用户，绝不悄悄提交。
+    let staged = staged_paths(&workdir).await;
+    if staged.is_empty() {
+        return Err("没有可提交的改动".to_string());
+    }
+    let extras: Vec<&str> = staged
+        .iter()
+        .map(|p| p.as_str())
+        .filter(|p| !approved.contains(*p))
+        .collect();
+    if !extras.is_empty() {
+        return Err(format!(
+            "暂存区还有未通过审查的改动：{}。请先在终端取消暂存（git restore --staged ...）后再提交。",
+            extras.join("、")
+        ));
+    }
+    let out = git(&workdir, &["commit", "-m", message.as_str()]).await?;
     let first_line = out.lines().next().unwrap_or("").trim().to_string();
     Ok(if first_line.is_empty() {
-        format!("已提交 {} 个文件", paths.len())
+        format!("已提交 {} 个文件", approved_count)
     } else {
-        format!("已提交 {} 个文件：{}", paths.len(), first_line)
+        format!("已提交 {} 个文件：{}", approved_count, first_line)
     })
 }
 

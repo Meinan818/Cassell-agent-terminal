@@ -297,6 +297,13 @@ pub fn save_settings(app: &AppHandle, settings: &Settings) -> Result<(), String>
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    // 先写临时文件再原子替换：写盘中途崩溃/断电时不会留下半个 JSON，
+    // 否则 load_settings 会静默回退默认值，把 API Key 和其他设置一起丢掉。
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &text).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
     Ok(())
 }

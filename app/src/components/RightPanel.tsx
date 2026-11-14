@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import hljs from "highlight.js/lib/common";
 import type {
@@ -42,6 +42,9 @@ interface RightPanelProps {
   onClose: () => void;
   /** 正在退场：先播 180ms 滑出动画再卸载（App 的 useOverlayExitValue）。 */
   closing?: boolean;
+  /** 有设置/抽屉/命令面板/向导等 DOM 浮层打开：内置浏览器是原生子 webview，
+   * 必须暂时隐藏，否则会盖在浮层上面。 */
+  overlayOpen?: boolean;
   /** P0-11 ①③：Inspector 宽度三档 360 / 480 / 720（并排 diff 用超宽档）。 */
   width: number;
   onToggleWidth: () => void;
@@ -571,6 +574,7 @@ export default function RightPanel(props: RightPanelProps) {
     onViewChange,
     onClose,
     closing = false,
+    overlayOpen = false,
     width,
     onToggleWidth,
     running,
@@ -598,6 +602,9 @@ export default function RightPanel(props: RightPanelProps) {
   } = props;
 
   // ---- Review view state ----
+  /** 异步 diff 请求回来时校验工作区，避免切换项目后旧响应回填缓存。 */
+  const workdirRef = useRef(workdir);
+  workdirRef.current = workdir;
   // P0-3：行内 diff（真实 `git diff HEAD`，经已有的 run_shell 命令取；无 get_file_diff 命令）。
   const [diffOpen, setDiffOpen] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, DiffState>>({});
@@ -619,12 +626,14 @@ export default function RightPanel(props: RightPanelProps) {
     }
     setDiffOpen(f.path);
     if (diffs[f.path]) return;
+    const requestWorkdir = workdir;
     setDiffs((prev) => ({ ...prev, [f.path]: { state: "loading" } }));
     if (f.status === "untracked") {
       // 未追踪文件没有 HEAD 对照：全文即新增，直接读文件当 diff。
       const full = workdir ? `${workdir.replace(/[\\/]+$/, "")}/${f.path}` : f.path;
       invoke<string>("read_file", { path: full })
         .then((text) => {
+          if (workdirRef.current !== requestWorkdir) return;
           const body = text.endsWith("（仅预览前 200KB）")
             ? text
             : text
@@ -639,12 +648,13 @@ export default function RightPanel(props: RightPanelProps) {
             },
           }));
         })
-        .catch((e) =>
+        .catch((e) => {
+          if (workdirRef.current !== requestWorkdir) return;
           setDiffs((prev) => ({
             ...prev,
             [f.path]: { state: "error", error: `读文件失败：${String(e)}` },
-          })),
-        );
+          }));
+        });
       return;
     }
     invoke<{ stdout: string; stderr: string; code: number | null }>("run_shell", {
@@ -652,6 +662,7 @@ export default function RightPanel(props: RightPanelProps) {
       workdir,
     })
       .then((r) => {
+        if (workdirRef.current !== requestWorkdir) return;
         if (r.code !== 0) {
           setDiffs((prev) => ({
             ...prev,
@@ -670,12 +681,13 @@ export default function RightPanel(props: RightPanelProps) {
           },
         }));
       })
-      .catch((e) =>
+      .catch((e) => {
+        if (workdirRef.current !== requestWorkdir) return;
         setDiffs((prev) => ({
           ...prev,
           [f.path]: { state: "error", error: String(e) },
-        })),
-      );
+        }));
+      });
   };
 
   const confirmStagedRejects = () => {
@@ -735,17 +747,21 @@ export default function RightPanel(props: RightPanelProps) {
     // 改过标记：读一次 git status（不是 git 仓库 / 失败时就当没有改动，不报错）。
     if (workdir) {
       invoke<{ stdout: string; stderr: string; code: number | null }>("run_shell", {
-        command: "git status --porcelain",
+        command: "git -c core.quotePath=false status --porcelain -z",
         workdir,
       })
         .then((r) => {
           if (!alive || r.code !== 0) return;
           const set = new Set<string>();
-          for (const line of r.stdout.split("\n")) {
-            if (line.length < 4) continue;
-            const raw = line.slice(3).trim();
-            const p = raw.split(" -> ").pop() ?? raw;
+          const records = r.stdout.split("\0");
+          for (let i = 0; i < records.length; i += 1) {
+            const rec = records[i];
+            if (rec.length < 4) continue;
+            const code = rec.slice(0, 2);
+            const p = rec.slice(3);
             if (p) set.add(p.replace(/\\/g, "/"));
+            // rename/copy 的下一条记录是旧路径，跳过。
+            if (code.includes("R") || code.includes("C")) i += 1;
           }
           setModified(set);
         })
@@ -760,7 +776,15 @@ export default function RightPanel(props: RightPanelProps) {
 
   useEffect(() => {
     setDir(workdir);
+    // 换工作区后旧项目的 diff 缓存不能复用（相对路径可能同名）。
+    setDiffOpen(null);
+    setDiffs({});
+    setRejectStaged([]);
   }, [workdir]);
+
+  // 审查列表刷新（文件内容可能已被再次修改）：丢掉旧 diff，重新点开时读最新内容。
+  // 注意不能依赖 review 对象身份：App 每次 refresh/通过/拒绝都会生成新对象，
+  // 那会把用户正在看的 diff 直接关掉。workdir 变化已在上面重置。
 
   /** 工作区内相对路径（改过标记用）：不在工作区内的返回 null。 */
   const relToWorkdir = (abs: string): string | null => {
@@ -1273,6 +1297,7 @@ export default function RightPanel(props: RightPanelProps) {
             <BrowserPane
               requested={browserRequested}
               onRequestedConsumed={onBrowserRequestedConsumed}
+              covered={overlayOpen || closing}
             />
           )}
 

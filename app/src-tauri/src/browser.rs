@@ -24,6 +24,11 @@ use std::sync::Mutex;
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl, Wry};
 
+#[cfg(windows)]
+use webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG;
+#[cfg(windows)]
+use webview2_com::CapturePreviewCompletedHandler;
+
 pub struct BrowserState {
     child: Mutex<Option<Webview<Wry>>>,
 }
@@ -42,13 +47,29 @@ pub struct BrowserInfo {
     pub url: String,
 }
 
+fn is_local_host(raw: &str) -> bool {
+    let host_port = raw.split('/').next().unwrap_or("");
+    let host = host_port
+        .strip_prefix('[')
+        .and_then(|s| s.split(']').next())
+        .unwrap_or_else(|| host_port.split(':').next().unwrap_or(""));
+    matches!(
+        host.to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1" | "0.0.0.0"
+    )
+}
+
 fn normalize_url(raw: &str) -> Result<Url, String> {
     let u = raw.trim();
     if u.is_empty() {
         return Err("网址为空".to_string());
     }
+    // 本地 dev server 默认 http；外网默认 https。别把 localhost 补成
+    // https://localhost，普通 Vite/Next dev server 没有 TLS，直接打不开。
     let with_scheme = if u.contains("://") {
         u.to_string()
+    } else if is_local_host(u) {
+        format!("http://{u}")
     } else {
         format!("https://{u}")
     };
@@ -60,8 +81,11 @@ fn normalize_url(raw: &str) -> Result<Url, String> {
 }
 
 fn profile_dir(app: &AppHandle) -> std::path::PathBuf {
+    // WebView2 的 user data folder 不能放网络路径；Windows 上 Roaming 可能被
+    // 组策略重定向到网络共享，优先用 LocalAppData。
     app.path()
-        .app_data_dir()
+        .app_local_data_dir()
+        .or_else(|_| app.path().app_data_dir())
         .map(|d| d.join("browser-profile"))
         .unwrap_or_else(|_| std::env::temp_dir().join("cassell-browser-profile"))
 }
@@ -100,8 +124,19 @@ pub async fn browser_open(
     let app_load = app.clone();
     let builder = WebviewBuilder::new("inspector-browser", WebviewUrl::External(url.clone()))
         .data_directory(profile_dir(&app))
-        // 导航一律放行（应用内浏览器，不做白名单）；地址栏靠下面的事件同步。
-        .on_navigation(|_url| true)
+        // target=_blank 只改成本页跳转：不新开窗口，也不跳系统浏览器。
+        // on_new_window 仍保底处理 window.open；这里先处理普通链接。
+        .initialization_script(
+            r#"(function(){
+              document.addEventListener('click', function(e){
+                var a = e.target && e.target.closest ? e.target.closest('a[target="_blank"]') : null;
+                if (a && a.href) { e.preventDefault(); window.location.href = a.href; }
+              }, true);
+            })();"#,
+        )
+        // 只允许网页导航；外站链接不能把子 webview 导航到 file://、mailto:
+        // 或自定义协议。about:blank 留给正常页面的内部跳转。
+        .on_navigation(|u| matches!(u.scheme(), "http" | "https" | "about"))
         .on_page_load(move |_w, payload| {
             let loading = payload.event() == PageLoadEvent::Started;
             let _ = app_load.emit(
@@ -114,8 +149,11 @@ pub async fn browser_open(
             );
         })
         .on_new_window(move |u, _features| {
-            // 新窗口不开出去：URL 发回后台线程，在同一个子 webview 里打开。
-            let _ = tx.send(u);
+            // 新窗口不开出去：只把 http/https 链接发回后台线程，在同一个子
+            // webview 里打开；file://、自定义协议一律拒绝。
+            if matches!(u.scheme(), "http" | "https") {
+                let _ = tx.send(u);
+            }
             NewWindowResponse::Deny
         });
     let child = window
@@ -226,6 +264,117 @@ pub async fn browser_current(state: State<'_, BrowserState>) -> Result<BrowserIn
     }
 }
 
+/// P0-11③ autoVerify：截取当前内置浏览器页面为 PNG，返回保存路径。
+/// Windows 走 WebView2 CapturePreview；其它平台先明确不支持。
+#[tauri::command]
+pub async fn browser_screenshot(app: AppHandle, state: State<'_, BrowserState>) -> Result<String, String> {
+    let child = {
+        let guard = state.child.lock().map_err(|_| "浏览器状态锁坏了".to_string())?;
+        guard.as_ref().ok_or_else(|| "内置浏览器还没打开".to_string())?.clone()
+    };
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<Vec<u8>, String>>();
+    let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+    child
+        .with_webview(move |webview| {
+            #[cfg(windows)]
+            {
+                use windows::Win32::Foundation::HGLOBAL;
+                use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
+                use windows::Win32::System::Com::STREAM_SEEK_SET;
+
+                let controller = webview.controller();
+                let core = match unsafe { controller.CoreWebView2() } {
+                    Ok(c) => c,
+                    Err(e) => {
+                        if let Some(tx) = tx.lock().unwrap().take() {
+                            let _ = tx.send(Err(format!("拿不到 WebView2：{e}")));
+                        }
+                        return;
+                    }
+                };
+                let stream = match unsafe { CreateStreamOnHGlobal(HGLOBAL::default(), true) } {
+                    Ok(s) => s,
+                    Err(e) => {
+                        if let Some(tx) = tx.lock().unwrap().take() {
+                            let _ = tx.send(Err(format!("创建截图流失败：{e}")));
+                        }
+                        return;
+                    }
+                };
+                let read_stream = stream.clone();
+                let tx_handler = tx.clone();
+                let handler = CapturePreviewCompletedHandler::create(Box::new(move |hr| {
+                    if hr.is_err() {
+                        if let Some(tx) = tx_handler.lock().unwrap().take() {
+                            let _ = tx.send(Err(format!("截图失败：{hr:?}")));
+                        }
+                        return Ok(());
+                    }
+                    let mut bytes = Vec::new();
+                    let mut buf = [0u8; 16 * 1024];
+                    unsafe {
+                        let _ = read_stream.Seek(0, STREAM_SEEK_SET, None);
+                        loop {
+                            let mut read: u32 = 0;
+                            let r = read_stream.Read(
+                                buf.as_mut_ptr() as *mut core::ffi::c_void,
+                                buf.len() as u32,
+                                Some(&mut read),
+                            );
+                            if r.is_err() || read == 0 {
+                                break;
+                            }
+                            bytes.extend_from_slice(&buf[..read as usize]);
+                        }
+                    }
+                    if let Some(tx) = tx_handler.lock().unwrap().take() {
+                        let _ = tx.send(Ok(bytes));
+                    }
+                    Ok(())
+                }));
+                if let Err(e) = unsafe {
+                    core.CapturePreview(
+                        COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+                        &stream,
+                        &handler,
+                    )
+                } {
+                    if let Some(tx) = tx.lock().unwrap().take() {
+                        let _ = tx.send(Err(format!("发起截图失败：{e}")));
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = webview;
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(Err("浏览器截图目前只支持 Windows".to_string()));
+                }
+            }
+        })
+        .map_err(|e| format!("截图调度失败：{e}"))?;
+    let bytes = tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+        .await
+        .map_err(|_| "截图超时（5 秒）".to_string())?
+        .map_err(|_| "截图回调丢失".to_string())??;
+    if bytes.is_empty() {
+        return Err("截图返回空数据".to_string());
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("cassell-agent"))
+        .join("verify");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建截图目录失败：{e}"))?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = dir.join(format!("verify-{stamp}.png"));
+    std::fs::write(&path, bytes).map_err(|e| format!("写截图失败：{e}"))?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 fn with_child<F>(state: &State<'_, BrowserState>, f: F) -> Result<(), String>
 where
     F: FnOnce(&Webview<Wry>) -> Result<(), tauri::Error>,
@@ -250,6 +399,14 @@ mod tests {
         assert_eq!(
             normalize_url("http://localhost:3000").unwrap().as_str(),
             "http://localhost:3000/"
+        );
+        assert_eq!(
+            normalize_url("localhost:3000").unwrap().as_str(),
+            "http://localhost:3000/"
+        );
+        assert_eq!(
+            normalize_url("127.0.0.1:5173").unwrap().as_str(),
+            "http://127.0.0.1:5173/"
         );
         assert_eq!(
             normalize_url("  https://example.com/a?b=1  ").unwrap().as_str(),

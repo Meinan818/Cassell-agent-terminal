@@ -55,6 +55,8 @@ import {
 import { getCommands, type SettingsNav } from "./components/commands";
 
 const TASKS_KEY = "cassell.tasks.v1";
+/** P0-11 ②：Inspector 宽度三档持久化（重启后不再回 360）。 */
+const INSPECTOR_WIDTH_KEY = "cassell.inspector-width.v1";
 /** P0-1：项目列表与当前项目 id 的持久化——跟任务列表走同一套机制
  *（localStorage，一样的 try/catch 兜底，不发明新办法）。 */
 const PROJECTS_KEY = "cassell.projects.v1";
@@ -1358,7 +1360,15 @@ export default function App() {
   /** Inspector（S6）：默认不常驻；null = 关闭，打开时对话画布不重排（浮层）。 */
   const [inspector, setInspector] = useState<InspectorView | null>(null);
   /** P0-11 ②：Inspector 宽度三档 360 / 480 / 720（并排 diff 用超宽档）。 */
-  const [inspectorWidth, setInspectorWidth] = useState(360);
+  const [inspectorWidth, setInspectorWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+      if (saved === 480 || saved === 720) return saved;
+    } catch {
+      // 读不到就用默认宽度。
+    }
+    return 360;
+  });
   /** EVA 切换仪式进行中的模式（1200ms 内防重入）；模式切换落行（C 档小字）。 */
   const [ritual, setRitual] = useState<{
     dir: Mode;
@@ -1440,6 +1450,10 @@ export default function App() {
   const settingsRef = useRef<Settings | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
   const runningRef = useRef(false);
+  /** 审查状态属于哪个工作区：切换项目/目录时不能把旧项目的文件并进新列表。 */
+  const reviewWorkdirRef = useRef<string | null>(null);
+  /** 只接受最后一次 refreshReview 的响应，避免切换工作区时旧请求后到覆盖新状态。 */
+  const reviewRequestSeq = useRef(0);
   /** handleSend 里要用最新的项目（新建任务时归属当前项目，见 P0-1）。 */
   const projectsRef = useRef<Project[]>([]);
   const activeProjectIdRef = useRef<string | null>(null);
@@ -1667,6 +1681,14 @@ export default function App() {
       // 写不进去不阻塞。
     }
   }, [activeProjectId]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INSPECTOR_WIDTH_KEY, String(inspectorWidth));
+    } catch {
+      // 写不进去不阻塞：宽度仍在本次会话生效。
+    }
+  }, [inspectorWidth]);
 
   // ---- Persist settings (debounced) ----
   const patchSettings = useCallback((patch: Partial<Settings>) => {
@@ -2144,10 +2166,18 @@ export default function App() {
   const refreshReview = useCallback(() => {
     const s = settingsRef.current;
     if (!s) return;
-    invoke<ReviewState>("get_review", { workdir: s.workdir })
+    const workdir = s.workdir;
+    const requestSeq = ++reviewRequestSeq.current;
+    invoke<ReviewState>("get_review", { workdir })
       .then((state) => {
+        if (requestSeq !== reviewRequestSeq.current) return;
         setReviewError(null);
+        const sameWorkdir = reviewWorkdirRef.current === workdir;
+        reviewWorkdirRef.current = workdir;
         setReview((prev) => {
+          // 换了工作区：旧项目的文件、通过/拒绝状态一律不并进来，
+          // 避免在新项目里对同名文件执行 reject/commit。
+          if (!sameWorkdir || !prev) return state;
           const prevMap = new Map(
             (prev?.files ?? []).map((f) => [f.path, f]),
           );
@@ -2165,8 +2195,22 @@ export default function App() {
           return { ...state, files: merged };
         });
       })
-      .catch((e) => setReviewError(String(e)));
+      .catch((e) => {
+        if (requestSeq === reviewRequestSeq.current) {
+          setReviewError(String(e));
+        }
+      });
   }, []);
+
+  // 工作区变了：先清掉旧项目的审查/合并状态，再等 refreshReview 拉新状态。
+  // RightPanel 里的 diff 缓存也按 workdir 重置（见 RightPanel 自己的 effect）。
+  const reviewWorkdir = settings?.workdir ?? "";
+  useEffect(() => {
+    // 不在这里写 reviewWorkdirRef：让 refreshReview 的响应自己判断
+    // “这次响应对应的工作区和上一次不同”，从而丢弃旧的 union。
+    setReview(null);
+    setMerge(null);
+  }, [reviewWorkdir]);
 
   useEffect(() => {
     if (settings) refreshReview();
@@ -2968,6 +3012,15 @@ export default function App() {
     const s = settingsRef.current;
     if (!s) return Promise.resolve({ ok: false, detail: "设置还没加载好" });
     const pid = providerId ?? s.provider_id;
+    // 测试“被查看的服务商”：当前服务商用它实际选中的模型（用户可能选过
+    // 非默认模型）；查看其它服务商时用它自己的默认模型，不串用当前模型。
+    const testProvider = s.providers.find((p) => p.id === pid);
+    const model =
+      pid === s.provider_id
+        ? s.model
+        : testProvider?.default_model ||
+          testProvider?.models?.[0] ||
+          s.model;
     setTesting(true);
     setTestResult(null);
     return invoke("save_settings", { settings: s })
@@ -2975,7 +3028,7 @@ export default function App() {
         invoke<{ ok: boolean; detail: string }>("test_provider", {
           // 注意：Tauri v2 命令参数默认转 camelCase，Rust 侧 provider_id 对应 JS 侧 providerId
           providerId: pid,
-          model: s.model,
+          model,
         }),
       )
       .then((r) => {
@@ -3255,6 +3308,10 @@ export default function App() {
   // 只在 Inspector 打开且视图为 review 时，对话区让出 360px（wide 时
   // 480px）——审查与对话同屏；其他视图保持浮层、不挤压对话区。
   const reviewDocked = inspector === "review";
+  /** 原生子 webview 永远盖在 DOM 之上；任何抽屉/命令面板/向导打开时，
+   * 先让内置浏览器隐藏，关闭后再恢复，否则网页会盖住浮层。 */
+  const overlayOpen =
+    renderDrawer !== null || renderPalette !== null || renderWizard !== null;
 
   // S7：Cmd-K 的命令上下文（每条命令都执行真实动作，见 ./components/commands）。
   const paletteItems = (q: string) =>
@@ -3836,6 +3893,7 @@ export default function App() {
           onViewChange={setInspector}
           onClose={() => setInspector(null)}
           closing={inspectorClosing}
+          overlayOpen={overlayOpen}
           width={inspectorWidth}
           onToggleWidth={() =>
             setInspectorWidth((w) => (w === 360 ? 480 : w === 480 ? 720 : 360))

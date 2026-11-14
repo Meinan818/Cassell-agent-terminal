@@ -16,13 +16,25 @@ export interface BrowserRequest {
   nonce: number;
 }
 
+/** 本地 dev server 默认 http；外网默认 https。与后端 normalize_url 保持一致。 */
+function isLocalHost(raw: string): boolean {
+  const hostPort = raw.split("/")[0] ?? "";
+  const host = hostPort.startsWith("[")
+    ? (hostPort.slice(1).split("]")[0] ?? "")
+    : (hostPort.split(":")[0] ?? "");
+  return ["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(host.toLowerCase());
+}
+
 interface BrowserPaneProps {
   /** App 传来的打开请求（agent 的 open_browser 工具 / 其他入口）。 */
   requested: BrowserRequest | null;
   onRequestedConsumed: () => void;
+  /** 有 DOM 浮层打开或 Inspector 正在退场：原生子 webview 要先藏起来，
+   * 否则它会永远画在抽屉/命令面板/关闭动画上面。 */
+  covered?: boolean;
 }
 
-export default function BrowserPane({ requested, onRequestedConsumed }: BrowserPaneProps) {
+export default function BrowserPane({ requested, onRequestedConsumed, covered = false }: BrowserPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,7 +67,9 @@ export default function BrowserPane({ requested, onRequestedConsumed }: BrowserP
     async (raw: string) => {
       const u = raw.trim();
       if (!u) return;
-      const full = /^https?:\/\//i.test(u) ? u : `https://${u}`;
+      const full = /^https?:\/\//i.test(u)
+        ? u
+        : `${isLocalHost(u) ? "http" : "https"}://${u}`;
       const r = rect();
       if (!r) return;
       setUrl(full);
@@ -98,6 +112,35 @@ export default function BrowserPane({ requested, onRequestedConsumed }: BrowserP
       invoke("browser_hide").catch(() => {});
     };
   }, [syncRect]);
+
+  // 原生子 webview 不参与 DOM 层叠：任何抽屉/命令面板/向导打开、或
+  // Inspector 正在退场时先隐藏；浮层关闭后再显示并重新对齐占位区。
+  useEffect(() => {
+    if (!hasPage) return;
+    if (covered) {
+      invoke("browser_hide").catch(() => {});
+      return;
+    }
+    invoke("browser_show")
+      .then(() => syncRect())
+      .catch(() => {});
+  }, [covered, hasPage, syncRect]);
+
+  // 首次打开时 Inspector/页签/占位区还在播入场动画；getBoundingClientRect
+  // 会带着 transform，等动画结束再补几次对齐，避免子 webview 永久偏几像素。
+  useEffect(() => {
+    if (!hasPage) return;
+    const timers = [0, 120, 280, 460].map((ms) =>
+      window.setTimeout(() => void syncRect(), ms),
+    );
+    const el = hostRef.current;
+    const onEnd = () => void syncRect();
+    el?.addEventListener("animationend", onEnd);
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t));
+      el?.removeEventListener("animationend", onEnd);
+    };
+  }, [hasPage, syncRect]);
 
   // agent 或其他入口要求打开某个 URL。
   useEffect(() => {

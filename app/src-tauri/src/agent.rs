@@ -13,6 +13,7 @@ use crate::settings::{load_settings, Settings};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
@@ -555,16 +556,18 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                 let mut c = tokio::process::Command::new("cmd");
                 c.args(["/C", cmd]).current_dir(&ctx.workdir);
                 crate::hide_console(&mut c);
-                c.output().await
+                c.kill_on_drop(true);
+                tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await
             };
             #[cfg(not(windows))]
-            let out = tokio::process::Command::new("sh")
-                .args(["-c", cmd])
-                .current_dir(&ctx.workdir)
-                .output()
-                .await;
+            let out = {
+                let mut c = tokio::process::Command::new("sh");
+                c.args(["-c", cmd]).current_dir(&ctx.workdir);
+                c.kill_on_drop(true);
+                tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await
+            };
             match out {
-                Ok(o) => {
+                Ok(Ok(o)) => {
                     let mut s = String::from_utf8_lossy(&o.stdout).to_string();
                     let err = String::from_utf8_lossy(&o.stderr).to_string();
                     if !err.trim().is_empty() {
@@ -572,10 +575,16 @@ async fn exec_tool(ctx: &ToolCtx<'_>, name: &str, args: &Value, tools_run: &mut 
                         s.push_str(&err);
                     }
                     s.push_str(&format!("\n[退出码 {}]", o.status.code().unwrap_or(-1)));
-                    if s.len() > 20_000 { s.truncate(20_000); }
+                    if s.len() > 20_000 {
+                        let cut = crate::text::floor_char_boundary(&s, 20_000);
+                        s.truncate(cut);
+                    }
                     s
                 }
-                Err(e) => format!("执行失败：{e}"),
+                Ok(Err(e)) => format!("执行失败：{e}"),
+                Err(_) => format!(
+                    "命令超时（120 秒），已终止直接子进程（孙进程可能仍在运行）：`{cmd}`"
+                ),
             }
         }
         "open_browser" => {
@@ -821,14 +830,20 @@ async fn run_inner_turn(
         if !status.is_success() {
             // 错误响应不是流，直接读全文，把服务商的真实错误原样给出
             let raw = resp.text().await.unwrap_or_default();
-            let short = if raw.len() > 600 { &raw[..600] } else { &raw };
+            let short = if raw.len() > 600 {
+                crate::text::truncate(&raw, 600)
+            } else {
+                &raw
+            };
             return Err(format!("服务商返回 {status}：{short}"));
         }
 
         /* 逐块读取 SSE：每收到一段文字就立刻推给界面，
            用户能看到字一个个出来，而不是等全部结束才蹦出来。 */
         let mut stream = resp.bytes_stream();
-        let mut buf = String::new();
+        // 按字节累积，不能对每个网络 chunk 单独做 from_utf8_lossy：
+        // chunk 边界可能切在一个汉字的字节中间，先解码会把半个字符变成 �。
+        let mut buf: Vec<u8> = Vec::new();
         let mut round_text = String::new();
         // 本轮模型发出的推理（reasoning_content）：思考模型要求下一轮
         // 原样传回去，否则 DeepSeek 会 400（"reasoning_content must be
@@ -870,11 +885,11 @@ async fn run_inner_turn(
                 Ok(b) => b,
                 Err(e) => return Err(format!("读取流式响应失败：{e}")),
             };
-            buf.push_str(&String::from_utf8_lossy(&bytes));
+            buf.extend_from_slice(&bytes);
 
             // SSE 以换行分隔行、空行分隔事件
-            while let Some(idx) = buf.find('\n') {
-                let line = buf[..idx].trim().to_string();
+            while let Some(idx) = buf.iter().position(|b| *b == b'\n') {
+                let line = String::from_utf8_lossy(&buf[..idx]).trim().to_string();
                 buf.drain(..=idx);
                 if line.is_empty() || line.starts_with(':') {
                     continue;
@@ -1140,6 +1155,12 @@ async fn run_agent_native_inner(
     } else {
         req.workdir.clone()
     };
+    if !workdir.trim().is_empty() && !Path::new(&workdir).is_absolute() {
+        return Err("工作区必须填写完整路径，不能使用相对路径。".to_string());
+    }
+    if !workdir.trim().is_empty() && !Path::new(&workdir).is_dir() {
+        return Err(format!("工作区目录不存在：{workdir}"));
+    }
     // P0-4：没有工作区也不直接报错——用户还能正常聊天，只是文件工具
     // 会在 exec_tool 里以"未授权"拒绝，并由界面引导他选文件夹。
     // （旧行为是整轮报错，用户连问问题都不行。）
@@ -1446,7 +1467,7 @@ async fn run_agent_native_inner(
         // messages 与 session 是同一个对象里的字段，不能同时借两次：
         // 先 take 出来，跑完再放回去。
         let mut turn_messages = std::mem::take(&mut session.messages);
-        let outcome = run_inner_turn(
+        let outcome = match run_inner_turn(
             app.clone(),
             state,
             &client,
@@ -1458,7 +1479,24 @@ async fn run_agent_native_inner(
             &mut session,
             goal_mode,
         )
-        .await?;
+        .await
+        {
+            Ok(o) => o,
+            Err(e) => {
+                // 目标会话在 run 开始时已经从 state.goals 里取出；这里若直接
+                // `?` 返回，会把整段目标上下文永久丢掉。先放回最新状态再报错，
+                // 让用户还能暂停/继续/倒带。
+                session.messages = turn_messages;
+                if goal_mode {
+                    session.status = GoalStatus::Paused;
+                    let progress = session.summary();
+                    let mut map = state.goals.lock().await;
+                    map.insert(session.id.clone(), session);
+                    let _ = app.emit("agent-goal-progress", progress);
+                }
+                return Err(e);
+            }
+        };
         session.messages = turn_messages;
         final_text.push_str(&outcome.text);
         tools_run.extend(outcome.tools_run);
@@ -1685,7 +1723,11 @@ pub async fn test_provider(
                     detail: format!("{} / {} 连通正常", provider.name, model),
                 })
             } else {
-                let short = if text.len() > 400 { &text[..400] } else { &text };
+                let short = if text.len() > 400 {
+                    crate::text::truncate(&text, 400)
+                } else {
+                    &text
+                };
                 Ok(ConnResult {
                     ok: false,
                     detail: format!("服务商返回 {status}：{short}"),
@@ -1736,7 +1778,11 @@ pub async fn list_models(
     let status = resp.status();
     let raw = resp.text().await.unwrap_or_default();
     if !status.is_success() {
-        let short = if raw.len() > 300 { &raw[..300] } else { &raw };
+        let short = if raw.len() > 300 {
+            crate::text::truncate(&raw, 300)
+        } else {
+            &raw
+        };
         return Err(format!("服务商返回 {status}：{short}"));
     }
 
