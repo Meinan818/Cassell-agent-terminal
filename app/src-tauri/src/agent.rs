@@ -930,6 +930,7 @@ async fn run_agent_native_inner(
                     // P0-7：另起新目标——清掉旧目标的检查点，拍一张目标
                     // 开始前的基线快照（turn 0）。拍失败不拦任务。
                     crate::goal::clear_checkpoints(&app, &gid);
+                    crate::engine::session::delete_goal(&app, &gid);
                     if let Err(e) =
                         crate::goal::snapshot_workdir(&app, &gid, 0, &workdir)
                     {
@@ -962,11 +963,23 @@ async fn run_agent_native_inner(
                     goal_mode = true;
                     // P0-7：新目标——清掉可能残留的旧检查点，拍基线快照（turn 0）。
                     crate::goal::clear_checkpoints(&app, &gid);
+                    crate::engine::session::delete_goal(&app, &gid);
                     if let Err(e) =
                         crate::goal::snapshot_workdir(&app, &gid, 0, &workdir)
                     {
                         eprintln!("[goal] 基线快照失败：{e}");
                     }
+                } else if let Some(mut s) = crate::engine::session::load_goal(&app, &gid) {
+                    // 应用重启后 RunState.goals 是空的：从磁盘恢复完整目标会话。
+                    goal_mode = true;
+                    if req.resume_goal {
+                        s.messages.push(json!({"role": "user", "content": "（继续完成目标：按目标清单接着做，不要从头开始，也不要重复已经做完的步骤。）"}));
+                    } else {
+                        s.messages
+                            .push(json!({"role": "user", "content": req.prompt}));
+                    }
+                    s.status = GoalStatus::Running;
+                    session = s;
                 } else {
                     // goal_id 指了一个不存在的会话：当普通对话跑。
                     let mut eph = GoalSession::new(
@@ -991,6 +1004,13 @@ async fn run_agent_native_inner(
         );
         eph.messages = messages.clone();
         session = eph;
+    }
+
+    // 目标会话立刻落盘：即使在第一轮请求前应用被杀，也能从磁盘恢复。
+    if goal_mode {
+        if let Err(e) = crate::engine::session::save_goal(&app, &session) {
+            eprintln!("[session] 初始保存失败：{e}");
+        }
     }
 
     // P0-1：冻结前缀定稿。目标会话：已存的、hash 对上的直接复用
@@ -1124,6 +1144,7 @@ async fn run_agent_native_inner(
                 session.messages = turn_messages;
                 if goal_mode {
                     session.status = GoalStatus::Paused;
+                    let _ = crate::engine::session::save_goal(&app, &session);
                     let progress = session.summary();
                     let mut map = state.goals.lock().await;
                     map.insert(session.id.clone(), session);
@@ -1151,6 +1172,7 @@ async fn run_agent_native_inner(
                 outcome.text.clone()
             };
             let _ = crate::goal::write_checkpoint(&app, &mut session, &summary);
+            let _ = crate::engine::session::save_goal(&app, &session);
             let _ = app.emit("agent-goal-progress", session.summary());
         }
         if outcome.cancelled {
@@ -1217,6 +1239,7 @@ async fn run_agent_native_inner(
         if cancelled {
             session.status = GoalStatus::Paused;
         }
+        let _ = crate::engine::session::save_goal(&app, &session);
         let _ = app.emit("agent-goal-progress", session.summary());
         // 会话放回表里（暂停/完成都保留，供目标卡片、检查点、倒带用；
         // 只有 clear_goal 或另起新目标时才清掉）。

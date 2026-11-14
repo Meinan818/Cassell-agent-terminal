@@ -11,5 +11,6 @@ pub mod edit;
 pub mod modes;
 pub mod policy;
 pub mod process;
+pub mod session;
 pub mod tooling;
 pub mod tool_pipeline;

@@ -1161,12 +1161,14 @@ pub async fn rewind_checkpoint_cmd(
 
 #[tauri::command]
 pub async fn clear_goal_cmd(
-    _app: AppHandle,
+    app: AppHandle,
     state: tauri::State<'_, crate::run_state::RunState>,
     goal_id: String,
 ) -> Result<(), String> {
     let mut map = state.goals.lock().await;
     map.remove(&goal_id);
+    drop(map);
+    crate::engine::session::delete_goal(&app, &goal_id);
     Ok(())
 }
 
@@ -1181,6 +1183,7 @@ pub async fn purge_goal_data_cmd(
     map.remove(&goal_id);
     drop(map);
     clear_checkpoints(&app, &goal_id);
+    crate::engine::session::delete_goal(&app, &goal_id);
     Ok(())
 }
 
