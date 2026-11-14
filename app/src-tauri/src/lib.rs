@@ -75,6 +75,7 @@ pub fn run() {
             fsutil::read_file,
             fsutil::read_file_base64,
             fsutil::get_review,
+            fsutil::get_file_diff,
             fsutil::revert_file,
             fsutil::commit_files,
             shell::run_shell,

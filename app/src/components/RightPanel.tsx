@@ -109,12 +109,6 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function quoteForShell(p: string): string {
-  // git paths come from `git status`; strip line breaks, double-quote the rest.
-  // Works for sh -c and cmd /C for ordinary paths (quotes in names are not supported).
-  return `"${p.replace(/[\r\n]/g, "").replace(/"/g, '\\"')}"`;
-}
-
 /** P0-11 ②：逐行评论（存在 localStorage，按文件路径分桶；评论是本地的，
  * 发给智能体后也保留，改完再看 diff 时还能对上）。 */
 interface LineComment {
@@ -657,20 +651,9 @@ export default function RightPanel(props: RightPanelProps) {
         });
       return;
     }
-    invoke<{ stdout: string; stderr: string; code: number | null }>("run_shell", {
-      command: `git diff HEAD -- ${quoteForShell(f.path)}`,
-      workdir,
-    })
-      .then((r) => {
+    invoke<string>("get_file_diff", { workdir, path: f.path })
+      .then((text) => {
         if (workdirRef.current !== requestWorkdir) return;
-        if (r.code !== 0) {
-          setDiffs((prev) => ({
-            ...prev,
-            [f.path]: { state: "error", error: r.stderr.trim() || `git diff 退出码 ${r.code ?? "?"}` },
-          }));
-          return;
-        }
-        const text = r.stdout;
         setDiffs((prev) => ({
           ...prev,
           [f.path]: {

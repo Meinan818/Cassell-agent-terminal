@@ -298,6 +298,21 @@ pub async fn get_review(workdir: String) -> Result<ReviewState, String> {
 }
 
 #[tauri::command]
+pub async fn get_file_diff(workdir: String, path: String) -> Result<String, String> {
+    if workdir.trim().is_empty() || !Path::new(&workdir).is_dir() {
+        return Err("工作区目录不存在".to_string());
+    }
+    validate_worktree_relative_path(&path)?;
+    // 直接以参数传给 git，不经过 cmd /C；否则带引号的相对路径在
+    // Windows 上会被 cmd 重新解析，git 可能收到空路径并返回空 diff。
+    git(
+        &workdir,
+        &["-c", "core.quotePath=false", "diff", "HEAD", "--", &path],
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn revert_file(workdir: String, path: String) -> Result<String, String> {
     if workdir.trim().is_empty() || path.trim().is_empty() {
         return Err("参数不完整".to_string());
