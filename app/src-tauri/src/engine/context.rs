@@ -81,6 +81,6 @@ mod tests {
         assert!(estimate_tokens("你好世界") >= 4);
         assert!(estimate_tokens("hello world") >= 2);
         assert_eq!(crate::models::context_window("direct", "deepseek-flash"), 1_000_000);
-        assert_eq!(crate::models::context_window("direct", "gpt-6.1"), 131_072);
+        assert_eq!(crate::models::context_window("direct", "gpt-6.1"), 524_288);
     }
 }

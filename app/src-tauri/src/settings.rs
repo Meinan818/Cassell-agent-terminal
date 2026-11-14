@@ -24,6 +24,17 @@ pub struct ProviderConfig {
     /// 发请求前按这个查模型映射表；老设置文件里没有这个字段时默认 direct。
     #[serde(default = "default_access_kind")]
     pub kind: String,
+    /// 每个模型的能力覆盖（上下文窗口 / 最大输出）。留空时按模型名推断。
+    #[serde(default)]
+    pub model_configs: HashMap<String, ModelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<usize>,
 }
 
 fn default_access_kind() -> String {
@@ -117,6 +128,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
             models: vec!["deepseek-flash".to_string(), "deepseek-v4-pro".to_string()],
             default_model: "deepseek-flash".to_string(),
             kind: "direct".to_string(),
+            model_configs: HashMap::new(),
         },
         ProviderConfig {
             id: "kimi".to_string(),
@@ -130,6 +142,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
             ],
             default_model: "kimi-k2".to_string(),
             kind: "direct".to_string(),
+            model_configs: HashMap::new(),
         },
         ProviderConfig {
             id: "qwen".to_string(),
@@ -143,6 +156,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
             ],
             default_model: "qwen-plus".to_string(),
             kind: "direct".to_string(),
+            model_configs: HashMap::new(),
         },
         ProviderConfig {
             id: "openai".to_string(),
@@ -152,6 +166,7 @@ pub fn default_providers() -> Vec<ProviderConfig> {
             models: vec!["gpt-6.1".to_string(), "gpt-4o".to_string()],
             default_model: "gpt-6.1".to_string(),
             kind: "direct".to_string(),
+            model_configs: HashMap::new(),
         },
     ]
 }

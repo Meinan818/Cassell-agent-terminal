@@ -25,6 +25,13 @@ export interface ProviderConfig {
   default_model: string;
   /** 接入方式："direct" 官方直连 / "relay" 中转站（P0-3，按这个查模型映射表）。 */
   kind?: string;
+  /** 每个模型的能力覆盖；留空按模型名推断。 */
+  model_configs?: Record<string, ModelConfig>;
+}
+
+export interface ModelConfig {
+  context_window?: number;
+  max_tokens?: number;
 }
 
 export interface ExtensionItem {

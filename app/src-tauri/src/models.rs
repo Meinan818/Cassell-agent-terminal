@@ -17,6 +17,8 @@
 //! 退役 ID 迁移：`deepseek-v4` 已退役，读设置时迁到 `deepseek-flash`，
 //! 并记一条日志；迁移只动主模型，不动压缩模型。
 
+use crate::settings::ModelConfig;
+
 /// 接入方式：`direct` 官方直连，`relay` 中转站。写错的一律按 direct。
 pub fn access_kind(raw: &str) -> &'static str {
     if raw.trim().eq_ignore_ascii_case("relay") {
@@ -100,6 +102,59 @@ pub fn default_compression_model() -> String {
     "deepseek-flash".to_string()
 }
 
+pub const DEFAULT_MODEL_CONTEXT_WINDOW: usize = 524_288;
+pub const DEFAULT_MODEL_MAX_TOKENS: usize = 65_536;
+
+/// Infer a context window from a size suffix such as `-128k` / `-1m`.
+/// The unit must be its own token so names like `kimi-k2` never match.
+pub fn infer_model_context_window(model_id: &str) -> Option<usize> {
+    for part in model_id
+        .to_ascii_lowercase()
+        .split(|c| matches!(c, '-' | '_' | '.' | '@' | ':'))
+    {
+        let (num, mul) = if let Some(n) = part.strip_suffix('k') {
+            (n, 1024)
+        } else if let Some(n) = part.strip_suffix('m') {
+            (n, 1024 * 1024)
+        } else {
+            continue;
+        };
+        if let Ok(n) = num.parse::<usize>() {
+            if n > 0 && n <= 4096 {
+                return Some(n * mul);
+            }
+        }
+    }
+    None
+}
+
+pub fn context_window_with_config(
+    kind: &str,
+    model: &str,
+    config: Option<&ModelConfig>,
+) -> usize {
+    if let Some(n) = config.and_then(|c| c.context_window).filter(|n| *n > 0) {
+        return n;
+    }
+    if let Some(n) = infer_model_context_window(model) {
+        return n;
+    }
+    capabilities(&resolve_model(kind, model)).context_window
+}
+
+pub fn max_tokens_with_config(
+    kind: &str,
+    model: &str,
+    config: Option<&ModelConfig>,
+) -> usize {
+    let context = context_window_with_config(kind, model, config);
+    let configured = config.and_then(|c| c.max_tokens).filter(|n| *n > 0);
+    configured
+        .unwrap_or_else(|| capabilities(&resolve_model(kind, model)).max_output)
+        .min(context)
+        .max(1)
+}
+
 /// Per-model runtime capabilities. This is intentionally a small, explicit
 /// table: context window and cache behavior must follow the selected model,
 /// not one global constant. Unknown models get a safe 128k fallback.
@@ -117,7 +172,7 @@ pub fn capabilities(model: &str) -> ModelCaps {
     if m.contains("deepseek") {
         return ModelCaps {
             context_window: 1_000_000,
-            max_output: 384_000,
+            max_output: 256_000,
             cache: "exact_prefix",
             reasoning_effort: true,
         };
@@ -163,13 +218,14 @@ pub fn capabilities(model: &str) -> ModelCaps {
         };
     }
     ModelCaps {
-        context_window: 131_072,
-        max_output: 65_536,
+        context_window: DEFAULT_MODEL_CONTEXT_WINDOW,
+        max_output: DEFAULT_MODEL_MAX_TOKENS,
         cache: "none",
         reasoning_effort: false,
     }
 }
 
+#[allow(dead_code)] // convenience for callers without an explicit model config
 pub fn context_window(kind: &str, model: &str) -> usize {
     capabilities(&resolve_model(kind, model)).context_window
 }
@@ -221,8 +277,32 @@ mod tests {
         assert_eq!(context_window("direct", "deepseek-flash"), 1_000_000);
         assert_eq!(context_window("direct", "kimi-k2"), 262_144);
         assert_eq!(context_window("direct", "moonshot-v1-8k"), 8_192);
-        assert_eq!(context_window("direct", "unknown-model"), 131_072);
+        assert_eq!(context_window("direct", "unknown-model"), 524_288);
         // Relay maps the alias first, then reads the same capability table.
         assert_eq!(context_window("relay", "deepseek-flash"), 1_000_000);
+    }
+
+    #[test]
+    fn model_config_override_and_suffix_inference_win() {
+        let cfg = ModelConfig {
+            context_window: Some(64_000),
+            max_tokens: Some(8_000),
+        };
+        assert_eq!(
+            context_window_with_config("direct", "unknown", Some(&cfg)),
+            64_000
+        );
+        assert_eq!(
+            max_tokens_with_config("direct", "unknown", Some(&cfg)),
+            8_000
+        );
+        assert_eq!(
+            context_window_with_config("direct", "glm-4.6-air-128k", None),
+            131_072
+        );
+        assert_eq!(
+            context_window_with_config("direct", "qwen-long-1m", None),
+            1_048_576
+        );
     }
 }

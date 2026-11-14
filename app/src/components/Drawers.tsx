@@ -5,6 +5,7 @@ import type {
   DeleteConfirm,
   Effort,
   Mode,
+  ModelConfig,
   ProviderConfig,
   Sandbox,
   Settings,
@@ -185,6 +186,7 @@ export function SettingsModal({
   const provider =
     settings.providers.find((p) => p.id === viewProviderId) ?? settings.providers[0];
   const isViewingActive = viewProviderId === settings.provider_id;
+  const modelConfig = provider?.model_configs?.[settings.model] ?? {};
   const hasAnyKey = Object.values(settings.api_keys).some((k) => k?.trim());
   const key = provider ? settings.api_keys[provider.id] ?? "" : "";
   const isCustom = provider?.id.startsWith("custom-") ?? false;
@@ -216,6 +218,29 @@ export function SettingsModal({
         p.id === provider.id ? { ...p, ...patch } : p,
       ),
     });
+  };
+
+  const updateModelConfig = (patch: Partial<ModelConfig>) => {
+    if (!provider || !settings.model) return;
+    const current = provider.model_configs ?? {};
+    onPatch({
+      providers: settings.providers.map((p) =>
+        p.id === provider.id
+          ? {
+              ...p,
+              model_configs: {
+                ...current,
+                [settings.model]: { ...modelConfig, ...patch },
+              },
+            }
+          : p,
+      ),
+    });
+  };
+
+  const numberOrUndefined = (v: string): number | undefined => {
+    const n = Number(v);
+    return v.trim() && Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
   };
 
   // 点列表行 = 只选中查看，不切换生效的服务商。
@@ -619,6 +644,50 @@ export function SettingsModal({
                           <span className="check">✓</span>
                         </div>
                       )}
+                    </div>
+                  )}
+                  {isViewingActive && settings.model && (
+                    <div className="s7-group" style={{ marginTop: 10 }}>
+                      <div className="drawer-section">模型能力 · {settings.model}</div>
+                      <label className="field-label" htmlFor="settings-model-context">
+                        上下文（tokens）
+                      </label>
+                      <input
+                        id="settings-model-context"
+                        className="field-input"
+                        type="number"
+                        min={1}
+                        step={1024}
+                        value={modelConfig.context_window ?? ""}
+                        onChange={(e) =>
+                          updateModelConfig({
+                            context_window: numberOrUndefined(e.target.value),
+                          })
+                        }
+                        placeholder="留空自动推断，例如 1000000"
+                        autoComplete="off"
+                      />
+                      <label className="field-label" htmlFor="settings-model-max-tokens">
+                        最大输出（tokens）
+                      </label>
+                      <input
+                        id="settings-model-max-tokens"
+                        className="field-input"
+                        type="number"
+                        min={1}
+                        step={1024}
+                        value={modelConfig.max_tokens ?? ""}
+                        onChange={(e) =>
+                          updateModelConfig({
+                            max_tokens: numberOrUndefined(e.target.value),
+                          })
+                        }
+                        placeholder="留空自动推断，例如 256000"
+                        autoComplete="off"
+                      />
+                      <p className="drawer-note">
+                        留空时按模型名后缀和内置能力表推断；改这里只影响当前模型，切换模型会自动换窗口。
+                      </p>
                     </div>
                   )}
                   <label className="field-label" htmlFor="settings-compression-model">

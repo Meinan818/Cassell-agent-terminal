@@ -63,6 +63,7 @@ mod tests {
             models: vec![],
             default_model: "deepseek-flash".to_string(),
             kind: "direct".to_string(),
+            model_configs: Default::default(),
         }
     }
 

@@ -332,6 +332,7 @@ struct TurnCtx {
     tools: Value,
     system_with_appendix: String,
     context_window: usize,
+    max_tokens: usize,
 }
 
 /// 单回合的产出（交给目标循环汇总）。
@@ -448,6 +449,9 @@ async fn run_inner_turn(
         });
         let mut body = body;
         crate::engine::deepseek::apply_request_fields(&mut body, &ctx.provider, &ctx.effort);
+        if ctx.max_tokens > 0 {
+            body["max_tokens"] = json!(ctx.max_tokens);
+        }
 
         let resp = crate::engine::retry::post_json_with_retry(
             &client,
@@ -1101,7 +1105,11 @@ async fn run_agent_native_inner(
             provider.kind, req.model, wire_model
         );
     }
-    let context_window = crate::models::context_window(&provider.kind, &wire_model);
+    let model_cfg = provider.model_configs.get(&req.model);
+    let context_window =
+        crate::models::context_window_with_config(&provider.kind, &req.model, model_cfg);
+    let max_tokens =
+        crate::models::max_tokens_with_config(&provider.kind, &req.model, model_cfg);
     // P0-8：turn_ctx 用上面已定好的生效档位（NORMA 收紧过的），不再重算。
     let turn_ctx = TurnCtx {
         model: wire_model,
@@ -1130,6 +1138,7 @@ async fn run_agent_native_inner(
         tools: frozen.tools.clone(),
         system_with_appendix: frozen.with_appendix(&appendix),
         context_window,
+        max_tokens,
     };
 
     let mut final_text = String::new();
