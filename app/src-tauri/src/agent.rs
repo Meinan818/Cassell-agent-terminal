@@ -333,6 +333,7 @@ struct TurnCtx {
     system_with_appendix: String,
     context_window: usize,
     max_tokens: usize,
+    compression_model: String,
 }
 
 /// 单回合的产出（交给目标循环汇总）。
@@ -395,11 +396,33 @@ async fn run_inner_turn(
             cancelled = true;
             break 'rounds;
         }
-        // D1/D2：超过窗口 80% 时先把旧消息归档，再用确定性摘要替换。
-        // 原文写入 sessions/archive/，活动上下文只保留最近一段。
-        if let Some(compacted) =
-            crate::engine::compact::compact_messages(messages, ctx.context_window)
+        // D1/D2/D4：超过窗口 80% 时先把旧消息归档，再用 compression_model
+        // 生成摘要；模型不可用/失败时回退到确定性摘要，绝不阻塞本轮。
+        if let Some(plan) =
+            crate::engine::compact::plan_compaction(messages, ctx.context_window)
         {
+            let preview: Vec<Value> = messages[1..plan.cut].to_vec();
+            let summary = if ctx.compression_model.trim().is_empty() {
+                crate::engine::compact::extractive_summary(&preview)
+            } else {
+                match crate::engine::compact::summarize_with_model(
+                    &client,
+                    url,
+                    key,
+                    &ctx.provider,
+                    &ctx.compression_model,
+                    &preview,
+                )
+                .await
+                {
+                    Ok(summary) => summary,
+                    Err(e) => {
+                        eprintln!("[compact] 压缩模型不可用，回退确定性摘要：{e}");
+                        crate::engine::compact::extractive_summary(&preview)
+                    }
+                }
+            };
+            let compacted = crate::engine::compact::apply_compaction(messages, plan, summary);
             let _ = crate::engine::session::archive_messages(
                 &app,
                 &ctx.session_id,
@@ -1139,6 +1162,7 @@ async fn run_agent_native_inner(
         system_with_appendix: frozen.with_appendix(&appendix),
         context_window,
         max_tokens,
+        compression_model: settings.compression_model.clone(),
     };
 
     let mut final_text = String::new();
