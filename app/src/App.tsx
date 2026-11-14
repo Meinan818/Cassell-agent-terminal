@@ -2550,8 +2550,13 @@ export default function App() {
                     // 要求方案固定用 ## 目标/## 发现/## 步骤/## 风险四段，按此识别）。
                     const isPlan =
                       rm === "plan" &&
-                      result.text.includes("## 目标") &&
-                      result.text.includes("## 步骤");
+                      !result.cancelled &&
+                      result.text.trim().length > 0 &&
+                      (result.text.includes("## 目标") ||
+                        result.text.includes("## 步骤") ||
+                        result.text.includes("计划") ||
+                        result.text.includes("方案") ||
+                        result.text.includes("步骤"));
                     // P0-6：到总预算上限 / 卡住时，消息下方挂一句说明——没有
                     // “继续”按钮。普通对话也会自动续跑到预算；想继续直接发消息。
                     // 目标模式下限由目标卡片承担，这里不重复挂。
