@@ -136,7 +136,7 @@ export default function Sidebar({
       name: "诺玛",
       sub: "通用工作",
       eva: false,
-      status: mode === "norma" && running ? "工作中" : "空闲中",
+      status: mode === "norma" && running ? "工作中" : "待命",
       dot: mode === "norma" && running ? "busy" : "ok",
     },
     {

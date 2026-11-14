@@ -61,9 +61,25 @@ export interface Settings {
   workdir: string;
   /** 用户显示名。空 = 界面显示默认“路明非”。 */
   display_name: string;
+  /** 专员编号（学号）。空 = 默认“S2017-0117”。 */
+  student_id?: string;
+  /** 血统评级。空 = 默认“S”。 */
+  bloodline?: string;
+  /** 专属言灵。空 = 默认“不要死”。 */
+  spirit?: string;
   providers: ProviderConfig[];
   api_keys: Record<string, string>;
   extensions: ExtensionItem[];
+}
+
+export interface Identity { displayName: string; studentId: string; bloodline: string; spirit: string; }
+export function resolveIdentity(s: Pick<Settings, "display_name" | "student_id" | "bloodline" | "spirit">): Identity {
+  return {
+    displayName: s.display_name?.trim() || "路明非",
+    studentId: s.student_id?.trim() || "S2017-0117",
+    bloodline: s.bloodline?.trim() || "S",
+    spirit: s.spirit?.trim() || "不要死",
+  };
 }
 
 export type MsgKind = "text" | "tool" | "error" | "eva" | "perm" | "ask" | "think";
@@ -287,7 +303,7 @@ export function modeGreeting(mode: Mode, hour: number, displayName: string): str
   const base = `${greetingForHour(hour)}，${displayName.charAt(0)}专员。`;
   return mode === "eva"
     ? `${base}任务简报已就位，要改哪块代码？`
-    : `${base}学院的档案室和任务板都已就绪，今天想处理什么文档/任务？`;
+    : `${base}学院的档案与情报都已就绪，今天想处理什么文档/任务？`;
 }
 
 /** P0-9 切换后的自我介绍：第一条消息说清"我现在是谁、能做什么、不能做什么"。称呼跟着显示名走（首字 + 专员），不要写死"路专员"。
@@ -296,7 +312,7 @@ export function modeGreeting(mode: Mode, hour: number, displayName: string): str
 export function modeIntro(mode: Mode, displayName: string): string {
   const title = `${displayName.charAt(0)}专员`;
   return mode === "eva"
-    ? `现在我是 EVA，卡塞尔学院的并行执行体，工程开发模式，与诺玛共用同一套记忆。${title}，我专精工程：读代码、改代码、跑测试，改动会拿测试和 diff 作证据；写文件默认直接动手，删文件仍会单独问你。办公文档我也能写，但日常办公是诺玛的强项，切回去更顺手。`
+    ? `现在我是 EVA，卡塞尔学院的战争人格，工程开发模式，与诺玛共用同一套记忆。${title}，我专精工程：读代码、改代码、跑测试，改动会拿测试和 diff 作证据；写文件默认直接动手，删文件仍会单独问你。办公文档我也能写，但日常办公是诺玛的强项，切回去更顺手。`
     : `现在我是诺玛，卡塞尔学院的中枢 AI，通用工作模式。学院的档案、任务与情报都经我手。${title}，我专精办公：写文档、整理资料、查信息、理思路；改文件会先问你。代码文件我也能改，但跑测试、跑命令要切到 EVA——终端是它的工具，我手头没有。`;
 }
 

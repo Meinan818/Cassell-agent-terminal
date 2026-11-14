@@ -360,9 +360,9 @@ export function SettingsModal({
                       S
                     </span>
                   </div>
-                  <div className="s7-identity-id">S2017-0117</div>
+                  <div className="s7-identity-id">{settings.student_id?.trim() || "S2017-0117"}</div>
                   <p className="drawer-note">
-                    编号是学院档案，只读，不可改。
+                    专员编号是终端内的编号，跟账号走，改名不变；学院档案里的编号另有记录（例：路明非 a.d.0013）。
                   </p>
                 </div>
                 {/* P0-1：这一行不再是全局唯一设置——它是“当前项目的目录”。
@@ -401,6 +401,47 @@ export function SettingsModal({
                     autoComplete="off"
                   />
                   <p className="drawer-note">问候与身份卡显示这个名字。</p>
+                </div>
+                {/* 身份配置：学号 / 血统 / 言灵，与显示名同在“个人资料”区；空着就是默认值。 */}
+                <div className="s7-group">
+                  <label className="field-label" htmlFor="settings-student-id">
+                    学号
+                  </label>
+                  <input
+                    id="settings-student-id"
+                    className="field-input"
+                    value={settings.student_id ?? ""}
+                    onChange={(e) => onPatch({ student_id: e.target.value })}
+                    placeholder="S2017-0117（默认）"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="s7-group">
+                  <label className="field-label" htmlFor="settings-bloodline">
+                    血统
+                  </label>
+                  <input
+                    id="settings-bloodline"
+                    className="field-input"
+                    value={settings.bloodline ?? ""}
+                    onChange={(e) => onPatch({ bloodline: e.target.value })}
+                    placeholder="S（默认）"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="s7-group">
+                  <label className="field-label" htmlFor="settings-spirit">
+                    言灵
+                  </label>
+                  <input
+                    id="settings-spirit"
+                    className="field-input"
+                    value={settings.spirit ?? ""}
+                    onChange={(e) => onPatch({ spirit: e.target.value })}
+                    placeholder="不要死（默认）"
+                    autoComplete="off"
+                  />
+                  <p className="drawer-note">名字、学号、血统、言灵都可以改，空着就是默认值。</p>
                 </div>
               </>
             )}
@@ -784,7 +825,7 @@ export function SettingsModal({
             {nav === "permissions" && (
               <>
                 <div className="s7-group">
-                  <div className="drawer-section">守夜人模式</div>
+                  <div className="drawer-section">审批与沙箱</div>
                   <p className="drawer-note">
                     危险操作先审批。审批与沙箱是两个独立的拨杆：审批管“要不要问你”，沙箱管“能碰哪些文件”。
                   </p>
@@ -992,7 +1033,7 @@ export function SettingsModal({
                   <div className="drawer-section">关于</div>
                   <p className="drawer-note">
                     卡塞尔专员终端 {APP_VERSION}。卡塞尔学院配发给专员的日常执行终端。
-                    AI 是诺玛；打开 EVA 开关后，诺玛切换为 EVA 模式（工程开发）。
+                    AI 是诺玛；切换到 EVA 不是打开开关——双黑卡、掌纹、视网膜与电子授权书确认后，诺玛人格暂时沉睡，学院转入进攻模式。EVA 是同一中枢的战争人格，设计初衷是进攻武器。
                   </p>
                   <p className="drawer-note">
                     执行引擎是应用自带的原生引擎，直连 OpenAI 兼容接口；界面是 Tauri 2 + React。
@@ -1242,8 +1283,7 @@ export function HelpDrawer({
     <DrawerShell title="帮助" onClose={onClose} closing={closing}>
       <div className="drawer-section">卡塞尔专员终端 {APP_VERSION}</div>
       <p className="drawer-note">
-        卡塞尔学院配发给专员的日常执行终端。AI 是诺玛；打开 EVA 开关后，诺玛切换为
-        EVA 模式（工程开发）。
+        卡塞尔学院配发给专员的日常执行终端。AI 是诺玛；切换到 EVA 不是打开开关——双黑卡、掌纹、视网膜与电子授权书确认后，诺玛人格暂时沉睡，学院转入进攻模式。EVA 是同一中枢的战争人格，设计初衷是进攻武器。
       </p>
       <div className="drawer-section">怎么用</div>
       <ul className="help-list">

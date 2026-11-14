@@ -88,6 +88,12 @@ pub struct Settings {
     /// 用户在「个人资料」里设置的显示名。空 = 界面显示占位称呼"专员"。
     /// 这是用户自己填的真实值，不是预设的人名。
     pub display_name: String,
+    /// 专员编号（学号），「个人资料」里可改。空 = 默认"S2017-0117"。
+    pub student_id: String,
+    /// 血统评级，「个人资料」里可改。空 = 默认"S"。
+    pub bloodline: String,
+    /// 专属言灵，「个人资料」里可改。空 = 默认"不要死"。
+    pub spirit: String,
     pub providers: Vec<ProviderConfig>,
     /// provider id -> API key. Kept out of logs and out of the UI after entry.
     pub api_keys: HashMap<String, String>,
@@ -111,6 +117,9 @@ impl Default for Settings {
             boot_animation: true,
             workdir: String::new(),
             display_name: String::new(),
+            student_id: String::new(),
+            bloodline: String::new(),
+            spirit: String::new(),
             providers: default_providers(),
             api_keys: HashMap::new(),
             extensions: default_extensions(),

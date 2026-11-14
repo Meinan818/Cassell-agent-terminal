@@ -25,6 +25,7 @@ import {
   folderName,
   modeGreeting,
   modeIntro,
+  resolveIdentity,
   resolveTheme,
   uid,
 } from "./types";
@@ -711,11 +712,29 @@ function L1Mark({ running }: { running: boolean }) {
 }
 
 const THINK_CYCLE: { shape: MorphShape; label: string }[] = [
-  { shape: "dots", label: "思考中" },
-  { shape: "ball", label: "思考中" },
-  { shape: "ring", label: "探索中" },
-  { shape: "pen", label: "撰写中" },
+  { shape: "dots", label: "调阅档案" },
+  { shape: "ball", label: "言灵共鸣" },
+  { shape: "ring", label: "解析龙文" },
+  { shape: "pen", label: "校准炼金矩阵" },
 ];
+
+/** M2 今日言灵：轮换池固定 5 条，以本地日历 2026-11-16 为第 0 天。 */
+const SPIRIT_ROTATION: { name: string; no: number; user: string; effect: string }[] = [
+  { name: "时间零", no: 84, user: "昂热", effect: "延缓时间" },
+  { name: "君焰", no: 89, user: "楚子航", effect: "火焰爆炸" },
+  { name: "镰鼬", no: 59, user: "恺撒", effect: "听觉强化" },
+  { name: "王权", no: 91, user: "源稚生", effect: "重力压制" },
+  { name: "戒律", no: 106, user: "守夜人", effect: "封印言灵" },
+];
+
+function todaySpirit(now = new Date()): string {
+  // 本地时区的日历天：先把两端都归到本地午夜再算天数差。
+  const base = new Date(2026, 10, 16);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((today.getTime() - base.getTime()) / 86400000);
+  const s = SPIRIT_ROTATION[((days % SPIRIT_ROTATION.length) + SPIRIT_ROTATION.length) % SPIRIT_ROTATION.length];
+  return `今日言灵 · ${s.name} (${s.no}) · ${s.user} · ${s.effect}`;
+}
 
 function ThinkBlock({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(false);
@@ -3363,7 +3382,9 @@ export default function App() {
   const hour = new Date().getHours();
   // 显示名默认“路明非”；问候取首字 + “专员”（路明非 → 路专员）。
   // P0-9 问候语随模式换口吻：NORMA 办公、EVA 工程。
-  const displayName = settings.display_name?.trim() || "路明非";
+  // 身份（名字 / 编号 / 血统 / 言灵）读设置，空值由 resolveIdentity 填默认。
+  const identity = resolveIdentity(settings);
+  const displayName = identity.displayName;
   const greeting = modeGreeting(settings.mode, hour, displayName);
   const hasAnyKey = Object.values(settings.api_keys).some((k) => k?.trim());
   const showEmpty = !activeTask || activeTask.messages.length === 0;
@@ -3375,8 +3396,8 @@ export default function App() {
     (f) => (f.state ?? "pending") === "pending",
   ).length;
   const l1Text = running
-    ? `${MODE_TAG[settings.mode]} · ${settings.mode === "eva" ? "EVA 正在执行…" : "正在思考…"}`
-    : modeLine ?? `${MODE_TAG[settings.mode]} · 空闲`;
+    ? `${MODE_TAG[settings.mode]} · ${settings.mode === "eva" ? "EVA 正在执行…" : "正在调阅档案…"}`
+    : modeLine ?? `${MODE_TAG[settings.mode]} · 待命`;
   const l1Target: InspectorView = running ? "workflow" : "review";
   const l1Clickable = running || pendingCount > 0;
   // 新消息一次性出现动效：最后一条用户消息 + 流式中的 AI 气泡（150ms 淡入 + 4px 上移）。
@@ -3468,7 +3489,7 @@ export default function App() {
       <style>{S7_CSS}</style>
       <style>{AUDIT_CSS}</style>
       <style>{P011_CSS}</style>
-      {boot && settings.boot_animation && <Boot onDone={handleBootDone} />}
+      {boot && settings.boot_animation && <Boot onDone={handleBootDone} settings={settings} />}
       {/* W4 仪式界面层：面纱（漫开再收住），不挡输入；
           稳态光晕常驻渲染，EVA 时 800ms 淡入、切回时淡出。 */}
       {ritual && (
@@ -3604,8 +3625,32 @@ export default function App() {
             <Mark size={100} eva={settings.mode === "eva"} state="idle" gaze={gaze} fast={settings.mode === "eva"} ritual={ritual} />
             <div className="empty-greeting">{greeting}</div>
             <div className="empty-identity">
-              {displayName} · S2017-0117 · 血统评级 S
+              {identity.displayName} · {identity.studentId} · {identity.bloodline}
             </div>
+            {/* L5 noya 静态形象 + 模式状态灯（NORMA 白 / EVA 蓝），放形象右下角。 */}
+            <div style={{ position: "relative", width: 72, height: 72 }}>
+              <img
+                src="/noya-v11.png"
+                alt="noya"
+                width={72}
+                height={72}
+                style={{ display: "block", width: 72, height: 72 }}
+              />
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  right: 2,
+                  bottom: 2,
+                  width: 10,
+                  height: 10,
+                  borderRadius: "50%",
+                  background: settings.mode === "eva" ? "#60a5fa" : "#FFFFFF",
+                  border: "1px solid rgba(0, 0, 0, 0.25)",
+                }}
+              />
+            </div>
+            <div className="empty-identity">{todaySpirit()}</div>
             {!hasAnyKey && (
               <div className="setup-cta">
                 <div className="setup-cta-title">

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Mark from "./Mark";
 import { SEAL_TARGETS } from "./sealTargets";
 import { APP_VERSION } from "../version";
+import { resolveIdentity, type Settings } from "../types";
 
 /**
  * 开机登录流（七步，顺序固定）：
@@ -33,7 +34,7 @@ const LOG_LINES = [
   "加载诺玛核心 … OK",
   "连接学院网络 … OK",
   "验证专员身份 …",
-  "血统评级 … S",
+  "评级 … S",
   "ACCESS GRANTED",
 ];
 
@@ -116,7 +117,9 @@ function fingerprintRidges(): { d: string; o: number; delay: number }[] {
 }
 const FP_RIDGES = fingerprintRidges();
 
-export default function Boot({ onDone }: { onDone: () => void }) {
+export default function Boot({ onDone, settings }: { onDone: () => void; settings: Settings }) {
+  // 登录行与欢迎段的姓名 / 编号读设置，空值由 resolveIdentity 填默认。
+  const identity = resolveIdentity(settings);
   const [phase, setPhase] = useState<Phase>("particles");
   const [exiting, setExiting] = useState<Phase | null>(null);
   const [exitingFading, setExitingFading] = useState(false);
@@ -854,8 +857,8 @@ export default function Boot({ onDone }: { onDone: () => void }) {
               <div style={{ fontSize: 16, fontWeight: 600, letterSpacing: "0.08em" }}>
                 校园网登录
               </div>
-              <LoginRow label="专员姓名" value="路明非" delay={0} />
-              <LoginRow label="专员编号" value="S2017-0117" mono delay={90} />
+              <LoginRow label="专员姓名" value={identity.displayName} delay={0} />
+              <LoginRow label="专员编号" value={identity.studentId} mono delay={90} />
               <LoginRow label="密码" value="••••••••" mono delay={180} />
               <div
                 style={{
@@ -1148,7 +1151,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
               }}
             >
               <span style={{ fontSize: 20, fontWeight: 600, letterSpacing: "0.04em" }}>
-                路明非
+                {identity.displayName}
               </span>
               <span
                 style={{
@@ -1180,7 +1183,7 @@ export default function Boot({ onDone }: { onDone: () => void }) {
                 animation: "boot-stage-in 550ms var(--ease-exp) 460ms both",
               }}
             >
-              S2017-0117
+              {identity.studentId}
               <span
                 style={{
                   width: 6,
