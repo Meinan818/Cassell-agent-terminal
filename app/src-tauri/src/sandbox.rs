@@ -119,7 +119,9 @@ pub fn needs_approval(
 pub fn join_path(workdir: &str, rel: &str, sandbox: SandboxLevel) -> Result<PathBuf, String> {
     if sandbox == SandboxLevel::FullAccess {
         let p = Path::new(rel);
-        if p.is_absolute() {
+        // Windows 上 `/tmp/x` 不是 `is_absolute()`，但它是根相对路径；
+        // 不能把它当成工作区内的相对路径。
+        if p.is_absolute() || p.has_root() {
             return Ok(normalize_lexical(p));
         }
     }
@@ -136,7 +138,7 @@ pub fn safe_join(workdir: &str, rel: &str) -> Result<PathBuf, String> {
         return Err(format!("工作区不存在：{workdir}"));
     }
     let p = Path::new(rel);
-    if p.is_absolute() {
+    if p.is_absolute() || p.has_root() {
         let norm = normalize_lexical(p);
         if norm.starts_with(base) {
             return Ok(norm);

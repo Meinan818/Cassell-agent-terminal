@@ -306,6 +306,7 @@ mod tests {
 
     /// 真 PTY：起一个 shell，echo 一行，等输出进缓冲，再确认快照能读到。
     /// 这是 P0-11④ 的核心回归：PTY 不是模拟的，输出必须真实流过。
+    #[cfg(unix)]
     #[test]
     fn pty_echo_roundtrip() {
         let pair = native_pty_system()
@@ -346,6 +347,7 @@ mod tests {
 
     /// TERM 必须进子进程：pty_spawn 用 CommandBuilder::env 配 TERM，
     /// 子进程 echo 出来的 TERM 得是配的值，不能是父进程继承来的 dumb。
+    #[cfg(unix)]
     #[test]
     fn pty_env_term_reaches_child() {
         let pair = native_pty_system()
